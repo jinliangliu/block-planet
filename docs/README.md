@@ -72,3 +72,19 @@
 - **代码是唯一事实来源**。文档与代码冲突时以代码为准，并回来修订文档。
 - **踩坑要写下来**。本项目最贵的成本是「同一个坑踩第二次」，所有非显然的约束都应进 `decisions.md` 或代码注释。
 - **决策不删除**。若新决策推翻旧决策，保留旧条目并交叉引用（`decisions.md` 的编号规则）。
+
+---
+
+## 临时产物：`tmp/`
+
+展示修改效果的截图、探针导出等**本地临时产物一律写入工程根目录的 `tmp/`**，该目录已在 `.gitignore` 中忽略，不进版本库。
+
+| 探针 | 输出 |
+|------|------|
+| `tests/craft_shot` | `tmp/craft_panel_shot.png` |
+| `tests/manual_shot` | `tmp/manual_panel_shot.png`、`tmp/manual_panel_shot_p6.png` |
+| `tests/backpack_shot` | `tmp/backpack_panel_shot.png` |
+| `tests/chest_shot` | `tmp/chest_panel_shot.png` |
+| `tests/render_probe` | `tmp/render_probe.png`、`tmp/render_probe_third.png` |
+
+约定：探针通过 `_shot_path(file_name)` 取路径（`res://tmp/` 全局化后按需建目录），**不写机器相关的绝对路径**；新增截图探针照此办理。

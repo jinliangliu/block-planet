@@ -2,9 +2,15 @@ extends Node
 ## 实机渲染探针：加载主场景运行片刻后截取视口画面存盘，用于桌面端视觉取证。
 ## 运行：Godot_console.exe --path . res://tests/render_probe.tscn （需窗口，勿加 --headless）
 
-const SAVE_PATH := "C:/Users/pc/Documents/github_repo/block-planet/render_probe.png"
-const SAVE_PATH_THIRD := "C:/Users/pc/Documents/github_repo/block-planet/render_probe_third.png"
+## 截图输出目录：tmp/ 属本地临时产物，已由 .gitignore 忽略。
+const SHOT_DIR := "res://tmp"
 const WAIT_FRAMES := 120
+
+
+func _shot_path(file_name: String) -> String:
+	var dir := ProjectSettings.globalize_path(SHOT_DIR)
+	DirAccess.make_dir_recursive_absolute(dir)
+	return dir.path_join(file_name)
 
 
 func _ready() -> void:
@@ -24,7 +30,7 @@ func _run() -> void:
 	await RenderingServer.frame_post_draw
 
 	var image := get_viewport().get_texture().get_image()
-	image.save_png(SAVE_PATH)
+	image.save_png(_shot_path("render_probe.png"))
 	print("surface_height(8,8)=", world.get_surface_height(8, 8))
 	print("player_pos=", player.global_position, " on_floor=", player.is_on_floor())
 	print("camera_pos=", camera.global_position)
@@ -41,7 +47,7 @@ func _run() -> void:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	var third_image := get_viewport().get_texture().get_image()
-	third_image.save_png(SAVE_PATH_THIRD)
+	third_image.save_png(_shot_path("render_probe_third.png"))
 	print("third_person_cam=", spring.get_node("Camera3D").global_position)
 	print("model_visible=", player.get_node("PlayerModel").visible)
 

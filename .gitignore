@@ -7,6 +7,9 @@ export_presets.cfg
 *.tmp
 *.log
 
+# Scratch output (screenshots & captures from probe runs)
+tmp/
+
 # WorkBuddy session data
 .workbuddy/
 
