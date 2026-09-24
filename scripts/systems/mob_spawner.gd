@@ -32,12 +32,19 @@ var _water_mobs: Array[Mob] = []
 var _spawn_timer := 0.0
 var _passive_timer := 1.0
 var _water_timer := 3.0
+## 当前区域的生成表（RegionAtlas 条目）：passive/hostile 为加权表，
+## surface 决定地面可站立判定（雪原/沙漠同样能刷动物）。空表即该区域无此生态。
+var _profile: Dictionary = {}
 
 
 func setup(player: Player, world: World, day_night: DayNightCycle) -> void:
 	_player = player
 	_world = world
 	_day_night = day_night
+
+
+func set_region(profile: Dictionary) -> void:
+	_profile = profile
 
 
 func _process(delta: float) -> void:
@@ -94,7 +101,9 @@ func _despawn_hostiles() -> void:
 	_mobs = kept
 
 
-func _spawn_one(mob_type: Mob.MobType) -> void:
+func _spawn_one(mob_type: int) -> void:
+	if mob_type < 0:
+		return
 	var pos := _find_spawn_position(Mob.is_passive(mob_type))
 	if pos == INVALID_POSITION:
 		return
@@ -105,28 +114,29 @@ func _spawn_one(mob_type: Mob.MobType) -> void:
 	_mobs.append(mob)
 
 
-## 夜晚敌对概率：僵尸 40%、骷髅 30%、蜘蛛 15%、狼 15%。
-func _pick_type() -> Mob.MobType:
-	var r := randf()
-	if r < 0.40:
-		return Mob.MobType.ZOMBIE
-	if r < 0.70:
-		return Mob.MobType.SKELETON
-	if r < 0.85:
-		return Mob.MobType.SPIDER
-	return Mob.MobType.WOLF
+## 按区域加权表抽取生物类型；返回 -1 表示该区域没有此类生态（如两极无动物）。
+func _pick_weighted(weights: Dictionary) -> int:
+	var total := 0
+	for key: String in weights:
+		total += int(weights[key])
+	if total <= 0:
+		return -1
+	var r := randi() % total
+	for key: String in weights:
+		r -= int(weights[key])
+		if r < 0:
+			return int(Mob.MobType[key])
+	return -1
 
 
-## 白天动物概率：牛 35%、羊 30%、鸡 20%、猪 15%。
-func _pick_passive_type() -> Mob.MobType:
-	var r := randf()
-	if r < 0.35:
-		return Mob.MobType.COW
-	if r < 0.65:
-		return Mob.MobType.SHEEP
-	if r < 0.85:
-		return Mob.MobType.CHICKEN
-	return Mob.MobType.PIG
+## 夜晚敌对：按区域表的权重抽取。
+func _pick_type() -> int:
+	return _pick_weighted(_profile.get("hostile", {}))
+
+
+## 白天动物：按区域表的权重抽取。
+func _pick_passive_type() -> int:
+	return _pick_weighted(_profile.get("passive", {}))
 
 
 func _despawn_all() -> void:
@@ -249,7 +259,9 @@ func _place_water_mob(mob_type: Mob.MobType, pos: Vector3) -> void:
 	_water_mobs.append(mob)
 
 
-func _find_spawn_position(require_grass: bool) -> Vector3:
+## 陆地动物的落点：require_ground 为真时要求脚下是可生长地面
+## （草/沙，或本区域地表方块——雪原、沙漠一样能刷动物）。
+func _find_spawn_position(require_ground: bool) -> Vector3:
 	for i in range(16):
 		var angle := randf() * TAU
 		var dist := randf_range(SPAWN_MIN, SPAWN_MAX)
@@ -258,11 +270,20 @@ func _find_spawn_position(require_grass: bool) -> Vector3:
 		var y := _find_ground_y(wx, wz)
 		if y < 0:
 			continue
-		if require_grass and _world.get_block(Vector3i(wx, y - 1, wz)) != BlockTypes.Block.GRASS:
+		if require_ground and not _is_ground_block(_world.get_block(Vector3i(wx, y - 1, wz))):
 			continue
 		return Vector3(float(wx) + 0.5, float(y) + 0.2, float(wz) + 0.5)
 
 	return INVALID_POSITION
+
+
+## 可站立地面：基础草/沙，外加当前区域配置的地表材质。
+func _is_ground_block(id: int) -> bool:
+	if id == BlockTypes.Block.GRASS or id == BlockTypes.Block.SAND:
+		return true
+	var surface := int(_profile.get("surface", BlockTypes.Block.GRASS))
+	var surface_low := int(_profile.get("surface_low", BlockTypes.Block.SAND))
+	return id == surface or id == surface_low
 
 
 ## 从噪声地表高度起向上扫描，找到连续两格空气且脚下为实心方块的位置。

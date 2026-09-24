@@ -19,6 +19,8 @@ var _hint_label: Label
 var _minimap: MiniMap
 var _time_label: Label
 var _mode_label: Label
+var _map_name_label: Label
+var _map_selector: MapSelector
 var _day_night: DayNightCycle
 var _craft_overlay: Control
 var _craft_result_grid: GridContainer
@@ -94,9 +96,17 @@ func _build() -> void:
 	_build_box_panel(root)
 	_build_smelt_panel(root)
 	_build_minimap(root)
+	_build_map_name(root)
+	_build_map_selector(root)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# 地图选择器为模态界面：仅响应 ESC 关闭，其余热键一律让位。
+	if _map_selector != null and _map_selector.is_open():
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			close_map_selector()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.is_action_pressed("toggle_craft"):
 			_toggle_craft_panel()
@@ -104,6 +114,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_game_mode()
 		elif event.is_action_pressed("toggle_trade"):
 			_toggle_trade_panel()
+		elif event.is_action_pressed("toggle_map"):
+			open_map_selector()
 		elif event.keycode == KEY_ESCAPE and _box_overlay != null and _box_overlay.visible:
 			set_box_open(false)
 			get_viewport().set_input_as_handled()
@@ -410,7 +422,7 @@ func _anchor_bottom_right(root: Control, control: Control, right_margin: float, 
 
 func _build_desktop_hint(root: Control) -> void:
 	_hint_label = Label.new()
-	_hint_label.text = "WASD 移动 · 鼠标视角 · 滚轮拉近/拉远(拉远看角色) · 左键按住破坏/左键攻击 · 右键放置/吃食物/开箱/冶炼 · 1-9 选方块 · E 合成 · M 切换模式 · 空格跳跃 · 双击空格飞行(创造) · Ctrl 下降 · Shift冲刺 · Esc释放鼠标 · F1 显示/隐藏本提示"
+	_hint_label.text = "WASD 移动 · 鼠标视角 · 滚轮拉近/拉远(拉远看角色) · 左键按住破坏/左键攻击 · 右键放置/吃食物/开箱/冶炼 · 1-9 选方块 · E 合成 · B 交易 · M 地图 · G 切换模式 · 空格跳跃 · 双击空格飞行(创造) · Ctrl 下降 · Shift冲刺 · Esc释放鼠标 · F1 显示/隐藏本提示"
 	_hint_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.9))
 	_hint_label.add_theme_font_size_override("font_size", 18)
 	_hint_label.position = Vector2(16, 120)
@@ -1396,6 +1408,74 @@ func _build_minimap(root: Control) -> void:
 	_minimap.offset_right = -20.0
 	_minimap.offset_bottom = 20.0 + MiniMap.SIZE
 	_minimap.setup(_player, _player.get_world())
+
+
+## 屏幕顶部居中的地图名：进入区域后显示当前地图名称（带描边保证在天空下可读）。
+func _build_map_name(root: Control) -> void:
+	_map_name_label = Label.new()
+	_map_name_label.text = GameState.region_title()
+	_map_name_label.add_theme_font_size_override("font_size", 24)
+	_map_name_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.96))
+	_map_name_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.75))
+	_map_name_label.add_theme_constant_override("outline_size", 6)
+	_map_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_map_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(_map_name_label)
+	_map_name_label.anchor_left = 0.0
+	_map_name_label.anchor_right = 1.0
+	_map_name_label.offset_left = 0.0
+	_map_name_label.offset_right = 0.0
+	_map_name_label.offset_top = 14.0
+	_map_name_label.offset_bottom = 46.0
+
+
+func set_map_name(title: String) -> void:
+	if _map_name_label != null:
+		_map_name_label.text = title
+
+
+## 地图选择器：M 键呼出；首次进入游戏由 Main 在 _ready 中自动打开。
+func _build_map_selector(root: Control) -> void:
+	_map_selector = MapSelector.new()
+	_map_selector.region_entered.connect(_on_region_entered)
+	_map_selector.closed.connect(_on_region_closed)
+	root.add_child(_map_selector)
+
+
+func open_map_selector() -> void:
+	if _map_selector == null:
+		return
+	_map_selector.open()
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_map_selector() -> void:
+	if _map_selector == null:
+		return
+	_map_selector.close()
+
+
+func _on_region_closed() -> void:
+	_set_player_frozen(false)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## 选定区域：本层只解除锁定，区域生效由 Main 监听 Events.region_entered 处理
+## （记录到 GameState 并重载主场景，保证区块、村庄、生物一并重建）。
+func _on_region_entered(region_id: int) -> void:
+	_set_player_frozen(false)
+	Events.region_entered.emit(region_id)
+
+
+## 全屏模态期间冻结玩家：关闭物理与输入处理，避免镜头与移动在背后漂移。
+func _set_player_frozen(frozen: bool) -> void:
+	if _player == null:
+		return
+	_player.set_physics_process(not frozen)
+	_player.set_process_unhandled_input(not frozen)
 
 
 func _refresh_stats() -> void:

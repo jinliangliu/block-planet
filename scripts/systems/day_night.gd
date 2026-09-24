@@ -4,6 +4,9 @@ class_name DayNightCycle
 ## 同时调制环境光与背景色：仅压暗方向光不足以"入夜变黑"（环境光恒定会
 ## 把场景整体抬亮），夜晚须同步把环境光与天幕压至近黑。
 ## time_changed 每秒发射一次，供 HUD 刷新时钟，避免每帧刷新文本。
+##
+## 区域色调：set_sky_tint 传入该区域的天空色调，乘到天幕与环境光上，
+## 让沙漠偏暖黄、雨林偏绿、极地偏冷白——昼夜明暗规律不受影响。
 
 const DAY_LENGTH := 600.0
 const NIGHT_LENGTH := 300.0
@@ -27,6 +30,8 @@ var _light: DirectionalLight3D
 var _env: Environment
 var _time := 0.0
 var _last_emitted_second := -1
+## 区域天空色调：默认中性白（不改变原配色）。
+var _sky_tint := Color(1.0, 1.0, 1.0)
 
 
 func setup(light: DirectionalLight3D) -> void:
@@ -35,6 +40,16 @@ func setup(light: DirectionalLight3D) -> void:
 
 func setup_environment(env: Environment) -> void:
 	_env = env
+
+
+## 设置区域天空色调（乘算），立即刷新一帧配色。
+func set_sky_tint(tint: Color) -> void:
+	_sky_tint = tint
+	_apply_lighting()
+
+
+func get_sky_tint() -> Color:
+	return _sky_tint
 
 
 func _process(delta: float) -> void:
@@ -72,12 +87,12 @@ func _apply_lighting() -> void:
 		var sun := sin(PI * t)
 		_light.rotation_degrees.x = lerpf(-85.0, -10.0, sun)
 		_light.light_energy = maxf(lerpf(0.2, 1.0, sun), 0.2)
-		_light.light_color = Color(1.0, 0.98, 0.92)
+		_light.light_color = Color(1.0, 0.98, 0.92) * _sky_tint
 		if _env != null:
 			# 环境光随日落渐暗并向暮色过渡，与夜晚起始值衔接不跳变。
 			_env.ambient_light_energy = lerpf(0.35, DAY_AMBIENT_ENERGY, sun)
-			_env.ambient_light_color = DAY_AMBIENT_COLOR.lerp(DUSK_AMBIENT_COLOR, 1.0 - sun)
-			_env.background_color = DAY_BACKGROUND_COLOR.lerp(DUSK_BACKGROUND_COLOR, 1.0 - sun)
+			_env.ambient_light_color = DAY_AMBIENT_COLOR.lerp(DUSK_AMBIENT_COLOR, 1.0 - sun) * _sky_tint
+			_env.background_color = DAY_BACKGROUND_COLOR.lerp(DUSK_BACKGROUND_COLOR, 1.0 - sun) * _sky_tint
 	else:
 		var t := (_time - DAY_LENGTH) / NIGHT_LENGTH
 		_light.rotation_degrees.x = -85.0

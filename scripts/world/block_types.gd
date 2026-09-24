@@ -26,6 +26,7 @@ enum Block {
 	DUCKWEED = 20,
 	LILY_PAD = 21,
 	LOTUS = 22,
+	SNOW = 23,
 }
 
 const NAMES := {
@@ -52,6 +53,7 @@ const NAMES := {
 	Block.DUCKWEED: "浮萍",
 	Block.LILY_PAD: "荷叶",
 	Block.LOTUS: "莲花",
+	Block.SNOW: "雪块",
 }
 
 const SOLID := {
@@ -78,6 +80,7 @@ const SOLID := {
 	Block.DUCKWEED: false,
 	Block.LILY_PAD: false,
 	Block.LOTUS: false,
+	Block.SNOW: true,
 }
 
 const TRANSPARENT := {
@@ -104,6 +107,7 @@ const TRANSPARENT := {
 	Block.DUCKWEED: true,
 	Block.LILY_PAD: true,
 	Block.LOTUS: true,
+	Block.SNOW: false,
 }
 
 # 每个方块的纹理瓦片：[顶面, 底面, 侧面]
@@ -130,6 +134,7 @@ const TILES := {
 	Block.DUCKWEED: Vector3i(21, 21, 21),
 	Block.LILY_PAD: Vector3i(22, 22, 22),
 	Block.LOTUS: Vector3i(23, 23, 23),
+	Block.SNOW: Vector3i(24, 24, 24),
 }
 
 # 水生植物：生长在水中/水面的非固体装饰方块，徒手可采，可再放置。
@@ -177,6 +182,7 @@ const SHORT_NAMES := {
 	Block.DUCKWEED: "萍",
 	Block.LILY_PAD: "荷",
 	Block.LOTUS: "莲",
+	Block.SNOW: "雪",
 }
 
 # 可堆叠物品（方块/材料/食物）的每格上限。
@@ -205,6 +211,7 @@ const HARDNESS := {
 	Block.DUCKWEED: 0.1,
 	Block.LILY_PAD: 0.1,
 	Block.LOTUS: 0.1,
+	Block.SNOW: 0.4,
 }
 
 # 有效工具类型；空字符串表示徒手/任意工具即可。
@@ -230,6 +237,7 @@ const EFFECTIVE_TOOL := {
 	Block.DUCKWEED: "",
 	Block.LILY_PAD: "",
 	Block.LOTUS: "",
+	Block.SNOW: "shovel",
 }
 
 

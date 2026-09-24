@@ -31,6 +31,13 @@ func _run() -> void:
 	spawner._despawn_all()
 	GameState.set_mode(GameState.Mode.SURVIVAL)
 
+	# 首次进入游戏会自动弹出地图选择器并冻结玩家；探针先关闭以恢复物理与输入，
+	# 后续所有移动/跳跃断言才成立。
+	if hud._map_selector != null and hud._map_selector.is_open():
+		hud.close_map_selector()
+	GameState.needs_region_pick = false
+	_check(player.is_physics_processing(), "关闭地图选择器后玩家物理处理已恢复")
+
 	var base_y := _probe_base_y(world)
 	_check(base_y > 0, "村庄基准高度可探测（base_y=%d）" % base_y)
 
@@ -502,6 +509,150 @@ func _run() -> void:
 	player.health = Player.MAX_HEALTH
 	for i in range(20):
 		await get_tree().physics_frame
+
+	# ── 阶段 K：地图图册、3D 地球、选择器与区域化世界生成 ──
+	_check(RegionAtlas.mask_is_valid(), "陆地掩码自检通过（36×72，无未知字母）")
+	var titles := {}
+	var seeds := {}
+	var texts_ok := true
+	for region_id in RegionAtlas.COUNT:
+		var region: Dictionary = RegionAtlas.profile(region_id)
+		titles[region["title"]] = true
+		seeds[region["seed"]] = true
+		for key: String in ["intro", "vegetation", "creature", "climate", "scenery"]:
+			if String(region[key]).is_empty():
+				texts_ok = false
+	_check(titles.size() == RegionAtlas.COUNT, "11 个区域名称互不重复")
+	_check(seeds.size() == RegionAtlas.COUNT, "11 个区域各有独立随机种子")
+	_check(texts_ok, "每个区域的介绍与四段地理说明均非空")
+
+	# 经纬度归属：七大洲四大洋各取一点。
+	_check(RegionAtlas.region_at_lat_lon(0.0, 20.0) == RegionAtlas.AFRICA, "0°N 20°E 判为非洲")
+	_check(RegionAtlas.region_at_lat_lon(50.0, 100.0) == RegionAtlas.ASIA, "50°N 100°E 判为亚洲")
+	_check(RegionAtlas.region_at_lat_lon(48.0, 10.0) == RegionAtlas.EUROPE, "48°N 10°E 判为欧洲")
+	_check(
+		RegionAtlas.region_at_lat_lon(40.0, -100.0) == RegionAtlas.NORTH_AMERICA,
+		"40°N 100°W 判为北美洲",
+	)
+	_check(
+		RegionAtlas.region_at_lat_lon(-15.0, -60.0) == RegionAtlas.SOUTH_AMERICA,
+		"15°S 60°W 判为南美洲",
+	)
+	_check(RegionAtlas.region_at_lat_lon(-20.0, 140.0) == RegionAtlas.OCEANIA, "20°S 140°E 判为大洋洲")
+	_check(RegionAtlas.region_at_lat_lon(-85.0, 0.0) == RegionAtlas.ANTARCTICA, "85°S 判为南极洲")
+	_check(RegionAtlas.region_at_lat_lon(0.0, -150.0) == RegionAtlas.PACIFIC, "0° 150°W 判为太平洋")
+	_check(RegionAtlas.region_at_lat_lon(0.0, -30.0) == RegionAtlas.ATLANTIC, "0° 30°W 判为大西洋")
+	_check(RegionAtlas.region_at_lat_lon(-30.0, 80.0) == RegionAtlas.INDIAN, "30°S 80°E 判为印度洋")
+	_check(RegionAtlas.region_at_lat_lon(80.0, 0.0) == RegionAtlas.ARCTIC, "80°N 判为北冰洋")
+	var covered := {}
+	for row in RegionAtlas.ROWS:
+		for col in RegionAtlas.COLS:
+			covered[RegionAtlas.region_of_cell(row, col)] = true
+	_check(covered.size() == RegionAtlas.COUNT, "球面覆盖全部 11 个区域（实际 %d）" % covered.size())
+
+	# 经纬度与方向向量互逆：球面网格与拾取共用这对函数，保证点选不错位。
+	var round_trip_ok := true
+	for probe: Vector2 in [Vector2(0.0, 0.0), Vector2(45.0, 120.0), Vector2(-60.0, -75.0)]:
+		var back := RegionAtlas.dir_to_lat_lon(RegionAtlas.lat_lon_to_dir(probe.x, probe.y))
+		if absf(back.x - probe.x) > 0.001 or absf(back.y - probe.y) > 0.001:
+			round_trip_ok = false
+	_check(round_trip_ok, "经纬度 → 方向向量 → 经纬度 往返一致")
+
+	# 3D 地球：球面网格生成 + 射线拾取与掩码归属一致。
+	var globe := MapGlobe.new()
+	add_child(globe)
+	globe.build()
+	globe.set_view_angles(0.0, 0.0)
+	var mesh_node := globe.get_child(0) as MeshInstance3D
+	_check(
+		mesh_node != null and mesh_node.mesh != null and mesh_node.mesh.get_surface_count() == 1,
+		"地球球面网格已生成（单表面顶点色）",
+	)
+	var picked := globe.region_at_world_ray(Vector3(0.0, 0.0, 3.0), Vector3(0.0, 0.0, -1.0))
+	_check(
+		picked == RegionAtlas.region_at_lat_lon(0.0, 0.0),
+		"正面射线拾取与掩码归属一致（region=%d）" % picked,
+	)
+	globe.set_view_angles(180.0, 0.0)
+	var picked_back := globe.region_at_world_ray(Vector3(0.0, 0.0, 3.0), Vector3(0.0, 0.0, -1.0))
+	_check(picked_back != picked, "地球旋转 180° 后拾取区域随之改变")
+	_check(
+		globe.region_at_world_ray(Vector3(0.0, 0.0, 3.0), Vector3(1.0, 0.0, 0.0)) == -1,
+		"射线未命中球体时返回 -1",
+	)
+	globe.queue_free()
+
+	# 选择器三页流程：介绍页 → 加载页逐段揭示 → 按钮解锁。
+	_check(
+		hud._map_name_label != null and hud._map_name_label.text == GameState.region_title(),
+		"屏幕顶部居中显示当前地图名（%s）" % GameState.region_title(),
+	)
+	hud.open_map_selector()
+	_check(hud._map_selector.is_open(), "可打开地图选择器（M 键路径）")
+	hud._map_selector._show_intro(RegionAtlas.ASIA)
+	_check(hud._map_selector._intro_title.text == "亚洲", "介绍页显示所选区域名称与地理介绍")
+	_check(not String(hud._map_selector._intro_body.text).is_empty(), "该区域地理介绍文本非空")
+	hud._map_selector._start_loading()
+	_check(hud._map_selector.get_page() == MapSelector.Page.LOADING, "点「进入」后切换到加载页")
+	hud._map_selector._process(MapSelector.LOAD_DURATION + 0.5)
+	_check(
+		not hud._map_selector._loading and not hud._map_selector._loading_enter.disabled,
+		"加载进度走满后「开始探索」按钮解锁",
+	)
+	var steps_visible := true
+	for step_label: Label in hud._map_selector._step_labels:
+		if step_label.modulate.a < 1.0:
+			steps_visible = false
+	_check(steps_visible, "植被/生物/气候/风貌四段说明已逐条揭示")
+	hud.close_map_selector()
+	_check(not hud._map_selector.is_open() and player.is_physics_processing(),
+		"关闭选择器后玩家恢复物理处理")
+
+	# 区域化世界生成：独立 World 实例按区域配置产出地表材质与树木密度。
+	var polar := World.new()
+	polar.set_region(RegionAtlas.ANTARCTICA)
+	add_child(polar)
+	polar.ensure_chunks_in_region(Vector3i(0, 0, 0), Vector3i(15, 0, 15))
+	var all_snow := true
+	var polar_tree := false
+	for x in range(16):
+		for z in range(16):
+			var top_y := polar.get_surface_height(x, z) - 1
+			if polar.get_block(Vector3i(x, top_y, z)) != BlockTypes.Block.SNOW:
+				all_snow = false
+			for dy in range(1, 6):
+				if polar.get_block(Vector3i(x, top_y + dy, z)) == BlockTypes.Block.WOOD:
+					polar_tree = true
+	_check(all_snow, "南极洲区块地表一律为雪块")
+	_check(not polar_tree, "南极洲树木密度 0，区块内无树木")
+	_check(polar.get_region() == RegionAtlas.ANTARCTICA, "世界记录的当前区域与设置一致")
+	polar.queue_free()
+
+	var desert := World.new()
+	desert.set_region(RegionAtlas.AFRICA)
+	add_child(desert)
+	# 单个区块内噪声几乎恒定（频率 0.012），须跨若干区块取样才能同时看到
+	# 低地沙丘与高地草原两种地表。
+	desert.ensure_chunks_in_region(Vector3i(0, 0, 0), Vector3i(63, 0, 63))
+	var sand_tops := 0
+	var grass_tops := 0
+	for x in range(64):
+		for z in range(64):
+			var top_y2 := desert.get_surface_height(x, z) - 1
+			var top_block := desert.get_block(Vector3i(x, top_y2, z))
+			if top_block == BlockTypes.Block.SAND:
+				sand_tops += 1
+			elif top_block == BlockTypes.Block.GRASS:
+				grass_tops += 1
+	_check(
+		sand_tops > 0 and grass_tops > 0,
+		"非洲低地为沙、高地为草（沙 %d / 草 %d）" % [sand_tops, grass_tops],
+	)
+	_check(
+		desert.seed_value == int(RegionAtlas.profile(RegionAtlas.AFRICA)["seed"]),
+		"切换区域同步应用该区域随机种子",
+	)
+	desert.queue_free()
 
 	if _failed == 0:
 		print("LIFE_TEST_OK")

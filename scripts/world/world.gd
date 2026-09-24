@@ -36,12 +36,30 @@ var _neighbor_lookup: Callable
 var box_contents: Dictionary[Vector3i, Inventory] = {}
 # 水体分类缓存：水面格 → WATER_LARGE / WATER_POND，同一水体只洪泛一次。
 var _water_kind_cache: Dictionary[Vector2i, int] = {}
+# 当前区域的生成配置（RegionAtlas.REGIONS 条目）：决定种子、地形起伏、
+# 地表材质与树木密度。未显式设置时使用默认区域，保证场景可单独运行。
+var _profile: Dictionary = {}
 
 
 func _ready() -> void:
 	_neighbor_lookup = Callable(self, "get_block")
 	_build_atlas_material()
+	if _profile.is_empty():
+		_profile = RegionAtlas.profile(RegionAtlas.DEFAULT_REGION)
+		seed_value = int(_profile["seed"])
 	_configure_noise()
+
+
+## 切换区域：同步种子与生成配置。区域切换由 Main 通过重载主场景完成
+## （村庄、生物、储物箱等全部随场景重建），此处只负责地形参数。
+func set_region(region_id: int) -> void:
+	_profile = RegionAtlas.profile(region_id)
+	seed_value = int(_profile["seed"])
+	_configure_noise()
+
+
+func get_region() -> int:
+	return int(_profile.get("id", RegionAtlas.DEFAULT_REGION))
 
 
 func set_player(player: Player) -> void:
@@ -311,17 +329,24 @@ func _generate_chunk(chunk: Chunk, coord: Vector3i) -> void:
 
 
 func _terrain_height(wx: int, wz: int) -> int:
+	var base := float(_profile.get("base_height", 28.0))
+	var amplitude := float(_profile.get("amplitude", 10.0))
 	var n := _noise.get_noise_2d(float(wx), float(wz))
-	return int(round(28.0 + n * 10.0))
+	return int(round(base + n * amplitude))
 
 
+## 地表材质由区域配置决定：高于 low_line 用 surface，低于等于则用 surface_low。
+## 例如非洲低地为沙（沙漠）、高地长草；两极一律为雪。地下三格同理。
 func _block_at(wx: int, wy: int, wz: int, height: int) -> int:
 	if wy > height:
 		return BlockTypes.Block.WATER if wy <= SEA_LEVEL else BlockTypes.Block.AIR
+	var low_line := int(_profile.get("low_line", SEA_LEVEL))
+	var high := height > low_line
+	var surface: int = _profile.get("surface", BlockTypes.Block.GRASS) if high else _profile.get("surface_low", BlockTypes.Block.SAND)
 	if wy == height:
-		return BlockTypes.Block.SAND if height <= SEA_LEVEL else BlockTypes.Block.GRASS
+		return surface
 	if wy >= height - 3:
-		return BlockTypes.Block.SAND if height <= SEA_LEVEL else BlockTypes.Block.DIRT
+		return int(_profile.get("sub", BlockTypes.Block.DIRT)) if high else int(_profile.get("sub_low", BlockTypes.Block.SAND))
 	return _ore_or_stone(wx, wy, wz)
 
 
@@ -349,7 +374,8 @@ func _generate_trees(chunk: Chunk, origin: Vector3i) -> void:
 
 			var wx := origin.x + x
 			var wz := origin.z + z
-			if _tree_rng(wx, wz) > 0.02:
+			var density := float(_profile.get("tree_density", 0.02))
+			if density <= 0.0 or _tree_rng(wx, wz) > density:
 				continue
 
 			var height := _terrain_height(wx, wz)

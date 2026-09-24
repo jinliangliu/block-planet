@@ -18,6 +18,10 @@ signal request_trade
 ## 右键命中储物箱方块时发出，HUD 监听后打开该箱的储物面板。
 signal request_box_open(cell: Vector3i)
 
+## 地图选择器确认区域后发出（region_id 为 RegionAtlas 常量）；
+## Main 监听后记录到 GameState 并重载主场景，使新区域生效。
+signal region_entered(region_id: int)
+
 ## 右键命中冶炼炉方块时发出，HUD 监听后打开冶炼面板。
 signal request_smelt
 

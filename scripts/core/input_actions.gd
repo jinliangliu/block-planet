@@ -11,8 +11,9 @@ const ACTIONS := {
 	"sprint": [KEY_SHIFT],
 	"fly_down": [KEY_CTRL],
 	"toggle_craft": [KEY_E],
-	"toggle_mode": [KEY_M],
+	"toggle_mode": [KEY_G],
 	"toggle_trade": [KEY_B],
+	"toggle_map": [KEY_M],
 }
 
 const SLOT_ACTION_COUNT := 9

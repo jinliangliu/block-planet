@@ -317,5 +317,5 @@ static func item_description(id: int) -> String:
 
 
 static func is_placeable(id: int) -> bool:
-	return id >= BlockTypes.Block.GRASS and id <= BlockTypes.Block.LOTUS
+	return id >= BlockTypes.Block.GRASS and id <= BlockTypes.Block.SNOW
 
