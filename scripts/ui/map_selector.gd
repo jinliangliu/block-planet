@@ -260,8 +260,8 @@ func _build_globe_page() -> void:
 	_hover_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hover_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hover_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	_hover_label.offset_top = -78.0
-	_hover_label.offset_bottom = -52.0
+	_hover_label.offset_top = -98.0
+	_hover_label.offset_bottom = -66.0
 	_globe_page.add_child(_hover_label)
 
 	_build_legend(_globe_page)
@@ -277,7 +277,7 @@ func _build_legend(parent: Control) -> void:
 	grid.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	grid.offset_left = -330.0
 	grid.offset_right = 330.0
-	grid.offset_top = -46.0
+	grid.offset_top = -60.0
 	grid.offset_bottom = -6.0
 	parent.add_child(grid)
 
