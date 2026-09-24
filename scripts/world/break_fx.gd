@@ -18,6 +18,8 @@ const BURST_COUNT := 26
 const BURST_LIFETIME := 0.7
 const HIT_COUNT := 5
 const HIT_LIFETIME := 0.35
+const LEAF_COUNT := 4
+const LEAF_LIFETIME := 0.9
 const CLEANUP_DELAY := 0.4
 const PARTICLE_SIZE := 0.09
 
@@ -62,6 +64,20 @@ static func spawn_hit(parent: Node, point: Vector3, normal: Vector3, block_id: i
 	parent.add_child(particles)
 	particles.emitting = true
 	_recycle_later(parent, particles, HIT_LIFETIME)
+
+
+## 树叶落下：一小撮叶屑受重力下落、飘散消逝（树干砍光后整冠落叶时逐片调用）。
+static func leaf_fall(parent: Node, center: Vector3) -> void:
+	if parent == null or not parent.is_inside_tree():
+		return
+	var particles := _make_particles(center, color_for_block(BlockTypes.Block.LEAVES), LEAF_COUNT, LEAF_LIFETIME)
+	particles.direction = Vector3.DOWN
+	particles.spread = 40.0
+	particles.initial_velocity_min = 0.5
+	particles.initial_velocity_max = 1.4
+	parent.add_child(particles)
+	particles.emitting = true
+	_recycle_later(parent, particles, LEAF_LIFETIME)
 
 
 static func _make_particles(center: Vector3, color: Color, count: int, lifetime: float) -> CPUParticles3D:

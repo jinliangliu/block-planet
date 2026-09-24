@@ -222,6 +222,48 @@ func _rebuild_chunk(coord: Vector3i) -> void:
 		chunk.rebuild(_atlas_material, _neighbor_lookup)
 
 
+## 树干砍完后让树冠「落下消失」：由 Player 在破坏 WOOD 后调用。
+## 判据：这一格所在竖列上下 8 格内都不再有木头（整根树干被砍光）。
+## 清除范围：该格上方 7 层、每层水平 ±2 的树叶（树冠始终长在树干顶端，
+## 同一 (x,z) 只生成一棵树；相邻树的树冠若在此范围内相接，一并清落也符合直觉）。
+## 树叶不进背包、不掉落——伴随每片叶子一撮向下飘散的叶屑，「落下消失」。
+## 返回清除的树叶格数。
+func decay_tree_leaves(cell: Vector3i) -> int:
+	if _column_has_wood(cell):
+		return 0
+	var removed: Array[Vector3i] = []
+	for dy in range(1, 8):
+		for dx in range(-2, 3):
+			for dz in range(-2, 3):
+				var p := cell + Vector3i(dx, dy, dz)
+				if get_block(p) == BlockTypes.Block.LEAVES:
+					removed.append(p)
+	if removed.is_empty():
+		return 0
+
+	# 批量写入 + 涉及区块统一重建：树冠常跨区块边界，逐块 set_block 会连 rebuild 一起做，
+	# 一棵树几十片叶子就是几十次网格重建；deferred 写入后各重建一次即可。
+	var touched := {}
+	for p in removed:
+		set_block_deferred(p, BlockTypes.Block.AIR)
+		touched[world_to_chunk(Vector3(p))] = true
+	for coord: Vector3i in touched:
+		_rebuild_chunk(coord)
+
+	for p in removed:
+		BreakFx.leaf_fall(self, Vector3(p) + Vector3(0.5, 0.5, 0.5))
+	return removed.size()
+
+
+## 该竖列上下是否还有树干残留（玩家手搭的木头列也会被视为树干，一并尊重）。
+func _column_has_wood(cell: Vector3i) -> bool:
+	for i in range(1, 9):
+		if get_block(cell + Vector3i(0, i, 0)) == BlockTypes.Block.WOOD \
+				or get_block(cell + Vector3i(0, -i, 0)) == BlockTypes.Block.WOOD:
+			return true
+	return false
+
+
 func _configure_noise() -> void:
 	_noise.seed = seed_value
 	_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX

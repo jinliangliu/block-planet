@@ -512,6 +512,9 @@ func _finish_break(cell: Vector3i, id: int) -> void:
 		_world.spill_box(cell, self)
 
 	_world.set_block(cell, BlockTypes.Block.AIR)
+	# 砍掉的是木头且这一列树干已全部砍光 → 树冠的树叶随之落下消失。
+	if id == BlockTypes.Block.WOOD:
+		_world.decay_tree_leaves(cell)
 	if GameState.is_survival():
 		if drop != BlockTypes.Block.AIR:
 			inventory.add_item(drop, BlockTypes.drop_count_for(id, tool_type))

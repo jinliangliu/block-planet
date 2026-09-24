@@ -229,6 +229,39 @@ func _run() -> void:
 		"收获小麦作物掉落小麦×2（drop_count_for）",
 	)
 
+	# ── 树叶随树干砍尽而落下消失 ──
+	# 手工搭一棵最小树：4 格树干 + 顶端 5 片树叶，验证衰减判据与清除效果。
+	var tree_b := Vector3i(farm_o.x + 6, base_y + 2, farm_o.z + 6)
+	for i in range(4):
+		world.set_block(tree_b + Vector3i(0, i, 0), BlockTypes.Block.WOOD)
+	var tree_leaves: Array[Vector3i] = [
+		tree_b + Vector3i(0, 4, 0),
+		tree_b + Vector3i(1, 4, 0), tree_b + Vector3i(-1, 4, 0),
+		tree_b + Vector3i(0, 4, 1), tree_b + Vector3i(0, 5, 0),
+	]
+	for p in tree_leaves:
+		world.set_block(p, BlockTypes.Block.LEAVES)
+	var leaves_in_bag := player.inventory.count_item(BlockTypes.Block.LEAVES)
+
+	player._finish_break(tree_b + Vector3i(0, 2, 0), BlockTypes.Block.WOOD)
+	_check(
+		world.get_block(tree_leaves[0]) == BlockTypes.Block.LEAVES,
+		"树干未砍尽时树叶不落（上方仍有木头）",
+	)
+	# 自下而上砍完剩余树干：最后一块破坏后整冠消失。
+	player._finish_break(tree_b + Vector3i(0, 1, 0), BlockTypes.Block.WOOD)
+	player._finish_break(tree_b, BlockTypes.Block.WOOD)
+	player._finish_break(tree_b + Vector3i(0, 3, 0), BlockTypes.Block.WOOD)
+	var leaves_left := 0
+	for p in tree_leaves:
+		if world.get_block(p) == BlockTypes.Block.LEAVES:
+			leaves_left += 1
+	_check(leaves_left == 0, "树干全部砍掉后树叶整冠落下消失（残留 %d 片）" % leaves_left)
+	_check(
+		player.inventory.count_item(BlockTypes.Block.LEAVES) == leaves_in_bag,
+		"落下的树叶直接消散、不进背包",
+	)
+
 	var bread_recipe := _find_recipe(ItemTypes.BREAD)
 	_check(bread_recipe != null, "存在面包合成配方")
 	if bread_recipe != null:
