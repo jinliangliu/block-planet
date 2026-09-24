@@ -1,0 +1,19 @@
+{
+  "id": "indian_ocean",
+  "name_zh": "印度洋",
+  "name_en": "Indian Ocean",
+  "type": "ocean",
+  "entries": [
+    { "id": "whale_shark_io", "kingdom": "animalia", "category": "fish", "name_zh": "鲸鲨", "name_en": "Whale Shark", "scientific": "Rhincodon typus", "fact_zh": "印度洋温暖海域常见，身上有白色斑点。" },
+    { "id": "dugong", "kingdom": "animalia", "category": "sea_animal", "name_zh": "儒艮", "name_en": "Dugong", "scientific": "Dugong dugon", "fact_zh": "被称为“海牛”，是传说中美人鱼的原型之一。" },
+    { "id": "green_sea_turtle_io", "kingdom": "animalia", "category": "sea_animal", "name_zh": "绿海龟", "name_en": "Green Sea Turtle", "scientific": "Chelonia mydas", "fact_zh": "印度洋是重要产卵地之一。" },
+    { "id": "hawksbill_turtle", "kingdom": "animalia", "category": "sea_animal", "name_zh": "玳瑁", "name_en": "Hawksbill Turtle", "scientific": "Eretmochelys imbricata", "fact_zh": "龟壳有美丽花纹，嘴巴像鹰嘴。" },
+    { "id": "manta_ray", "kingdom": "animalia", "category": "fish", "name_zh": "蝠鲼", "name_en": "Manta Ray", "scientific": "Manta birostris", "fact_zh": "像水下风筝，张开翅膀可达7米。" },
+    { "id": "lionfish", "kingdom": "animalia", "category": "fish", "name_zh": "狮子鱼", "name_en": "Lionfish", "scientific": "Pterois", "fact_zh": "鱼鳍像狮子鬃毛，带有毒刺。" },
+    { "id": "clownfish", "kingdom": "animalia", "category": "fish", "name_zh": "小丑鱼", "name_en": "Clownfish", "scientific": "Amphiprioninae", "fact_zh": "住在海葵里，和海葵互相保护。" },
+    { "id": "coelacanth", "kingdom": "animalia", "category": "fish", "name_zh": "腔棘鱼", "name_en": "Coelacanth", "scientific": "Latimeria chalumnae", "fact_zh": "被称为活化石，曾被认为已经灭绝。" },
+    { "id": "mangrove_indian", "kingdom": "plantae", "category": "tree", "name_zh": "红树", "name_en": "Mangrove", "scientific": "Rhizophora", "fact_zh": "印度洋海岸常见，根泡在咸水里也不怕。" },
+    { "id": "seagrass_indian", "kingdom": "plantae", "category": "seagrass", "name_zh": "印度洋海草", "name_en": "Indian Ocean Seagrass", "scientific": "Thalassia", "fact_zh": "儒艮的主要食物，长在浅海里。" },
+    { "id": "coral_indian", "kingdom": "animalia", "category": "sea_animal", "name_zh": "印度洋珊瑚", "name_en": "Indian Ocean Coral", "scientific": "Anthozoa", "fact_zh": "马尔代夫和斯里兰卡附近有很多珊瑚礁。" }
+  ]
+}

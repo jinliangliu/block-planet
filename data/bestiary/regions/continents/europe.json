@@ -1,0 +1,22 @@
+{
+  "id": "europe",
+  "name_zh": "欧洲",
+  "name_en": "Europe",
+  "type": "continent",
+  "entries": [
+    { "id": "european_brown_bear", "kingdom": "animalia", "category": "mammal", "name_zh": "欧洲棕熊", "name_en": "European Brown Bear", "scientific": "Ursus arctos arctos", "fact_zh": "欧洲森林里的大型食肉动物，冬天会冬眠。" },
+    { "id": "gray_wolf", "kingdom": "animalia", "category": "mammal", "name_zh": "灰狼", "name_en": "Gray Wolf", "scientific": "Canis lupus", "fact_zh": "成群生活，靠嚎叫互相沟通。" },
+    { "id": "eurasian_lynx", "kingdom": "animalia", "category": "mammal", "name_zh": "欧亚猞猁", "name_en": "Eurasian Lynx", "scientific": "Lynx lynx", "fact_zh": "耳朵尖有一撮黑毛，听觉非常灵敏。" },
+    { "id": "european_bison", "kingdom": "animalia", "category": "mammal", "name_zh": "欧洲野牛", "name_en": "European Bison", "scientific": "Bison bonasus", "fact_zh": "欧洲最大的陆生动物，曾一度濒临灭绝。" },
+    { "id": "reindeer", "kingdom": "animalia", "category": "mammal", "name_zh": "驯鹿", "name_en": "Reindeer", "scientific": "Rangifer tarandus", "fact_zh": "雌雄都长角，北欧的驯鹿会季节迁徙。" },
+    { "id": "alpine_ibex", "kingdom": "animalia", "category": "mammal", "name_zh": "阿尔卑斯野山羊", "name_en": "Alpine Ibex", "scientific": "Capra ibex", "fact_zh": "能在陡峭岩壁上行走，是攀岩高手。" },
+    { "id": "eurasian_beaver", "kingdom": "animalia", "category": "mammal", "name_zh": "欧亚海狸", "name_en": "Eurasian Beaver", "scientific": "Castor fiber", "fact_zh": "会用树枝和泥巴筑水坝，被称为自然工程师。" },
+    { "id": "atlantic_puffin_eu", "kingdom": "animalia", "category": "bird", "name_zh": "北极海鹦", "name_en": "Atlantic Puffin", "scientific": "Fratercula arctica", "fact_zh": "嘴巴彩色，像小丑，游泳捕鱼很厉害。" },
+    { "id": "oak", "kingdom": "plantae", "category": "tree", "name_zh": "橡树", "name_en": "Oak", "scientific": "Quercus", "fact_zh": "欧洲常见的树，橡果是松鼠和野猪的食物。" },
+    { "id": "olive_tree", "kingdom": "plantae", "category": "tree", "name_zh": "橄榄树", "name_en": "Olive Tree", "scientific": "Olea europaea", "fact_zh": "地中海沿岸常见，橄榄可以榨油。" },
+    { "id": "lavender", "kingdom": "plantae", "category": "flower", "name_zh": "薰衣草", "name_en": "Lavender", "scientific": "Lavandula", "fact_zh": "紫色的花田，香味很浓，法国普罗旺斯很有名。" },
+    { "id": "edelweiss", "kingdom": "plantae", "category": "flower", "name_zh": "雪绒花", "name_en": "Edelweiss", "scientific": "Leontopodium nivale", "fact_zh": "长在高山上，花瓣上有白色绒毛。" },
+    { "id": "european_holly", "kingdom": "plantae", "category": "shrub", "name_zh": "欧洲冬青", "name_en": "European Holly", "scientific": "Ilex aquifolium", "fact_zh": "冬天结红果子，常被用来做圣诞装饰。" },
+    { "id": "peat_moss", "kingdom": "plantae", "category": "moss", "name_zh": "泥炭藓", "name_en": "Peat Moss", "scientific": "Sphagnum", "fact_zh": "能吸收很多水，欧洲的泥炭沼泽里常见。" }
+  ]
+}

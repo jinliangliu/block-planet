@@ -8,6 +8,13 @@ extends Node
 var _failed := 0
 ## 成长事件计数（lambda 捕获成员而非局部变量，便于统计）。
 var _grown_events := 0
+## 受保护名录里「不算图鉴物种」的三项：村民是人不是物种；蜻蜓、蝴蝶是游戏里
+## 陪伴玩家的益虫，图鉴未收录它们的资料。给它们补条目时请一并删掉这条豁免。
+const PROTECTED_WITHOUT_ENTRY := [
+	Mob.MobType.VILLAGER,
+	Mob.MobType.DRAGONFLY,
+	Mob.MobType.BUTTERFLY,
+]
 
 
 func _ready() -> void:
@@ -108,8 +115,12 @@ func _run() -> void:
 	for i in range(90):
 		await get_tree().physics_frame
 	player.break_held = false
-	_check(hp0 - target.health >= 3, "按住左键 1.5 秒内连续攻击多次（共命中 %d 次）" % (hp0 - target.health))
-	target.queue_free()
+	# 连击够久会把 7 血的狼打死，而 _die() 会 queue_free——这里必须在读取前确认还活着，
+	# 否则「打得太狠」反而让探针崩在 freed 对象上（攻击节奏受帧率影响，不稳定）。
+	var hp_after: int = target.health if is_instance_valid(target) else 0
+	_check(hp0 - hp_after >= 3, "按住左键 1.5 秒内连续攻击多次（共命中 %d 点）" % (hp0 - hp_after))
+	if is_instance_valid(target):
+		target.queue_free()
 
 	# ── 阶段 D：猪掉生猪排、狼夜晚追击且无掉落 ──────────────────────────
 	var pig2 := _spawn_mob(main_scene, Mob.MobType.PIG, player, day_night,
@@ -455,7 +466,15 @@ func _run() -> void:
 	var live_crab := _spawn_mob(main_scene, Mob.MobType.CRAB, player, day_night, bed_pos)
 	for i in range(70):
 		await get_tree().physics_frame
-	_check(live_crab.is_on_floor(), "蟹贴在水底（is_on_floor 为真）")
+	# 断言值里带上高度与垂直速度：这条失败过（蟹悬在水中不落地），
+	# 光看 true/false 无从判断是「没下沉」还是「浮起来了」，把过程量打出来省一轮排查。
+	_check(
+		live_crab.is_on_floor(),
+		"蟹贴在水底（is_on_floor=%s，落点 y=%.2f → 现 y=%.2f，垂直速度 %.2f）" % [
+			live_crab.is_on_floor(), bed_pos.y,
+			live_crab.global_position.y, live_crab.velocity.y,
+		],
+	)
 	_check(live_crab.global_position.y < float(World.SEA_LEVEL) + 1.0,
 		"蟹未浮出水面（y=%.2f）" % live_crab.global_position.y)
 	live_crab.queue_free()
@@ -1595,6 +1614,237 @@ func _run() -> void:
 		"图鉴卡片的字段与插画种类都有对应（错项：%s）" % _join_or_none(card_wrong),
 	)
 
+	# ── 阶段 S：生物图鉴（数据完整性 + 面板行为 + 与地图/进度的接线） ──
+	# 图鉴是纯数据驱动的（data/bestiary/*.json），写错一个字段不会有编译错误，
+	# 只会在 UI 上静默少显示一行。这一节把「读盘时说得出哪里不对」变成硬断言。
+	#
+	# 本节末尾会真的答一道题（验证问答计入进度），因此先备份进度、结束时还原并落盘，
+	# 否则这份测试态会留在 user://progress.json 里，让下一次运行阶段 L 的
+	# 「答对 2 题尚未触发连对奖励」凭空失败——探针给自己下毒，排查起来极费时间。
+	var s_saved_counters: Dictionary = Progress.counters.duplicate()
+	var s_saved_states: Dictionary = Progress.states.duplicate()
+	var s_saved_quiz_streak: int = Progress._quiz_correct_since_reward
+	var bestiary_problems := BestiaryData.load_problems
+	_check(
+		BestiaryData.is_loaded and bestiary_problems.is_empty(),
+		"图鉴数据零问题（%d 条；首条：%s）" % [
+			bestiary_problems.size(),
+			"无" if bestiary_problems.is_empty() else bestiary_problems[0],
+		],
+	)
+
+	# S-1 结构：区域数、条目数、id 唯一
+	_check(
+		BestiaryData.get_regions().size() == 13,
+		"图鉴收录 13 个地区（%d）" % BestiaryData.get_regions().size(),
+	)
+	var bestiary_entries := BestiaryData.get_entries()
+	var entry_total := bestiary_entries.size()
+	_check(entry_total >= 170, "图鉴条目共 %d 种" % entry_total)
+	var unique_ids := {}
+	for entry_value: Variant in bestiary_entries:
+		var entry: Dictionary = entry_value
+		unique_ids[String(entry.get("id", ""))] = true
+	_check(unique_ids.size() == entry_total, "条目 id 唯一（%d / %d）" % [unique_ids.size(), entry_total])
+
+	# S-2 世界区域 ↔ 图鉴区域双向接通：只往一个方向加映射，筛选就会漏掉半边图鉴。
+	var link_wrong := PackedStringArray()
+	var referenced := {}
+	for atlas_id in RegionAtlas.COUNT:
+		var region_ids := BestiaryData.region_ids_of_atlas(atlas_id)
+		if region_ids.is_empty():
+			link_wrong.append("%s 没有对应图鉴地区" % RegionAtlas.title_of(atlas_id))
+		for region_id: String in region_ids:
+			referenced[region_id] = true
+			if BestiaryData.region_by_id(region_id).is_empty():
+				link_wrong.append("%s → 不存在的地区 %s" % [RegionAtlas.title_of(atlas_id), region_id])
+	for region_value: Variant in BestiaryData.get_regions():
+		var region: Dictionary = region_value
+		if not referenced.has(String(region.get("id", ""))):
+			link_wrong.append("图鉴地区 %s 没被任何世界区域引用" % region.get("name_zh", ""))
+	_check(
+		link_wrong.is_empty(),
+		"%d 个世界区域与 %d 个图鉴地区双向接得上（错项：%s）" % [
+			RegionAtlas.COUNT, BestiaryData.get_regions().size(), _join_or_none(link_wrong)
+		],
+	)
+
+	# S-3 受保护动物必须有图鉴条目：这条拦的是「游戏里加了保护动物、图鉴却没写」。
+	# 豁免三项：村民是人不是物种，蜻蜓/蝴蝶是游戏里的陪伴益虫（图鉴未收录它们的资料）。
+	var no_entry := PackedStringArray()
+	var linked_species := 0
+	for mob_id: int in Mob.MobType.values():
+		var linked_entry := BestiaryData.entry_of_mob(mob_id)
+		if linked_entry.is_empty():
+			if Mob.is_protected(mob_id) and not PROTECTED_WITHOUT_ENTRY.has(mob_id):
+				no_entry.append(String(Mob.MOB_NAMES.get(mob_id, str(mob_id))))
+			continue
+		linked_species += 1
+	_check(no_entry.is_empty(), "受保护动物都在图鉴里有条目（缺：%s）" % _join_or_none(no_entry))
+	_check(linked_species >= 4, "游戏物种与图鉴按中文名自动对上 %d 种" % linked_species)
+
+	# S-4 反向：图鉴条目认出来的物种，必须真的是游戏里的物种
+	var back_wrong := PackedStringArray()
+	for probe_id in ["giant_panda", "polar_bear", "kangaroo", "bald_eagle", "golden_monkey", "crested_ibis"]:
+		if BestiaryData.mob_of_entry(BestiaryData.get_entry(probe_id)) < 0:
+			back_wrong.append(probe_id)
+	_check(
+		back_wrong.is_empty(),
+		"保护动物条目都能反查到游戏物种（错项：%s）" % _join_or_none(back_wrong),
+	)
+
+	# S-5 题库：主题前缀都有中文名，且答案都在选项内（后者在 load_all 里已查）
+	var theme_wrong := PackedStringArray()
+	for item_value: Variant in BestiaryData.get_quiz():
+		var item: Dictionary = item_value
+		if _bestiary_theme_of(String(item.get("id", ""))).is_empty():
+			theme_wrong.append(String(item.get("id", "")))
+	_check(
+		BestiaryData.get_quiz().size() >= 15 and theme_wrong.is_empty(),
+		"题库 %d 题、主题前缀都认得（错项：%s）" % [
+			BestiaryData.get_quiz().size(), _join_or_none(theme_wrong)
+		],
+	)
+
+	# S-6 UI：打开 / 卡片数量 / 筛选 / 搜索 / 详情
+	hud.open_bestiary()
+	var panel: BestiaryUI = hud._bestiary
+	_check(panel != null and panel.is_open(), "可按 F2 打开生物图鉴")
+	_check(panel._cards.size() == entry_total, "面板建出 %d 张卡片（等于条目数）" % panel._cards.size())
+
+	panel._set_kingdom("animalia")
+	await get_tree().process_frame
+	var animalia_matched := BestiaryData.filter("animalia", "", "", "")
+	var visible_cards := 0
+	var visible_non_animalia := 0
+	for card_value: Variant in panel._cards.values():
+		var card: EntryCard = card_value
+		if not card.visible:
+			continue
+		visible_cards += 1
+		if String(BestiaryData.get_entry(card.entry_id).get("kingdom", "")) != "animalia":
+			visible_non_animalia += 1
+	_check(
+		visible_cards == animalia_matched.size() and visible_non_animalia == 0,
+		"按「动物」界筛选命中 %d 种（期望 %d，混入非动物 %d 张）" % [
+			visible_cards, animalia_matched.size(), visible_non_animalia
+		],
+	)
+
+	panel._set_kingdom("")
+	panel._search_box.text = "企鹅"
+	panel._refresh_grid()
+	await get_tree().process_frame
+	# 搜索同时覆盖名字与科普文案：命中数会比「名字里带企鹅」的 7 种多
+	# （磷虾的科普里写着「鲸鱼、企鹅、海豹都吃它」），但每条命中都必须真出现过这个词。
+	var penguin_hits := 0
+	var penguin_named := 0
+	var penguin_wrong := 0
+	for card_value: Variant in panel._cards.values():
+		var card: EntryCard = card_value
+		if not card.visible:
+			continue
+		penguin_hits += 1
+		var hit_entry := BestiaryData.get_entry(card.entry_id)
+		if String(hit_entry.get("name_zh", "")).contains("企鹅"):
+			penguin_named += 1
+		var text := "%s %s" % [hit_entry.get("name_zh", ""), hit_entry.get("fact_zh", "")]
+		if not text.contains("企鹅"):
+			penguin_wrong += 1
+	_check(
+		penguin_named >= 7 and penguin_wrong == 0,
+		"搜索「企鹅」命中 %d 种（其中名字里带企鹅的 %d 种，凭空命中 %d）" % [
+			penguin_hits, penguin_named, penguin_wrong
+		],
+	)
+
+	panel._search_box.text = ""
+	panel._on_card_pressed("giant_panda")
+	await get_tree().process_frame
+	_check(
+		panel._detail_name.text.contains("大熊猫")
+		and not panel._detail_fact.text.is_empty()
+		and panel._detail_latin.text.contains("Ailuropoda")
+		and panel._detail_badges.get_child_count() == 3,
+		"点开卡片显示资料：%s / %s" % [panel._detail_name.text, panel._detail_latin.text],
+	)
+	_check(
+		panel._detail_game.text.contains("大熊猫"),
+		"图鉴会指出该物种在游戏内也能遇见：%s" % panel._detail_game.text,
+	)
+
+	# S-7 问答页：出题 → 答对计入进度 → 答错不计
+	panel._set_tab(BestiaryUI.Tab.QUIZ)
+	await get_tree().process_frame
+	_check(
+		not panel._quiz_question.text.is_empty() and panel._quiz_options.get_child_count() >= 2,
+		"问答页出题并列出选项（%d 个）" % panel._quiz_options.get_child_count(),
+	)
+	var quiz_before := int(Progress.counters.get("quiz_correct", 0))
+	panel._on_option_pressed(panel._quiz_answer)
+	await get_tree().process_frame
+	var quiz_after_correct := int(Progress.counters.get("quiz_correct", 0))
+	_check(
+		quiz_after_correct == quiz_before + 1,
+		"图鉴问答答对计入知识问答进度（%d → %d）" % [quiz_before, quiz_after_correct],
+	)
+	panel._draw_question()
+	await get_tree().process_frame
+	panel._on_option_pressed("这个选项一定不对")
+	var quiz_after_wrong := int(Progress.counters.get("quiz_correct", 0))
+	_check(
+		quiz_after_wrong == quiz_after_correct and panel._quiz_feedback.text.contains("正确答案"),
+		"答错不计数，并说明正确答案",
+	)
+	panel._set_tab(BestiaryUI.Tab.ENTRIES)
+	panel._on_card_pressed("giant_panda")
+	_check(panel.get_tab() == BestiaryUI.Tab.ENTRIES, "可切回图鉴页")
+
+	# S-8 地图页 → 图鉴：介绍页的「看看这里的生物」要带着地区筛选跳过来
+	var selector_open: bool = hud._map_selector.is_open()
+	if not selector_open:
+		hud._map_selector.open()
+	hud._map_selector._show_intro(RegionAtlas.AFRICA)
+	await get_tree().process_frame
+	var jump_button := _find_button(hud._map_selector._intro_panel, "看看这里的生物")
+	_check(jump_button != null, "地球介绍页有「看看这里的生物」入口")
+	if jump_button != null:
+		jump_button.pressed.emit()
+		await get_tree().process_frame
+		_check(not hud._map_selector.is_open(), "从地图页跳进图鉴时，地图选择器已关闭")
+		_check(panel.is_open(), "图鉴已打开")
+		var africa_hits := 0
+		var africa_wrong := 0
+		for card_value: Variant in panel._cards.values():
+			var card: EntryCard = card_value
+			if not card.visible:
+				continue
+			africa_hits += 1
+			var region_id := String(BestiaryData.get_entry(card.entry_id).get("region_id", ""))
+			if region_id != "africa":
+				africa_wrong += 1
+		_check(
+			africa_hits > 0 and africa_wrong == 0,
+			"跳过来时地区筛选已落在非洲（命中 %d 种，串区 %d）" % [africa_hits, africa_wrong],
+		)
+	hud.close_bestiary()
+	_check(not panel.is_open(), "关闭图鉴后状态复位")
+
+	# S-9 说明书里写明了入口：文档与实现不同步时（加了键没说）这里会红
+	var manual_mentions := false
+	for page_value: Variant in ManualPanel.PAGES:
+		var page: Dictionary = page_value
+		for line_value: Variant in page.get("lines", []):
+			if String(line_value).contains("F2"):
+				manual_mentions = true
+	_check(manual_mentions, "说明书里写明了图鉴的打开方式")
+
+	# 还原进度：本页的问答测试不留在存档里（见本节开头的说明）。
+	Progress.counters = s_saved_counters
+	Progress.states = s_saved_states
+	Progress._quiz_correct_since_reward = s_saved_quiz_streak
+	Progress._save()
+
 	if _failed == 0:
 		print("LIFE_TEST_OK")
 		get_tree().quit(0)
@@ -1749,3 +1999,22 @@ func _region_species_keys() -> Dictionary:
 		for key: String in (entry["hostile"] as Dictionary):
 			seen[key] = true
 	return seen
+
+
+## 阶段 S 用：题目 id 前缀 → 主题名（认不出返回空串，说明主题徽章会退化成「综合」）。
+func _bestiary_theme_of(quiz_id: String) -> String:
+	for pair: Array in BestiaryUI.QUIZ_THEMES:
+		if quiz_id.begins_with(String(pair[0])):
+			return String(pair[1])
+	return ""
+
+
+## 阶段 S 用：按文字递归找按钮（用来点开地图介绍页里的入口，而不是直接调方法）。
+func _find_button(root: Node, text: String) -> Button:
+	for child in root.get_children():
+		if child is Button and (child as Button).text == text:
+			return child as Button
+		var found := _find_button(child, text)
+		if found != null:
+			return found
+	return null

@@ -24,12 +24,27 @@
 | 区域生成 | 地形参数、天空、昼夜生态表、四段介绍 | `RegionAtlas.REGIONS` | `scripts/world/region_atlas.gd` |
 | 区域图鉴卡片 | 每个区域 3 张知识卡片（标题/正文/插画/主色） | `RegionAtlas.REGION_CARDS` | `region_atlas.gd` |
 | 卡片插画 | 程序化插画 | `MapSelector._draw_art()` + 种类清单 `ART_KINDS` | `scripts/ui/map_selector.gd` |
+| **生物图鉴资料** | **13 个地区 175 种动植物的中文名/英文名/学名/科普/界类归属** | `data/bestiary/regions/**/*.json`（唯一来源），由 `manifest.json` 登记 | `data/bestiary/` |
+| **图鉴分类树** | 界（动物/植物/真菌）→ 类（哺乳/鸟类/…）的中文名、图标、主色 | `manifest.json` → `kingdoms` | `data/bestiary/manifest.json` |
+| **图鉴题库** | 19 道题（极地/海洋/大洲/植物四主题，含讲解） | `data/bestiary/quiz.json` | 同上 |
+| **图鉴卡片与面板外观** | 卡片、详情栏、筛选芯片的程序化外观 | `EntryCard` 常量 + `BestiaryUI._*_style()` | `scripts/ui/entry_card.gd`、`bestiary_ui.gd` |
 | 任务/问答/成就 | 新手任务链 8 环、题库、成就 | `QuestData._build()` | `scripts/core/quest_data.gd` |
 | 手册文案 | 说明书分页与每页状态栏提示 | `ManualPanel.PAGES` | `scripts/ui/manual_panel.gd` |
 | 地球外观 | 大洲掩码、配色、区域锚点 | `RegionAtlas.LAND_MASK / REGION_COLORS / REGION_ANCHORS` | `region_atlas.gd` |
 | **外部美术文件** | **（无）** | —— | —— |
 
 > 仓库里唯一的二进制文件是 `tmp/` 下的探针截图，已被 `.gitignore` 忽略，不进版本库。
+
+**两类资产的存放媒介不同**，这是有意为之：
+
+| | 代码内资产 | 内容型资产 |
+|---|---|---|
+| 例子 | 方块表、造型、插画、任务链 | 生物图鉴（175 条）、图鉴题库 |
+| 存在哪 | `.gd` 里的 `const` / `static` 表 | `data/**/*.json` |
+| 为什么 | 与逻辑强耦合，要参与运算、要编译期检查 | 纯文案与条目，量大、由内容而非逻辑驱动 |
+| 代价 | 改一条文案也要重读逻辑 | 写错字段没有编译错误，只能等运行时 |
+
+第三条原则（机器校验）因此是两类共用的：JSON 那一侧不靠「仔细检查」，靠 `BestiaryData.load_problems` + 探针阶段 S。
 
 ---
 
@@ -48,7 +63,7 @@
    新增物种**未登记造型**时画出**品红占位方块**并打警告——宁可丑得刺眼，也不要静默地长成别的东西。
 
 4. **凡是「新增时必须同步 N 张表」的地方，都要有机器校验。**
-   人工清单会漏，探针不会。对应实现：`tests/life_probe.gd` 的 **阶段 R：资产完整性守门**（12 条断言，见第五节）。
+   人工清单会漏，探针不会。对应实现：`tests/life_probe.gd` 的 **阶段 R：资产完整性守门**（代码内资产，12 条）与 **阶段 S：图鉴数据守门**（JSON 内容资产，15 条），见第八节。
 
 ---
 
@@ -66,7 +81,7 @@
 | 6 | 生长链（可选） | `mob.gd` → `MOB_STAGES` | 不出幼体；或末段不是成体导致属性换算错 | R-4 |
 | 7 | 写造型 + **登记到 `ART_BUILDERS`** | `mob.gd` → `_build_xxx()` / `ART_BUILDERS` | 画成品红占位方块 + 警告（不会静默出错） | R-6 |
 | 8 | 登区域生成表 | `region_atlas.gd` → `REGIONS[i]["passive"/"hostile"]` | 满世界找不到它 | R-5 |
-| 9 | 内容补全：保护名录 / 狩猎规则 / 题目成就 / 手册文案 | `PROTECTED_MOBS`+`PROTECTED_NOTES`、`HUNT_RULES`、`quest_data.gd`、`manual_panel.gd` | 打不动、或打得到却没有规则、或图鉴里查不到 | R-7，其余靠阶段 P 断句 |
+| 9 | 内容补全：保护名录 / 狩猎规则 / 题目成就 / 手册文案 / **图鉴条目** | `PROTECTED_MOBS`+`PROTECTED_NOTES`、`HUNT_RULES`、`quest_data.gd`、`manual_panel.gd`、`data/bestiary/`.json | 打不动、或打得到却没有规则、或图鉴里查不到 | R-7、S-3（保护动物必须有图鉴条目），其余靠阶段 P 断句 |
 
 **两个高频错误**：
 
@@ -114,7 +129,7 @@
 ## 六、校验：跑什么、看什么
 
 ```bash
-# 资产完整性守门（阶段 R，12 条）+ 全量功能回归
+# 资产完整性守门（阶段 R 代码内资产 12 条 + 阶段 S 图鉴数据 15 条）+ 全量功能回归
 "C:/Program Files/Godot/Godot_v4.6.3-stable_win64_console.exe" \
   --headless --path . res://tests/life_probe.tscn
 
@@ -123,6 +138,7 @@
 
 # UI/外观改动：开窗截图目检（输出落 tmp/，勿加 --headless）
 "C:/Program Files/Godot/Godot_v4.6.3-stable_win64_console.exe" --path . res://tests/hud_mode_shot.tscn
+"C:/Program Files/Godot/Godot_v4.6.3-stable_win64_console.exe" --path . res://tests/bestiary_shot.tscn
 ```
 
 阶段 R 覆盖的 12 条（新增内容时最该关注）：

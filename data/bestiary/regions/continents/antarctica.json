@@ -1,0 +1,22 @@
+{
+  "id": "antarctica",
+  "name_zh": "南极洲",
+  "name_en": "Antarctica",
+  "type": "continent",
+  "entries": [
+    { "id": "emperor_penguin", "kingdom": "animalia", "category": "bird", "name_zh": "帝企鹅", "name_en": "Emperor Penguin", "scientific": "Aptenodytes forsteri", "fact_zh": "世界上最大的企鹅，爸爸负责孵蛋。" },
+    { "id": "adelie_penguin", "kingdom": "animalia", "category": "bird", "name_zh": "阿德利企鹅", "name_en": "Adélie Penguin", "scientific": "Pygoscelis adeliae", "fact_zh": "眼睛周围有白色眼圈，像戴了眼镜。" },
+    { "id": "chinstrap_penguin", "kingdom": "animalia", "category": "bird", "name_zh": "帽带企鹅", "name_en": "Chinstrap Penguin", "scientific": "Pygoscelis antarcticus", "fact_zh": "下巴有一条黑线，像帽带。" },
+    { "id": "gentoo_penguin", "kingdom": "animalia", "category": "bird", "name_zh": "金图企鹅", "name_en": "Gentoo Penguin", "scientific": "Pygoscelis papua", "fact_zh": "企鹅里游泳最快的，嘴巴是橙色的。" },
+    { "id": "weddell_seal", "kingdom": "animalia", "category": "mammal", "name_zh": "威德尔海豹", "name_en": "Weddell Seal", "scientific": "Leptonychotes weddellii", "fact_zh": "生活在最南端的海豹，会在冰下唱歌。" },
+    { "id": "leopard_seal", "kingdom": "animalia", "category": "mammal", "name_zh": "豹海豹", "name_en": "Leopard Seal", "scientific": "Hydrurga leptonyx", "fact_zh": "南极顶级掠食者之一，会捕食企鹅。" },
+    { "id": "crabeater_seal", "kingdom": "animalia", "category": "mammal", "name_zh": "食蟹海豹", "name_en": "Crabeater Seal", "scientific": "Lobodon carcinophaga", "fact_zh": "其实不吃螃蟹，主要吃南极磷虾。" },
+    { "id": "antarctic_krill", "kingdom": "animalia", "category": "sea_animal", "name_zh": "南极磷虾", "name_en": "Antarctic Krill", "scientific": "Euphausia superba", "fact_zh": "南极生态链的基石，鲸鱼、企鹅、海豹都吃它。" },
+    { "id": "wandering_albatross", "kingdom": "animalia", "category": "bird", "name_zh": "漂泊信天翁", "name_en": "Wandering Albatross", "scientific": "Diomedea exulans", "fact_zh": "翼展最长的鸟，能滑翔几千公里。" },
+    { "id": "south_polar_skua", "kingdom": "animalia", "category": "bird", "name_zh": "南极贼鸥", "name_en": "South Polar Skua", "scientific": "Stercorarius maccormicki", "fact_zh": "会抢其他鸟的食物，是南极的“海盗”。" },
+    { "id": "antarctic_hair_grass", "kingdom": "plantae", "category": "grass", "name_zh": "南极发草", "name_en": "Antarctic Hair Grass", "scientific": "Deschampsia antarctica", "fact_zh": "南极仅有的两种开花植物之一。" },
+    { "id": "antarctic_pearlwort", "kingdom": "plantae", "category": "flower", "name_zh": "南极漆姑草", "name_en": "Antarctic Pearlwort", "scientific": "Colobanthus quitensis", "fact_zh": "南极另一种开花植物，长得像小绿垫子。" },
+    { "id": "antarctic_moss", "kingdom": "plantae", "category": "moss", "name_zh": "南极苔藓", "name_en": "Antarctic Moss", "fact_zh": "在南极短暂的夏天里快速生长。" },
+    { "id": "antarctic_lichen", "kingdom": "fungi", "category": "lichen", "name_zh": "南极地衣", "name_en": "Antarctic Lichen", "fact_zh": "地衣不是植物，而是真菌和藻类一起生活的伙伴。" }
+  ]
+}

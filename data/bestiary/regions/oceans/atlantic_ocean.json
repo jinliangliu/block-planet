@@ -1,0 +1,19 @@
+{
+  "id": "atlantic_ocean",
+  "name_zh": "大西洋",
+  "name_en": "Atlantic Ocean",
+  "type": "ocean",
+  "entries": [
+    { "id": "right_whale", "kingdom": "animalia", "category": "sea_animal", "name_zh": "北大西洋露脊鲸", "name_en": "North Atlantic Right Whale", "scientific": "Eubalaena glacialis", "fact_zh": "非常稀有，头部有白色皮茧。" },
+    { "id": "humpback_whale_ao", "kingdom": "animalia", "category": "sea_animal", "name_zh": "座头鲸", "name_en": "Humpback Whale", "scientific": "Megaptera novaeangliae", "fact_zh": "大西洋的座头鲸也会唱歌和迁徙。" },
+    { "id": "bluefin_tuna", "kingdom": "animalia", "category": "fish", "name_zh": "蓝鳍金枪鱼", "name_en": "Atlantic Bluefin Tuna", "scientific": "Thunnus thynnus", "fact_zh": "游得极快，是海洋里的高速猎手。" },
+    { "id": "atlantic_cod", "kingdom": "animalia", "category": "fish", "name_zh": "大西洋鳕鱼", "name_en": "Atlantic Cod", "scientific": "Gadus morhua", "fact_zh": "曾是北大西洋最重要的经济鱼类。" },
+    { "id": "gray_seal", "kingdom": "animalia", "category": "sea_animal", "name_zh": "灰海豹", "name_en": "Gray Seal", "scientific": "Halichoerus grypus", "fact_zh": "大西洋两岸都有分布，公海豹鼻子像马。" },
+    { "id": "bottlenose_dolphin_ao", "kingdom": "animalia", "category": "sea_animal", "name_zh": "宽吻海豚", "name_en": "Bottlenose Dolphin", "scientific": "Tursiops truncatus", "fact_zh": "大西洋沿岸常见，喜欢跟着船游。" },
+    { "id": "great_white_shark_ao", "kingdom": "animalia", "category": "fish", "name_zh": "大白鲨", "name_en": "Great White Shark", "scientific": "Carcharodon carcharias", "fact_zh": "大西洋也有分布，是顶级掠食者。" },
+    { "id": "green_sea_turtle_ao", "kingdom": "animalia", "category": "sea_animal", "name_zh": "绿海龟", "name_en": "Green Sea Turtle", "scientific": "Chelonia mydas", "fact_zh": "大西洋温暖海域常见，会跨洋迁徙。" },
+    { "id": "sargassum", "kingdom": "plantae", "category": "algae", "name_zh": "马尾藻", "name_en": "Sargassum", "scientific": "Sargassum", "fact_zh": "漂浮在海面上，形成著名的马尾藻海。" },
+    { "id": "seagrass_atlantic", "kingdom": "plantae", "category": "seagrass", "name_zh": "大西洋海草", "name_en": "Atlantic Seagrass", "scientific": "Zostera marina", "fact_zh": "海草床是很多小鱼和海马的家。" },
+    { "id": "coral_atlantic", "kingdom": "animalia", "category": "sea_animal", "name_zh": "大西洋珊瑚", "name_en": "Atlantic Coral", "scientific": "Anthozoa", "fact_zh": "加勒比海的珊瑚礁非常有名。" }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "north_america",
+  "name_zh": "北美洲",
+  "name_en": "North America",
+  "type": "continent",
+  "entries": [
+    { "id": "american_bison", "kingdom": "animalia", "category": "mammal", "name_zh": "美洲野牛", "name_en": "American Bison", "scientific": "Bison bison", "fact_zh": "北美洲最大的陆生动物，曾遍布大平原。" },
+    { "id": "gray_wolf_na", "kingdom": "animalia", "category": "mammal", "name_zh": "灰狼", "name_en": "Gray Wolf", "scientific": "Canis lupus", "fact_zh": "北美洲的灰狼是群居猎手。" },
+    { "id": "brown_bear_na", "kingdom": "animalia", "category": "mammal", "name_zh": "棕熊", "name_en": "Brown Bear", "scientific": "Ursus arctos", "fact_zh": "阿拉斯加的棕熊会聚集在河边捕鲑鱼。" },
+    { "id": "moose", "kingdom": "animalia", "category": "mammal", "name_zh": "驼鹿", "name_en": "Moose", "scientific": "Alces alces", "fact_zh": "世界上最大的鹿，雄鹿有巨大的掌状鹿角。" },
+    { "id": "raccoon", "kingdom": "animalia", "category": "mammal", "name_zh": "浣熊", "name_en": "Raccoon", "scientific": "Procyon lotor", "fact_zh": "眼睛周围有黑色面罩，喜欢洗东西。" },
+    { "id": "cougar", "kingdom": "animalia", "category": "mammal", "name_zh": "美洲狮", "name_en": "Cougar", "scientific": "Puma concolor", "fact_zh": "分布从加拿大到南美，跳得又高又远。" },
+    { "id": "american_alligator", "kingdom": "animalia", "category": "reptile", "name_zh": "美洲短吻鳄", "name_en": "American Alligator", "scientific": "Alligator mississippiensis", "fact_zh": "生活在北美东南部沼泽，嘴巴宽而圆。" },
+    { "id": "bald_eagle", "kingdom": "animalia", "category": "bird", "name_zh": "白头海雕", "name_en": "Bald Eagle", "scientific": "Haliaeetus leucocephalus", "fact_zh": "美国的国鸟，头白色，捕鱼高手。" },
+    { "id": "monarch_butterfly", "kingdom": "animalia", "category": "insect", "name_zh": "黑脉金斑蝶", "name_en": "Monarch Butterfly", "scientific": "Danaus plexippus", "fact_zh": "每年从加拿大飞到墨西哥越冬，是迁徙能手。" },
+    { "id": "sugar_maple", "kingdom": "plantae", "category": "tree", "name_zh": "糖枫", "name_en": "Sugar Maple", "scientific": "Acer saccharum", "fact_zh": "树液可以熬成枫糖浆，秋天叶子变红。" },
+    { "id": "giant_sequoia", "kingdom": "plantae", "category": "tree", "name_zh": "巨杉", "name_en": "Giant Sequoia", "scientific": "Sequoiadendron giganteum", "fact_zh": "世界上最大的树之一，能活几千年。" },
+    { "id": "saguaro", "kingdom": "plantae", "category": "shrub", "name_zh": "巨人柱仙人掌", "name_en": "Saguaro Cactus", "scientific": "Carnegiea gigantea", "fact_zh": "长在沙漠里，像举手的大柱子。" },
+    { "id": "poison_ivy", "kingdom": "plantae", "category": "vine", "name_zh": "毒葛", "name_en": "Poison Ivy", "scientific": "Toxicodendron radicans", "fact_zh": "碰到会痒，叶子是三片一组。" },
+    { "id": "sunflower", "kingdom": "plantae", "category": "flower", "name_zh": "向日葵", "name_en": "Sunflower", "scientific": "Helianthus annuus", "fact_zh": "花盘会朝着太阳转，种子可以吃。" }
+  ]
+}

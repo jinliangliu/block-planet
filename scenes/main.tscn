@@ -1,12 +1,12 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene format=3 uid="uid://dxcw7wopcggli"]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://ejo0wieu2nv3" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2_player"]
-[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="3_hud"]
-[ext_resource type="Script" path="res://scripts/world/world.gd" id="4_world"]
-[ext_resource type="Script" path="res://scripts/systems/day_night.gd" id="5_daynight"]
-[ext_resource type="Script" path="res://scripts/systems/mob_spawner.gd" id="6_mobspawner"]
-[ext_resource type="Script" path="res://scripts/world/break_fx.gd" id="7_breakfx"]
+[ext_resource type="Script" uid="uid://c0ax6gh5x5pf" path="res://scripts/ui/hud.gd" id="3_hud"]
+[ext_resource type="Script" uid="uid://dvcolfgoxh55o" path="res://scripts/world/world.gd" id="4_world"]
+[ext_resource type="Script" uid="uid://bp3om8ytnq0rn" path="res://scripts/systems/day_night.gd" id="5_daynight"]
+[ext_resource type="Script" uid="uid://biwcouns5m0mw" path="res://scripts/systems/mob_spawner.gd" id="6_mobspawner"]
+[ext_resource type="Script" uid="uid://dpw1birknrcqa" path="res://scripts/world/break_fx.gd" id="7_breakfx"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -15,29 +15,29 @@ ambient_light_source = 2
 ambient_light_color = Color(0.75, 0.78, 0.85, 1)
 ambient_light_energy = 0.6
 
-[node name="Main" type="Node3D"]
+[node name="Main" type="Node3D" unique_id=1018644619]
 script = ExtResource("1_main")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=999878785]
 environment = SubResource("Environment_main")
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=967082531]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 12, 4)
 
-[node name="DayNightCycle" type="Node3D" parent="."]
+[node name="DayNightCycle" type="Node3D" parent="." unique_id=1369283242]
 script = ExtResource("5_daynight")
 
-[node name="World" type="Node3D" parent="."]
+[node name="World" type="Node3D" parent="." unique_id=370776305]
 script = ExtResource("4_world")
 
-[node name="MobSpawner" type="Node3D" parent="."]
+[node name="MobSpawner" type="Node3D" parent="." unique_id=33402330]
 script = ExtResource("6_mobspawner")
 
-[node name="BreakFx" type="Node3D" parent="."]
+[node name="BreakFx" type="Node3D" parent="." unique_id=1334810743]
 script = ExtResource("7_breakfx")
 
-[node name="Player" parent="." instance=ExtResource("2_player")]
+[node name="Player" parent="." unique_id=1507943211 instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 32, 0)
 
-[node name="UI" type="CanvasLayer" parent="."]
+[node name="UI" type="CanvasLayer" parent="." unique_id=172303217]
 script = ExtResource("3_hud")

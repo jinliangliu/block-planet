@@ -19,6 +19,11 @@ config/features=PackedStringArray("4.6")
 Events="*res://scripts/core/events.gd"
 GameState="*res://scripts/core/game_state.gd"
 Progress="*res://scripts/systems/progress_manager.gd"
+BestiaryData="*res://scripts/systems/bestiary_data.gd"
+
+[debug]
+
+gdscript/warnings/enable_all_warnings=true
 
 [display]
 
@@ -27,10 +32,6 @@ window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/handheld/orientation=4
-
-[debug]
-
-gdscript/warnings/enable_all_warnings=true
 
 [rendering]
 

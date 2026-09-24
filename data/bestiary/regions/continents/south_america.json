@@ -1,0 +1,24 @@
+{
+  "id": "south_america",
+  "name_zh": "南美洲",
+  "name_en": "South America",
+  "type": "continent",
+  "entries": [
+    { "id": "jaguar", "kingdom": "animalia", "category": "mammal", "name_zh": "美洲豹", "name_en": "Jaguar", "scientific": "Panthera onca", "fact_zh": "南美雨林顶级掠食者，会游泳，咬合力极强。" },
+    { "id": "sloth", "kingdom": "animalia", "category": "mammal", "name_zh": "树懒", "name_en": "Sloth", "scientific": "Bradypus", "fact_zh": "动作非常慢，一周才下树一次上厕所。" },
+    { "id": "alpaca", "kingdom": "animalia", "category": "mammal", "name_zh": "羊驼", "name_en": "Alpaca", "scientific": "Vicugna pacos", "fact_zh": "生活在安第斯山，毛很暖和。" },
+    { "id": "capybara", "kingdom": "animalia", "category": "mammal", "name_zh": "水豚", "name_en": "Capybara", "scientific": "Hydrochoerus hydrochaeris", "fact_zh": "世界上最大的啮齿动物，性格温和。" },
+    { "id": "giant_anteater", "kingdom": "animalia", "category": "mammal", "name_zh": "大食蚁兽", "name_en": "Giant Anteater", "scientific": "Myrmecophaga tridactyla", "fact_zh": "没有牙齿，用长舌头舔食蚂蚁和白蚁。" },
+    { "id": "toucan", "kingdom": "animalia", "category": "bird", "name_zh": "巨嘴鸟", "name_en": "Toucan", "scientific": "Ramphastos", "fact_zh": "嘴巴很大但很轻，用来散热和够果子。" },
+    { "id": "macaw", "kingdom": "animalia", "category": "bird", "name_zh": "金刚鹦鹉", "name_en": "Macaw", "scientific": "Ara", "fact_zh": "色彩鲜艳，能学人说话。" },
+    { "id": "green_anaconda", "kingdom": "animalia", "category": "reptile", "name_zh": "森蚺", "name_en": "Green Anaconda", "scientific": "Eunectes murinus", "fact_zh": "世界上最大的蛇之一，生活在亚马逊水域。" },
+    { "id": "poison_dart_frog", "kingdom": "animalia", "category": "amphibian", "name_zh": "箭毒蛙", "name_en": "Poison Dart Frog", "scientific": "Dendrobatidae", "fact_zh": "颜色鲜艳，皮肤有毒，是雨林里的小宝石。" },
+    { "id": "amazon_river_dolphin", "kingdom": "animalia", "category": "sea_animal", "name_zh": "亚马逊河豚", "name_en": "Amazon River Dolphin", "scientific": "Inia geoffrensis", "fact_zh": "淡水豚，身体是粉红色的。" },
+    { "id": "rubber_tree", "kingdom": "plantae", "category": "tree", "name_zh": "橡胶树", "name_en": "Rubber Tree", "scientific": "Hevea brasiliensis", "fact_zh": "树液可以做成橡胶，原产于亚马逊雨林。" },
+    { "id": "victoria_amazonica", "kingdom": "plantae", "category": "flower", "name_zh": "王莲", "name_en": "Victoria Amazonica", "scientific": "Victoria amazonica", "fact_zh": "叶子很大，能托住一个小孩。" },
+    { "id": "orchid", "kingdom": "plantae", "category": "flower", "name_zh": "兰花", "name_en": "Orchid", "scientific": "Orchidaceae", "fact_zh": "南美雨林有上千种兰花，很多长在树上。" },
+    { "id": "bromeliad", "kingdom": "plantae", "category": "flower", "name_zh": "凤梨科植物", "name_en": "Bromeliad", "scientific": "Bromeliaceae", "fact_zh": "叶子中间能存水，小青蛙会住在里面。" },
+    { "id": "cacao", "kingdom": "plantae", "category": "tree", "name_zh": "可可树", "name_en": "Cacao Tree", "scientific": "Theobroma cacao", "fact_zh": "可可豆可以做成巧克力。" },
+    { "id": "ceiba", "kingdom": "plantae", "category": "tree", "name_zh": "吉贝木棉", "name_en": "Ceiba", "scientific": "Ceiba pentandra", "fact_zh": "雨林里的大树，能长到70米高。" }
+  ]
+}

@@ -9,6 +9,8 @@ extends Control
 
 signal region_entered(region_id: int)
 signal closed
+## 在介绍页请求跳去看该区域的动植物图鉴（由 HUD 关闭本窗口后打开图鉴）。
+signal bestiary_requested(region_id: int)
 
 enum Page {
 	GLOBE,
@@ -466,6 +468,18 @@ func _build_intro_panel() -> void:
 	back.focus_mode = Control.FOCUS_NONE
 	back.pressed.connect(func(): _show_page(Page.GLOBE))
 	row.add_child(back)
+
+	# 介绍页是「地理」与「生物」的交汇点：看完地形介绍，
+	# 顺手就能翻到这片地方的动植物图鉴，两套内容由同一个区域号串起来。
+	var bestiary := Button.new()
+	bestiary.text = "看看这里的生物"
+	bestiary.custom_minimum_size = Vector2(150, 44)
+	bestiary.focus_mode = Control.FOCUS_NONE
+	bestiary.pressed.connect(func():
+		if _selected >= 0:
+			bestiary_requested.emit(_selected)
+	)
+	row.add_child(bestiary)
 
 	var enter := Button.new()
 	enter.text = "进入"

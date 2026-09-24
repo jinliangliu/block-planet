@@ -16,6 +16,7 @@ const ACTIONS := {
 	"toggle_trade": [KEY_T],
 	"toggle_map": [KEY_M],
 	"toggle_manual": [KEY_F1],
+	"toggle_bestiary": [KEY_F2],
 	"toggle_quests": [KEY_J],
 }
 

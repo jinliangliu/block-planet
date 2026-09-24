@@ -1,0 +1,21 @@
+{
+  "id": "antarctic_region",
+  "name_zh": "南极地区",
+  "name_en": "Antarctic Region",
+  "type": "polar",
+  "note_zh": "南极洲及南大洋，没有北极熊。",
+  "entries": [
+    { "id": "king_penguin", "kingdom": "animalia", "category": "bird", "name_zh": "王企鹅", "name_en": "King Penguin", "scientific": "Aptenodytes patagonicus", "fact_zh": "比帝企鹅小一点，生活在亚南极岛屿。" },
+    { "id": "macaroni_penguin", "kingdom": "animalia", "category": "bird", "name_zh": "马可罗尼企鹅", "name_en": "Macaroni Penguin", "scientific": "Eudyptes chrysolophus", "fact_zh": "头顶有金黄色羽毛，像戴了头饰。" },
+    { "id": "rockhopper_penguin", "kingdom": "animalia", "category": "bird", "name_zh": "跳岩企鹅", "name_en": "Rockhopper Penguin", "scientific": "Eudyptes chrysocome", "fact_zh": "眼睛上方有黄色羽毛，会在岩石上跳跃。" },
+    { "id": "ross_seal", "kingdom": "animalia", "category": "mammal", "name_zh": "罗斯海豹", "name_en": "Ross Seal", "scientific": "Ommatophoca rossii", "fact_zh": "南极最稀有的海豹，会发出像唱歌一样的声音。" },
+    { "id": "elephant_seal", "kingdom": "animalia", "category": "mammal", "name_zh": "象海豹", "name_en": "Elephant Seal", "scientific": "Mirounga", "fact_zh": "雄性鼻子像大象，是最大的海豹。" },
+    { "id": "minke_whale", "kingdom": "animalia", "category": "sea_animal", "name_zh": "小须鲸", "name_en": "Minke Whale", "scientific": "Balaenoptera acutorostrata", "fact_zh": "南极最常见的小型须鲸。" },
+    { "id": "snow_petrel", "kingdom": "animalia", "category": "bird", "name_zh": "雪海燕", "name_en": "Snow Petrel", "scientific": "Pagodroma nivea", "fact_zh": "全身雪白，只在南极地区繁殖。" },
+    { "id": "antarctic_icefish", "kingdom": "animalia", "category": "fish", "name_zh": "南极冰鱼", "name_en": "Antarctic Icefish", "scientific": "Channichthyidae", "fact_zh": "血液透明，没有血红蛋白，靠冷水溶氧生存。" },
+    { "id": "antarctic_hair_grass_ar", "kingdom": "plantae", "category": "grass", "name_zh": "南极发草", "name_en": "Antarctic Hair Grass", "scientific": "Deschampsia antarctica", "fact_zh": "南极仅有的两种开花植物之一。" },
+    { "id": "antarctic_pearlwort_ar", "kingdom": "plantae", "category": "flower", "name_zh": "南极漆姑草", "name_en": "Antarctic Pearlwort", "scientific": "Colobanthus quitensis", "fact_zh": "南极另一种开花植物，长得像小绿垫子。" },
+    { "id": "antarctic_moss_ar", "kingdom": "plantae", "category": "moss", "name_zh": "南极苔藓", "name_en": "Antarctic Moss", "fact_zh": "在南极短暂的夏天里快速生长。" },
+    { "id": "antarctic_lichen_ar", "kingdom": "fungi", "category": "lichen", "name_zh": "南极地衣", "name_en": "Antarctic Lichen", "fact_zh": "地衣不是植物，而是真菌和藻类一起生活的伙伴。" }
+  ]
+}

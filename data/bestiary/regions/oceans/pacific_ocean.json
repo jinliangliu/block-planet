@@ -1,0 +1,20 @@
+{
+  "id": "pacific_ocean",
+  "name_zh": "太平洋",
+  "name_en": "Pacific Ocean",
+  "type": "ocean",
+  "entries": [
+    { "id": "blue_whale", "kingdom": "animalia", "category": "sea_animal", "name_zh": "蓝鲸", "name_en": "Blue Whale", "scientific": "Balaenoptera musculus", "fact_zh": "地球上最大的动物，心脏像一辆小汽车那么大。" },
+    { "id": "humpback_whale", "kingdom": "animalia", "category": "sea_animal", "name_zh": "座头鲸", "name_en": "Humpback Whale", "scientific": "Megaptera novaeangliae", "fact_zh": "会唱复杂的歌，每年长途迁徙。" },
+    { "id": "orca", "kingdom": "animalia", "category": "sea_animal", "name_zh": "虎鲸", "name_en": "Orca", "scientific": "Orcinus orca", "fact_zh": "海洋顶级掠食者，群体合作捕猎。" },
+    { "id": "bottlenose_dolphin", "kingdom": "animalia", "category": "sea_animal", "name_zh": "宽吻海豚", "name_en": "Bottlenose Dolphin", "scientific": "Tursiops truncatus", "fact_zh": "非常聪明，会用回声定位。" },
+    { "id": "great_white_shark", "kingdom": "animalia", "category": "fish", "name_zh": "大白鲨", "name_en": "Great White Shark", "scientific": "Carcharodon carcharias", "fact_zh": "嗅觉极其灵敏，能闻到很远处的血腥味。" },
+    { "id": "whale_shark", "kingdom": "animalia", "category": "fish", "name_zh": "鲸鲨", "name_en": "Whale Shark", "scientific": "Rhincodon typus", "fact_zh": "世界上最大的鱼，只吃浮游生物。" },
+    { "id": "green_sea_turtle", "kingdom": "animalia", "category": "sea_animal", "name_zh": "绿海龟", "name_en": "Green Sea Turtle", "scientific": "Chelonia mydas", "fact_zh": "会回到自己出生的海滩产卵。" },
+    { "id": "sea_otter", "kingdom": "animalia", "category": "sea_animal", "name_zh": "海獭", "name_en": "Sea Otter", "scientific": "Enhydra lutris", "fact_zh": "仰泳时把石头放在肚子上敲开贝壳。" },
+    { "id": "pacific_salmon", "kingdom": "animalia", "category": "fish", "name_zh": "太平洋鲑鱼", "name_en": "Pacific Salmon", "scientific": "Oncorhynchus", "fact_zh": "逆流而上回到出生地产卵，被称为洄游。" },
+    { "id": "giant_kelp", "kingdom": "plantae", "category": "algae", "name_zh": "巨藻", "name_en": "Giant Kelp", "scientific": "Macrocystis pyrifera", "fact_zh": "能长到60米长，是海獭的家。" },
+    { "id": "seagrass_pacific", "kingdom": "plantae", "category": "seagrass", "name_zh": "海草", "name_en": "Seagrass", "scientific": "Zostera", "fact_zh": "海草是长在海底的植物，儒艮和海龟爱吃。" },
+    { "id": "coral_pacific", "kingdom": "animalia", "category": "sea_animal", "name_zh": "珊瑚", "name_en": "Coral", "scientific": "Anthozoa", "fact_zh": "珊瑚看起来像石头，其实是很多小动物住在一起。" }
+  ]
+}

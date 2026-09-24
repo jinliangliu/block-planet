@@ -1,0 +1,58 @@
+{
+  "id": "block_planet_bestiary",
+  "name_zh": "Block Planet 星球生物图鉴",
+  "name_en": "Block Planet Bestiary",
+  "version": 1,
+  "kingdoms": [
+    {
+      "id": "animalia", "name_zh": "动物", "name_en": "Animals", "icon": "paw", "color": "#F4A261",
+      "children": [
+        { "id": "mammal", "name_zh": "哺乳动物", "name_en": "Mammals", "icon": "paw", "color": "#E76F51" },
+        { "id": "bird", "name_zh": "鸟类", "name_en": "Birds", "icon": "bird", "color": "#2A9D8F" },
+        { "id": "reptile", "name_zh": "爬行动物", "name_en": "Reptiles", "icon": "lizard", "color": "#6A994E" },
+        { "id": "amphibian", "name_zh": "两栖动物", "name_en": "Amphibians", "icon": "frog", "color": "#80B918" },
+        { "id": "fish", "name_zh": "鱼类", "name_en": "Fish", "icon": "fish", "color": "#219EBC" },
+        { "id": "insect", "name_zh": "昆虫", "name_en": "Insects", "icon": "bug", "color": "#BC6C25" },
+        { "id": "sea_animal", "name_zh": "海洋动物", "name_en": "Sea Animals", "icon": "shell", "color": "#0077B6" }
+      ]
+    },
+    {
+      "id": "plantae", "name_zh": "植物", "name_en": "Plants", "icon": "leaf", "color": "#90BE6D",
+      "children": [
+        { "id": "tree", "name_zh": "大树", "name_en": "Trees", "icon": "tree", "color": "#2D6A4F" },
+        { "id": "shrub", "name_zh": "灌木", "name_en": "Shrubs", "icon": "bush", "color": "#40916C" },
+        { "id": "grass", "name_zh": "草", "name_en": "Grasses", "icon": "grass", "color": "#74C69D" },
+        { "id": "flower", "name_zh": "花", "name_en": "Flowers", "icon": "flower", "color": "#F28482" },
+        { "id": "fern", "name_zh": "蕨类", "name_en": "Ferns", "icon": "fern", "color": "#52B788" },
+        { "id": "moss", "name_zh": "苔藓", "name_en": "Mosses", "icon": "moss", "color": "#95D5B2" },
+        { "id": "vine", "name_zh": "藤本", "name_en": "Vines", "icon": "vine", "color": "#588157" },
+        { "id": "algae", "name_zh": "藻类", "name_en": "Algae", "icon": "water", "color": "#48CAE4" },
+        { "id": "seagrass", "name_zh": "海草", "name_en": "Seagrass", "icon": "water", "color": "#00B4D8" }
+      ]
+    },
+    {
+      "id": "fungi", "name_zh": "真菌", "name_en": "Fungi", "icon": "mushroom", "color": "#CD9777",
+      "children": [
+        { "id": "mushroom", "name_zh": "蘑菇", "name_en": "Mushrooms", "icon": "mushroom", "color": "#A47148" },
+        { "id": "lichen", "name_zh": "地衣", "name_en": "Lichen", "icon": "lichen", "color": "#B08968" },
+        { "id": "mold", "name_zh": "霉菌", "name_en": "Molds", "icon": "mold", "color": "#9C6644" }
+      ]
+    }
+  ],
+  "region_files": [
+    "res://data/bestiary/regions/continents/asia.json",
+    "res://data/bestiary/regions/continents/europe.json",
+    "res://data/bestiary/regions/continents/africa.json",
+    "res://data/bestiary/regions/continents/north_america.json",
+    "res://data/bestiary/regions/continents/south_america.json",
+    "res://data/bestiary/regions/continents/oceania.json",
+    "res://data/bestiary/regions/continents/antarctica.json",
+    "res://data/bestiary/regions/oceans/pacific_ocean.json",
+    "res://data/bestiary/regions/oceans/atlantic_ocean.json",
+    "res://data/bestiary/regions/oceans/indian_ocean.json",
+    "res://data/bestiary/regions/oceans/arctic_ocean.json",
+    "res://data/bestiary/regions/polar/arctic_region.json",
+    "res://data/bestiary/regions/polar/antarctic_region.json"
+  ],
+  "quiz_file": "res://data/bestiary/quiz.json"
+}

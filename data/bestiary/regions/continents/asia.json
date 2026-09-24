@@ -1,0 +1,24 @@
+{
+  "id": "asia",
+  "name_zh": "亚洲",
+  "name_en": "Asia",
+  "type": "continent",
+  "entries": [
+    { "id": "giant_panda", "kingdom": "animalia", "category": "mammal", "name_zh": "大熊猫", "name_en": "Giant Panda", "scientific": "Ailuropoda melanoleuca", "fact_zh": "只生活在中国的竹林里，是中国的国宝。" },
+    { "id": "asian_elephant", "kingdom": "animalia", "category": "mammal", "name_zh": "亚洲象", "name_en": "Asian Elephant", "scientific": "Elephas maximus", "fact_zh": "耳朵比非洲象小，只有部分雄性长象牙。" },
+    { "id": "bengal_tiger", "kingdom": "animalia", "category": "mammal", "name_zh": "孟加拉虎", "name_en": "Bengal Tiger", "scientific": "Panthera tigris tigris", "fact_zh": "主要生活在印度和孟加拉国的森林里。" },
+    { "id": "snow_leopard", "kingdom": "animalia", "category": "mammal", "name_zh": "雪豹", "name_en": "Snow Leopard", "scientific": "Panthera uncia", "fact_zh": "生活在高山雪线附近，尾巴又长又粗。" },
+    { "id": "golden_monkey", "kingdom": "animalia", "category": "mammal", "name_zh": "金丝猴", "name_en": "Golden Snub-nosed Monkey", "scientific": "Rhinopithecus roxellana", "fact_zh": "长着蓝色的脸和金色的长毛，只生活在中国的高山森林里。" },
+    { "id": "orangutan", "kingdom": "animalia", "category": "mammal", "name_zh": "红毛猩猩", "name_en": "Orangutan", "scientific": "Pongo", "fact_zh": "生活在东南亚雨林，会用树叶做雨伞。" },
+    { "id": "bactrian_camel", "kingdom": "animalia", "category": "mammal", "name_zh": "双峰驼", "name_en": "Bactrian Camel", "scientific": "Camelus bactrianus", "fact_zh": "有两个驼峰，生活在亚洲的沙漠和草原。" },
+    { "id": "komodo_dragon", "kingdom": "animalia", "category": "reptile", "name_zh": "科莫多巨蜥", "name_en": "Komodo Dragon", "scientific": "Varanus komodoensis", "fact_zh": "世界上最大的蜥蜴，只生活在印度尼西亚的科莫多岛。" },
+    { "id": "japanese_crane", "kingdom": "animalia", "category": "bird", "name_zh": "丹顶鹤", "name_en": "Red-crowned Crane", "scientific": "Grus japonensis", "fact_zh": "头顶有一块红色皮肤，是长寿的象征。" },
+    { "id": "crested_ibis", "kingdom": "animalia", "category": "bird", "name_zh": "朱鹮", "name_en": "Crested Ibis", "scientific": "Nipponia nippon", "fact_zh": "曾经被认为已经灭绝，后来在中国重新被发现，现在数量慢慢多起来了。" },
+    { "id": "bamboo", "kingdom": "plantae", "category": "grass", "name_zh": "竹子", "name_en": "Bamboo", "scientific": "Bambusoideae", "fact_zh": "竹子是长得最快的植物之一，也是大熊猫的主要食物。" },
+    { "id": "tea_plant", "kingdom": "plantae", "category": "shrub", "name_zh": "茶树", "name_en": "Tea Plant", "scientific": "Camellia sinensis", "fact_zh": "茶叶来自茶树的嫩叶，亚洲很多地方都种茶。" },
+    { "id": "ginkgo", "kingdom": "plantae", "category": "tree", "name_zh": "银杏", "name_en": "Ginkgo", "scientific": "Ginkgo biloba", "fact_zh": "被称为活化石，秋天叶子会变成金黄色。" },
+    { "id": "lotus", "kingdom": "plantae", "category": "flower", "name_zh": "荷花", "name_en": "Lotus", "scientific": "Nelumbo nucifera", "fact_zh": "长在池塘里，叶子和花能浮在水面上。" },
+    { "id": "sakura", "kingdom": "plantae", "category": "tree", "name_zh": "樱花", "name_en": "Cherry Blossom", "scientific": "Prunus serrulata", "fact_zh": "春天开花，日本有赏樱的传统。" },
+    { "id": "ginseng", "kingdom": "plantae", "category": "grass", "name_zh": "人参", "name_en": "Ginseng", "scientific": "Panax ginseng", "fact_zh": "一种有名的药用植物，长在亚洲的森林里。" }
+  ]
+}

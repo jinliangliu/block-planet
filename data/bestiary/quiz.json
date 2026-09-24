@@ -1,0 +1,213 @@
+{
+  "quiz": [
+	{
+	  "id": "q_polar_001",
+	  "type": "true_false",
+	  "question_zh": "北极熊和企鹅能住在一起吗？",
+	  "question_en": "Can polar bears and penguins live together?",
+	  "options": ["能", "不能"],
+	  "answer_zh": "不能",
+	  "answer_en": "No",
+	  "explain_zh": "北极熊住在北极，企鹅住在南极，它们相隔整个地球。",
+	  "explain_en": "Polar bears live in the Arctic, penguins in the Antarctic."
+	},
+	{
+	  "id": "q_polar_002",
+	  "type": "true_false",
+	  "question_zh": "南极有北极熊吗？",
+	  "question_en": "Are there polar bears in Antarctica?",
+	  "options": ["有", "没有"],
+	  "answer_zh": "没有",
+	  "answer_en": "No",
+	  "explain_zh": "南极没有北极熊，北极没有企鹅，这是最常见的极地误区。",
+	  "explain_en": "No polar bears in Antarctica, no penguins in the Arctic."
+	},
+	{
+	  "id": "q_polar_003",
+	  "type": "choice",
+	  "question_zh": "哪种鸟每年从北极飞到南极再飞回来？",
+	  "question_en": "Which bird migrates from the Arctic to the Antarctic every year?",
+	  "options": ["帝企鹅", "北极燕鸥", "雪鸮", "漂泊信天翁"],
+	  "answer_zh": "北极燕鸥",
+	  "answer_en": "Arctic Tern",
+	  "explain_zh": "北极燕鸥是迁徙距离最长的动物，一年能飞几万公里。",
+	  "explain_en": "The Arctic Tern makes the longest migration of any animal."
+	},
+	{
+	  "id": "q_polar_004",
+	  "type": "choice",
+	  "question_zh": "南极生态链的基石是什么？",
+	  "question_en": "What is the foundation of the Antarctic food chain?",
+	  "options": ["南极磷虾", "海带", "浮游鱼", "冰藻"],
+	  "answer_zh": "南极磷虾",
+	  "answer_en": "Antarctic Krill",
+	  "explain_zh": "鲸鱼、企鹅、海豹都吃南极磷虾，它是整个南极生态的核心。",
+	  "explain_en": "Whales, penguins and seals all feed on Antarctic krill."
+	},
+	{
+	  "id": "q_polar_005",
+	  "type": "choice",
+	  "question_zh": "北极地区有，南极地区没有的动物是？",
+	  "question_en": "Which animal lives in the Arctic but not the Antarctic?",
+	  "options": ["帝企鹅", "北极熊", "威德尔海豹", "南极贼鸥"],
+	  "answer_zh": "北极熊",
+	  "answer_en": "Polar Bear",
+	  "explain_zh": "北极熊只在北极，是北极的顶级掠食者。",
+	  "explain_en": "Polar bears are exclusive to the Arctic."
+	},
+	{
+	  "id": "q_ocean_001",
+	  "type": "choice",
+	  "question_zh": "世界上最大的动物是什么？",
+	  "question_en": "What is the largest animal in the world?",
+	  "options": ["非洲象", "蓝鲸", "鲸鲨", "长颈鹿"],
+	  "answer_zh": "蓝鲸",
+	  "answer_en": "Blue Whale",
+	  "explain_zh": "蓝鲸生活在海洋里，比任何恐龙都大。",
+	  "explain_en": "The blue whale is larger than any dinosaur."
+	},
+	{
+	  "id": "q_ocean_002",
+	  "type": "choice",
+	  "question_zh": "世界上最大的鱼是什么？",
+	  "question_en": "What is the largest fish in the world?",
+	  "options": ["大白鲨", "蓝鲸", "鲸鲨", "蓝鳍金枪鱼"],
+	  "answer_zh": "鲸鲨",
+	  "answer_en": "Whale Shark",
+	  "explain_zh": "鲸鲨虽然叫“鲸”，但它是鱼，只吃浮游生物。",
+	  "explain_en": "Despite its name, the whale shark is a fish that eats plankton."
+	},
+	{
+	  "id": "q_ocean_003",
+	  "type": "choice",
+	  "question_zh": "什么动物被称为“活化石”，曾被认为已经灭绝？",
+	  "question_en": "Which animal is called a living fossil and was once thought extinct?",
+	  "options": ["鲸鲨", "腔棘鱼", "儒艮", "独角鲸"],
+	  "answer_zh": "腔棘鱼",
+	  "answer_en": "Coelacanth",
+	  "explain_zh": "腔棘鱼在印度洋被发现，是几千万年前就存在的古老鱼类。",
+	  "explain_en": "The coelacanth was rediscovered in the Indian Ocean."
+	},
+	{
+	  "id": "q_ocean_004",
+	  "type": "choice",
+	  "question_zh": "被称为“海牛”，也是美人鱼传说的原型之一的是？",
+	  "question_en": "Which animal is called a sea cow and inspired mermaid legends?",
+	  "options": ["海獭", "海象", "儒艮", "海豹"],
+	  "answer_zh": "儒艮",
+	  "answer_en": "Dugong",
+	  "explain_zh": "儒艮生活在印度洋，吃海草，是温和的海洋哺乳动物。",
+	  "explain_en": "The dugong lives in the Indian Ocean and feeds on seagrass."
+	},
+	{
+	  "id": "q_ocean_005",
+	  "type": "true_false",
+	  "question_zh": "珊瑚是植物吗？",
+	  "question_en": "Are corals plants?",
+	  "options": ["是", "不是"],
+	  "answer_zh": "不是",
+	  "answer_en": "No",
+	  "explain_zh": "珊瑚是动物，由很多微小的珊瑚虫组成。",
+	  "explain_en": "Corals are animals made of tiny polyps."
+	},
+	{
+	  "id": "q_continent_001",
+	  "type": "choice",
+	  "question_zh": "考拉和袋鼠生活在哪个洲？",
+	  "question_en": "Which continent do koalas and kangaroos live on?",
+	  "options": ["非洲", "大洋洲", "南美洲", "亚洲"],
+	  "answer_zh": "大洋洲",
+	  "answer_en": "Oceania",
+	  "explain_zh": "考拉和袋鼠都是大洋洲特有的有袋类动物。",
+	  "explain_en": "Koalas and kangaroos are marsupials native to Oceania."
+	},
+	{
+	  "id": "q_continent_002",
+	  "type": "choice",
+	  "question_zh": "水豚和美洲豹生活在哪个洲？",
+	  "question_en": "Which continent do capybaras and jaguars live on?",
+	  "options": ["北美洲", "非洲", "南美洲", "欧洲"],
+	  "answer_zh": "南美洲",
+	  "answer_en": "South America",
+	  "explain_zh": "水豚和美洲豹都生活在南美的雨林和湿地。",
+	  "explain_en": "Capybaras and jaguars live in South American rainforests."
+	},
+	{
+	  "id": "q_continent_003",
+	  "type": "choice",
+	  "question_zh": "大熊猫主要吃什么？",
+	  "question_en": "What do giant pandas mainly eat?",
+	  "options": ["竹子", "鱼", "蚂蚁", "水果"],
+	  "answer_zh": "竹子",
+	  "answer_en": "Bamboo",
+	  "explain_zh": "大熊猫每天要吃很多竹子，但它其实是食肉目动物。",
+	  "explain_en": "Giant pandas eat mostly bamboo, though they belong to the order Carnivora."
+	},
+	{
+	  "id": "q_continent_004",
+	  "type": "choice",
+	  "question_zh": "非洲草原上跑得最快的动物是？",
+	  "question_en": "Which is the fastest animal on the African savanna?",
+	  "options": ["狮子", "猎豹", "斑马", "长颈鹿"],
+	  "answer_zh": "猎豹",
+	  "answer_en": "Cheetah",
+	  "explain_zh": "猎豹短跑可达每小时110公里，但只能坚持很短时间。",
+	  "explain_en": "Cheetahs can run up to 110 km/h in short bursts."
+	},
+	{
+	  "id": "q_continent_005",
+	  "type": "choice",
+	  "question_zh": "会下蛋的哺乳动物是？",
+	  "question_en": "Which mammals lay eggs?",
+	  "options": ["袋鼠和考拉", "鸭嘴兽和针鼹", "水豚和树懒", "海豹和鲸"],
+	  "answer_zh": "鸭嘴兽和针鼹",
+	  "answer_en": "Platypus and Echidna",
+	  "explain_zh": "鸭嘴兽和针鼹是单孔目动物，会下蛋但也是哺乳动物。",
+	  "explain_en": "Platypus and echidna are egg-laying mammals called monotremes."
+	},
+	{
+	  "id": "q_continent_006",
+	  "type": "choice",
+	  "question_zh": "下列哪种植物生活在南极地区？",
+	  "question_en": "Which plant lives in the Antarctic region?",
+	  "options": ["仙人掌", "南极发草", "桉树", "椰子树"],
+	  "answer_zh": "南极发草",
+	  "answer_en": "Antarctic Hair Grass",
+	  "explain_zh": "南极发草是南极仅有的两种开花植物之一。",
+	  "explain_en": "Antarctic hair grass is one of only two flowering plants in Antarctica."
+	},
+	{
+	  "id": "q_plant_001",
+	  "type": "true_false",
+	  "question_zh": "地衣是植物吗？",
+	  "question_en": "Is lichen a plant?",
+	  "options": ["是", "不是"],
+	  "answer_zh": "不是",
+	  "answer_en": "No",
+	  "explain_zh": "地衣是真菌和藻类一起生活的共生体，不算植物。",
+	  "explain_en": "Lichen is a symbiosis of fungi and algae, not a plant."
+	},
+	{
+	  "id": "q_plant_002",
+	  "type": "choice",
+	  "question_zh": "考拉最爱吃的植物是？",
+	  "question_en": "What is a koala's favorite food?",
+	  "options": ["竹子", "桉树叶", "桑叶", "松针"],
+	  "answer_zh": "桉树叶",
+	  "answer_en": "Eucalyptus leaves",
+	  "explain_zh": "考拉几乎只吃桉树叶，所以每天大部分时间在睡觉。",
+	  "explain_en": "Koalas eat almost only eucalyptus leaves."
+	},
+	{
+	  "id": "q_plant_003",
+	  "type": "choice",
+	  "question_zh": "可可豆来自哪种植物？",
+	  "question_en": "Which plant produces cocoa beans?",
+	  "options": ["咖啡树", "可可树", "茶树", "橡胶树"],
+	  "answer_zh": "可可树",
+	  "answer_en": "Cacao Tree",
+	  "explain_zh": "可可豆可以做成巧克力，原产于南美雨林。",
+	  "explain_en": "Cocoa beans come from the cacao tree, native to South America."
+	}
+  ]
+}

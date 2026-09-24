@@ -1,0 +1,18 @@
+{
+  "id": "arctic_ocean",
+  "name_zh": "北冰洋",
+  "name_en": "Arctic Ocean",
+  "type": "ocean",
+  "entries": [
+    { "id": "polar_bear", "kingdom": "animalia", "category": "mammal", "name_zh": "北极熊", "name_en": "Polar Bear", "scientific": "Ursus maritimus", "fact_zh": "在浮冰上捕海豹，是北极的顶级掠食者。" },
+    { "id": "walrus", "kingdom": "animalia", "category": "sea_animal", "name_zh": "海象", "name_en": "Walrus", "scientific": "Odobenus rosmarus", "fact_zh": "有两根长牙，用它们在冰上爬行。" },
+    { "id": "ringed_seal", "kingdom": "animalia", "category": "sea_animal", "name_zh": "环斑海豹", "name_en": "Ringed Seal", "scientific": "Pusa hispida", "fact_zh": "北极最常见的海豹，会在雪里挖洞产崽。" },
+    { "id": "bearded_seal", "kingdom": "animalia", "category": "sea_animal", "name_zh": "髯海豹", "name_en": "Bearded Seal", "scientific": "Erignathus barbatus", "fact_zh": "胡须又长又密，用来寻找海底食物。" },
+    { "id": "narwhal", "kingdom": "animalia", "category": "sea_animal", "name_zh": "独角鲸", "name_en": "Narwhal", "scientific": "Monodon monoceros", "fact_zh": "头上的长角其实是一颗牙齿。" },
+    { "id": "beluga_whale", "kingdom": "animalia", "category": "sea_animal", "name_zh": "白鲸", "name_en": "Beluga Whale", "scientific": "Delphinapterus leucas", "fact_zh": "全身白色，被称为海洋金丝雀，会唱歌。" },
+    { "id": "bowhead_whale", "kingdom": "animalia", "category": "sea_animal", "name_zh": "弓头鲸", "name_en": "Bowhead Whale", "scientific": "Balaena mysticetus", "fact_zh": "寿命可达200年，头骨坚硬能破冰。" },
+    { "id": "arctic_cod", "kingdom": "animalia", "category": "fish", "name_zh": "北极鳕鱼", "name_en": "Arctic Cod", "scientific": "Boreogadus saida", "fact_zh": "北极水域的重要鱼类，是海豹和鲸的食物。" },
+    { "id": "arctic_kelp", "kingdom": "plantae", "category": "algae", "name_zh": "北极海带", "name_en": "Arctic Kelp", "scientific": "Laminaria", "fact_zh": "在冰冷的海水里生长，是海胆的食物。" },
+    { "id": "arctic_phytoplankton", "kingdom": "plantae", "category": "algae", "name_zh": "北极浮游藻", "name_en": "Arctic Phytoplankton", "scientific": "Phytoplankton", "fact_zh": "小到看不见，却是整个海洋食物链的起点。" }
+  ]
+}

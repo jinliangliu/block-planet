@@ -1,0 +1,25 @@
+{
+  "id": "africa",
+  "name_zh": "非洲",
+  "name_en": "Africa",
+  "type": "continent",
+  "entries": [
+    { "id": "african_elephant", "kingdom": "animalia", "category": "mammal", "name_zh": "非洲象", "name_en": "African Elephant", "scientific": "Loxodonta", "fact_zh": "世界上最大的陆生动物，耳朵像大扇子。" },
+    { "id": "lion", "kingdom": "animalia", "category": "mammal", "name_zh": "狮子", "name_en": "Lion", "scientific": "Panthera leo", "fact_zh": "群居生活，雄狮有鬃毛。" },
+    { "id": "giraffe", "kingdom": "animalia", "category": "mammal", "name_zh": "长颈鹿", "name_en": "Giraffe", "scientific": "Giraffa", "fact_zh": "世界上最高的动物，舌头是紫黑色的。" },
+    { "id": "zebra", "kingdom": "animalia", "category": "mammal", "name_zh": "斑马", "name_en": "Zebra", "scientific": "Equus quagga", "fact_zh": "每只斑马的条纹都独一无二，像指纹一样。" },
+    { "id": "black_rhino", "kingdom": "animalia", "category": "mammal", "name_zh": "黑犀牛", "name_en": "Black Rhinoceros", "scientific": "Diceros bicornis", "fact_zh": "嘴唇呈钩状，适合吃灌木叶子。" },
+    { "id": "hippopotamus", "kingdom": "animalia", "category": "mammal", "name_zh": "河马", "name_en": "Hippopotamus", "scientific": "Hippopotamus amphibius", "fact_zh": "白天泡在水里，晚上上岸吃草。" },
+    { "id": "cheetah", "kingdom": "animalia", "category": "mammal", "name_zh": "猎豹", "name_en": "Cheetah", "scientific": "Acinonyx jubatus", "fact_zh": "陆地上跑得最快的动物，短跑可达每小时110公里。" },
+    { "id": "mountain_gorilla", "kingdom": "animalia", "category": "mammal", "name_zh": "山地大猩猩", "name_en": "Mountain Gorilla", "scientific": "Gorilla beringei beringei", "fact_zh": "生活在非洲高山森林，是最大的灵长类动物。" },
+    { "id": "meerkat", "kingdom": "animalia", "category": "mammal", "name_zh": "狐獴", "name_en": "Meerkat", "scientific": "Suricata suricatta", "fact_zh": "站岗放哨时用后腿站立，像小哨兵。" },
+    { "id": "african_ostrich", "kingdom": "animalia", "category": "bird", "name_zh": "非洲鸵鸟", "name_en": "Ostrich", "scientific": "Struthio camelus", "fact_zh": "世界上最大的鸟，不会飞但跑得很快。" },
+    { "id": "nile_crocodile", "kingdom": "animalia", "category": "reptile", "name_zh": "尼罗鳄", "name_en": "Nile Crocodile", "scientific": "Crocodylus niloticus", "fact_zh": "非洲最大的爬行动物，潜伏在河里等猎物。" },
+    { "id": "acacia", "kingdom": "plantae", "category": "tree", "name_zh": "金合欢树", "name_en": "Acacia", "scientific": "Acacia", "fact_zh": "非洲草原上常见，长颈鹿爱吃它的叶子。" },
+    { "id": "baobab", "kingdom": "plantae", "category": "tree", "name_zh": "猴面包树", "name_en": "Baobab", "scientific": "Adansonia", "fact_zh": "树干很粗，能储存很多水，被称为生命之树。" },
+    { "id": "aloe", "kingdom": "plantae", "category": "shrub", "name_zh": "芦荟", "name_en": "Aloe", "scientific": "Aloe", "fact_zh": "叶子厚厚的，里面有很多水分，耐旱。" },
+    { "id": "african_violet", "kingdom": "plantae", "category": "flower", "name_zh": "非洲紫罗兰", "name_en": "African Violet", "scientific": "Saintpaulia", "fact_zh": "原产于东非，是很受欢迎的室内花。" },
+    { "id": "elephant_grass", "kingdom": "plantae", "category": "grass", "name_zh": "象草", "name_en": "Elephant Grass", "scientific": "Pennisetum purpureum", "fact_zh": "非洲草原上的高草，大象爱吃。" },
+    { "id": "mangrove_africa", "kingdom": "plantae", "category": "tree", "name_zh": "红树", "name_en": "Mangrove", "scientific": "Rhizophora", "fact_zh": "长在非洲海岸，根泡在咸水里也不怕。" }
+  ]
+}

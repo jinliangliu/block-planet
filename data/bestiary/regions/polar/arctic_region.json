@@ -1,0 +1,22 @@
+{
+  "id": "arctic_region",
+  "name_zh": "北极地区",
+  "name_en": "Arctic Region",
+  "type": "polar",
+  "note_zh": "北冰洋及周边苔原，没有企鹅。",
+  "entries": [
+    { "id": "arctic_fox", "kingdom": "animalia", "category": "mammal", "name_zh": "北极狐", "name_en": "Arctic Fox", "scientific": "Vulpes lagopus", "fact_zh": "冬天毛变白，夏天变灰褐色，会换装。" },
+    { "id": "arctic_wolf", "kingdom": "animalia", "category": "mammal", "name_zh": "北极狼", "name_en": "Arctic Wolf", "scientific": "Canis lupus arctos", "fact_zh": "生活在极地苔原，成群捕猎。" },
+    { "id": "arctic_hare", "kingdom": "animalia", "category": "mammal", "name_zh": "北极兔", "name_en": "Arctic Hare", "scientific": "Lepus arcticus", "fact_zh": "冬天全身白色，夏天变灰蓝色。" },
+    { "id": "lemming", "kingdom": "animalia", "category": "mammal", "name_zh": "旅鼠", "name_en": "Lemming", "scientific": "Lemmus", "fact_zh": "北极苔原上的小老鼠，是很多动物的食物。" },
+    { "id": "muskox", "kingdom": "animalia", "category": "mammal", "name_zh": "麝牛", "name_en": "Muskox", "scientific": "Ovibos moschatus", "fact_zh": "长着厚厚的毛，遇到危险会围成一圈保护小牛。" },
+    { "id": "snowy_owl", "kingdom": "animalia", "category": "bird", "name_zh": "雪鸮", "name_en": "Snowy Owl", "scientific": "Bubo scandiacus", "fact_zh": "白色的猫头鹰，是《哈利·波特》里海德薇的原型。" },
+    { "id": "arctic_tern", "kingdom": "animalia", "category": "bird", "name_zh": "北极燕鸥", "name_en": "Arctic Tern", "scientific": "Sterna paradisaea", "fact_zh": "每年从北极飞到南极再飞回来，是迁徙冠军。" },
+    { "id": "greenland_shark", "kingdom": "animalia", "category": "fish", "name_zh": "格陵兰鲨", "name_en": "Greenland Shark", "scientific": "Somniosus microcephalus", "fact_zh": "寿命可达400年，是寿命最长的脊椎动物。" },
+    { "id": "arctic_moss", "kingdom": "plantae", "category": "moss", "name_zh": "北极苔藓", "name_en": "Arctic Moss", "scientific": "Calliergon", "fact_zh": "长在苔原上，是驯鹿的食物。" },
+    { "id": "arctic_willow", "kingdom": "plantae", "category": "shrub", "name_zh": "北极柳", "name_en": "Arctic Willow", "scientific": "Salix arctica", "fact_zh": "贴着地面生长，躲避寒冷的风。" },
+    { "id": "arctic_poppy", "kingdom": "plantae", "category": "flower", "name_zh": "北极罂粟", "name_en": "Arctic Poppy", "scientific": "Papaver radicatum", "fact_zh": "在极地夏天开花，花朵会朝着太阳转。" },
+    { "id": "cottongrass", "kingdom": "plantae", "category": "grass", "name_zh": "羊胡子草", "name_en": "Cottongrass", "scientific": "Eriophorum", "fact_zh": "顶着一团白色绒毛，像棉花糖。" },
+    { "id": "arctic_lichen", "kingdom": "fungi", "category": "lichen", "name_zh": "北极地衣", "name_en": "Arctic Lichen", "fact_zh": "地衣是真菌和藻类一起生活的伙伴，驯鹿冬天吃它。" }
+  ]
+}

@@ -30,6 +30,7 @@ var _mode_label: Label
 var _map_name_label: Label
 var _map_selector: MapSelector
 var _manual: ManualPanel
+var _bestiary: BestiaryUI
 var _quest_panel: QuestPanel
 var _inventory_panel: InventoryPanel
 var _toast_label: Label
@@ -112,6 +113,7 @@ func _build() -> void:
 	_build_smelt_panel(root)
 	_build_minimap(root)
 	_build_manual(root)
+	_build_bestiary(root)
 	_build_inventory_panel(root)
 	_build_quest_panel(root)
 	_build_toast(root)
@@ -132,6 +134,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and not event.echo \
 				and (event.keycode == KEY_ESCAPE or event.keycode == KEY_F1):
 			close_manual()
+			get_viewport().set_input_as_handled()
+		return
+	# 生物图鉴同为模态窗口：ESC / F2 关闭，其余热键让位。
+	if _bestiary != null and _bestiary.is_open():
+		if event is InputEventKey and event.pressed and not event.echo \
+				and (event.keycode == KEY_ESCAPE or event.keycode == KEY_F2):
+			close_bestiary()
 			get_viewport().set_input_as_handled()
 		return
 	# 任务面板为模态窗口：ESC / J 关闭，其余热键让位。
@@ -155,6 +164,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			open_map_selector()
 		elif event.is_action_pressed("toggle_manual"):
 			open_manual()
+		elif event.is_action_pressed("toggle_bestiary"):
+			open_bestiary()
 		elif event.is_action_pressed("toggle_quests"):
 			open_quest_panel()
 		elif event.keycode == KEY_ESCAPE and _box_overlay != null and _box_overlay.visible:
@@ -349,6 +360,13 @@ func _build_action_buttons(root: Control) -> void:
 	smelt_button.focus_mode = Control.FOCUS_NONE
 	smelt_button.pressed.connect(_toggle_smelt_panel)
 	_anchor_bottom_right(root, smelt_button, 400.0, 138.0)
+
+	var bestiary_button := Button.new()
+	bestiary_button.text = "图鉴"
+	bestiary_button.custom_minimum_size = Vector2(76, 76)
+	bestiary_button.focus_mode = Control.FOCUS_NONE
+	bestiary_button.pressed.connect(func(): open_bestiary())
+	_anchor_bottom_right(root, bestiary_button, 486.0, 138.0)
 
 
 func _build_hotbar(root: Control) -> void:
@@ -1542,6 +1560,7 @@ func _build_map_selector(root: Control) -> void:
 	_map_selector = MapSelector.new()
 	_map_selector.region_entered.connect(_on_region_entered)
 	_map_selector.closed.connect(_on_region_closed)
+	_map_selector.bestiary_requested.connect(_on_map_bestiary_requested)
 	root.add_child(_map_selector)
 
 
@@ -1627,6 +1646,7 @@ func _any_overlay_open() -> bool:
 		or (_trade_overlay != null and _trade_overlay.visible) \
 		or (_smelt_overlay != null and _smelt_overlay.visible) \
 		or (_manual != null and _manual.is_open()) \
+		or (_bestiary != null and _bestiary.is_open()) \
 		or (_quest_panel != null and _quest_panel.is_open())
 
 
@@ -1652,6 +1672,37 @@ func _on_manual_closed() -> void:
 		or (_smelt_overlay != null and _smelt_overlay.visible)
 	if not overlay_open and not DisplayServer.is_touchscreen_available():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## 生物图鉴：阅读 + 问答型窗口，行为与说明书一致（不冻结玩家物理）。
+##   atlas_id 给定时预置该世界区域的地区筛选——地图页的「看看这里的生物」走这条。
+func _build_bestiary(root: Control) -> void:
+	_bestiary = BestiaryUI.new()
+	_bestiary.closed.connect(_on_manual_closed)
+	root.add_child(_bestiary)
+
+
+func open_bestiary(atlas_id: int = -1) -> void:
+	if _bestiary == null:
+		return
+	if atlas_id >= 0:
+		_bestiary.open_for_atlas_region(atlas_id)
+	else:
+		_bestiary.open()
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_bestiary() -> void:
+	if _bestiary == null:
+		return
+	_bestiary.close()
+
+
+## 地图介绍页 → 图鉴：先关掉地图选择器（它会解除玩家冻结），再打开图鉴。
+func _on_map_bestiary_requested(region_id: int) -> void:
+	close_map_selector()
+	open_bestiary(region_id)
 
 
 ## 任务与成就面板：模态窗口，冻结玩家（同地图选择器）。

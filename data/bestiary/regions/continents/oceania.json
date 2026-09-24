@@ -1,0 +1,22 @@
+{
+  "id": "oceania",
+  "name_zh": "大洋洲",
+  "name_en": "Oceania",
+  "type": "continent",
+  "entries": [
+    { "id": "kangaroo", "kingdom": "animalia", "category": "mammal", "name_zh": "袋鼠", "name_en": "Kangaroo", "scientific": "Macropus", "fact_zh": "用尾巴保持平衡，跳跃前进，是有袋类动物。" },
+    { "id": "koala", "kingdom": "animalia", "category": "mammal", "name_zh": "考拉", "name_en": "Koala", "scientific": "Phascolarctos cinereus", "fact_zh": "只吃桉树叶，每天睡18到22小时。" },
+    { "id": "platypus", "kingdom": "animalia", "category": "mammal", "name_zh": "鸭嘴兽", "name_en": "Platypus", "scientific": "Ornithorhynchus anatinus", "fact_zh": "会下蛋的哺乳动物，嘴巴像鸭子，尾巴像海狸。" },
+    { "id": "echidna", "kingdom": "animalia", "category": "mammal", "name_zh": "针鼹", "name_en": "Echidna", "scientific": "Tachyglossus aculeatus", "fact_zh": "身上有刺，也会下蛋，和鸭嘴兽是近亲。" },
+    { "id": "tasmanian_devil", "kingdom": "animalia", "category": "mammal", "name_zh": "袋獾", "name_en": "Tasmanian Devil", "scientific": "Sarcophilus harrisii", "fact_zh": "只生活在塔斯马尼亚，叫声很吓人。" },
+    { "id": "emu", "kingdom": "animalia", "category": "bird", "name_zh": "鸸鹋", "name_en": "Emu", "scientific": "Dromaius novaehollandiae", "fact_zh": "世界上第二高的鸟，不会飞但跑得很快。" },
+    { "id": "cassowary", "kingdom": "animalia", "category": "bird", "name_zh": "食火鸡", "name_en": "Cassowary", "scientific": "Casuarius", "fact_zh": "头顶有盔，被称为世界上最危险的鸟之一。" },
+    { "id": "kiwi", "kingdom": "animalia", "category": "bird", "name_zh": "几维鸟", "name_en": "Kiwi", "scientific": "Apteryx", "fact_zh": "新西兰的国鸟，不会飞，鼻孔长在喙尖。" },
+    { "id": "great_barrier_reef_turtle", "kingdom": "animalia", "category": "sea_animal", "name_zh": "绿海龟", "name_en": "Green Sea Turtle", "scientific": "Chelonia mydas", "fact_zh": "大堡礁常见，会回到出生的海滩产卵。" },
+    { "id": "eucalyptus", "kingdom": "plantae", "category": "tree", "name_zh": "桉树", "name_en": "Eucalyptus", "scientific": "Eucalyptus", "fact_zh": "考拉的食物，叶子有特殊香味。" },
+    { "id": "wattle", "kingdom": "plantae", "category": "tree", "name_zh": "金合欢", "name_en": "Wattle", "scientific": "Acacia", "fact_zh": "澳大利亚的国花，开黄色绒球花。" },
+    { "id": "bottlebrush", "kingdom": "plantae", "category": "shrub", "name_zh": "红千层", "name_en": "Bottlebrush", "scientific": "Callistemon", "fact_zh": "花像红色的瓶刷，鹦鹉喜欢来吸蜜。" },
+    { "id": "waratah", "kingdom": "plantae", "category": "flower", "name_zh": "红火球帝王花", "name_en": "Waratah", "scientific": "Telopea speciosissima", "fact_zh": "澳大利亚新南威尔士州的州花，红色球状。" },
+    { "id": "tree_fern", "kingdom": "plantae", "category": "fern", "name_zh": "树蕨", "name_en": "Tree Fern", "scientific": "Cyathea", "fact_zh": "长得像树一样的蕨类，新西兰和澳大利亚常见。" }
+  ]
+}
