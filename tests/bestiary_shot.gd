@@ -31,7 +31,13 @@ func _run() -> void:
 	var panel: BestiaryUI = hud._bestiary
 	for i in range(20):
 		await get_tree().process_frame
+	# 等微缩图渲染队列排空：175 张离屏渲染要好几百帧，不等的话截下来全是占位色块。
+	var waits := 0
+	while panel._thumbs.pending_count() > 0 and waits < 1200:
+		await get_tree().process_frame
+		waits += 1
 	await RenderingServer.frame_post_draw
+	print("BESTIARY_THUMBS rendered=%d waited=%d frames" % [panel._thumbs.cache_size(), waits])
 	get_viewport().get_texture().get_image().save_png(_shot_path("bestiary_shot_all.png"))
 
 	# 第二张：筛到「动物 / 哺乳动物」并点开一张卡片，弹出居中预览卡（3D 模型）。
@@ -50,6 +56,35 @@ func _run() -> void:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shot_path("bestiary_shot_filtered.png"))
+
+	# 第三张：替身模型——点开一个游戏里没有的物种，看程序化拼出来的 3D 造型。
+	panel._set_kingdom("")
+	panel._set_category("")
+	panel._region = ""
+	panel._rebuild_chips()
+	panel._refresh_grid()
+	panel._on_card_pressed("asian_elephant")
+	for i in range(14):
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(_shot_path("bestiary_shot_standin.png"))
+	panel._close_preview()
+	for i in range(6):
+		await get_tree().process_frame
+
+	# 第四张：悬停浮层——把光标挪到某张卡片上，浮出的 3D 模型实时自转。
+	var target: EntryCard = panel._cards.get("asian_elephant")
+	if target != null and target.visible:
+		Input.warp_mouse(Vector2i(target.get_global_rect().get_center()))
+		panel._on_card_hovered("asian_elephant")
+		for i in range(16):
+			await get_tree().process_frame
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(_shot_path("bestiary_shot_hover.png"))
+		panel._hide_hover()
+		for i in range(6):
+			await get_tree().process_frame
+
 
 	# 第三张：知识问答页（出题 + 答一题看讲解）。
 	panel._set_tab(BestiaryUI.Tab.QUIZ)

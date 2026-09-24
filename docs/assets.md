@@ -28,6 +28,8 @@
 | **图鉴分类树** | 界（动物/植物/真菌）→ 类（哺乳/鸟类/…）的中文名、图标、主色 | `manifest.json` → `kingdoms` | `data/bestiary/manifest.json` |
 | **图鉴题库** | 19 道题（极地/海洋/大洲/植物四主题，含讲解） | `data/bestiary/quiz.json` | 同上 |
 | **图鉴卡片与面板外观** | 卡片、详情栏、筛选芯片的程序化外观 | `EntryCard` 常量 + `BestiaryUI._*_style()` | `scripts/ui/entry_card.gd`、`bestiary_ui.gd` |
+| **图鉴 3D 微缩图** | 每张条目卡的 3D 缩略贴图（128×128 离屏拍一次、缓存复用） | `BestiaryThumbs` 异步队列 | `scripts/ui/bestiary_thumbs.gd` |
+| **图鉴 3D 模型** | 游戏内物种用真 `Mob` 模型；其余 154 种按界/类程序化拼装（19 类各一套），动物走自然毛色板 | `BestiaryModel.build()` + `ANIMAL_COATS` | `scripts/ui/bestiary_model.gd` |
 | 任务/问答/成就 | 新手任务链 8 环、题库、成就 | `QuestData._build()` | `scripts/core/quest_data.gd` |
 | 手册文案 | 说明书分页与每页状态栏提示 | `ManualPanel.PAGES` | `scripts/ui/manual_panel.gd` |
 | 地球外观 | 大洲掩码、配色、区域锚点 | `RegionAtlas.LAND_MASK / REGION_COLORS / REGION_ANCHORS` | `region_atlas.gd` |

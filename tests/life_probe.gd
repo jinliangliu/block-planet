@@ -1898,29 +1898,105 @@ func _run() -> void:
 	)
 	_check(panel._preview_layer.visible, "点卡片后弹出居中预览卡（而不是在底部显示说明）")
 	_check(
-		panel._preview_layer.visible and panel._preview_mobs.get_child_count() >= 1
-		and not panel._preview_silhouette.visible,
+		panel._preview_layer.visible
+		and panel._preview_stage.get_child_count() >= 1
+		and BestiaryModel.is_real_mob(panel._preview_stage.get_child(0)),
 		"游戏内物种的预览卡挂出真 3D 模型（大熊猫）",
 	)
 	panel._close_preview()
 	_check(not panel._preview_layer.visible, "预览卡可关闭")
-	# 任选一个不在游戏里的条目验证剪影兜底：遍历找第一个 mob_of_entry<0 的。
-	var non_game_id := ""
-	for e_value: Variant in BestiaryData.get_entries():
-		var e: Dictionary = e_value
-		if BestiaryData.mob_of_entry(e) < 0:
-			non_game_id = String(e.get("id", ""))
-			break
-	if non_game_id.is_empty():
-		_check(true, "（图鉴条目全部在游戏内，剪影兜底无样本可测）")
-	else:
-		panel._on_card_pressed(non_game_id)
-		await get_tree().process_frame
+	# S-6.5 每个「类」都要有程序化替身：174 条里只有 6 条能用真 Mob 模型，
+	# 其余全靠 BestiaryModel 按类拼装。这里逐类造一遍，任何一类漏了就会显出来。
+	var host := Node3D.new()
+	get_tree().root.add_child(host)
+	var thin: Array[String] = []
+	var built_classes := 0
+	# 合成一条属于该类的虚构条目，好让「类」本身被覆盖到——某些类（比如地衣）
+	# 暂时还没有任何物种，但工厂仍须支持它，将来加数据才不会开出空白卡。
+	for cat_value: Variant in BestiaryData.categories.keys():
+		var category_id := String(cat_value)
+		var sample := {
+			"id": "probe_" + category_id,
+			"kingdom": BestiaryData.category_kingdom(category_id),
+			"category": category_id,
+		}
+		var m := BestiaryModel.build(sample)
+		host.add_child(m)
+		BestiaryModel.hide_labels(m)
+		if _count_meshes(m) < 3:
+			thin.append("%s(%d)" % [category_id, _count_meshes(m)])
+		built_classes += 1
+		m.queue_free()
+	_check(
+		thin.is_empty() and built_classes >= 19,
+		"19 个类都能拼出程序化替身模型（薄弱：%s）" % _join_or_none(PackedStringArray(thin)),
+	)
+
+	# 取真模型与替身各一条，验证 normalize 的契约：
+	# 所有模型都缩放到同一包围盒并居中 —— 相机这才敢用固定参数取景。
+	var frames_ok := true
+	var frames_detail := ""
+	for sample_id in ["giant_panda", "asian_elephant"]:
+		var m2 := BestiaryModel.build(BestiaryData.get_entry(sample_id))
+		host.add_child(m2)
+		BestiaryModel.normalize(m2)
+		var boxes: Array[AABB] = []
+		BestiaryModel._collect_boxes(m2, boxes)
+		if boxes.is_empty():
+			frames_ok = false
+			frames_detail += "%s=空 " % sample_id
+			continue
+		var frame_box := boxes[0]
+		for i in range(1, boxes.size()):
+			frame_box = frame_box.merge(boxes[i])
+		var longest := maxf(maxf(frame_box.size.x, frame_box.size.y), frame_box.size.z)
+		var center := frame_box.get_center().length()
+		if absf(longest - BestiaryModel.FRAME_SIZE) > 0.002 or center > 0.05:
+			frames_ok = false
+		frames_detail += "%s=%.3f/中心%.3f " % [sample_id, longest, center]
+		m2.queue_free()
+	_check(frames_ok, "模型归一化到统一取景包围盒（%s目标 %.2f）" % [frames_detail, BestiaryModel.FRAME_SIZE])
+	host.queue_free()
+
+	# S-6.6 卡片微缩图：每条都有「占位底色 + 贴图层」两层，图到了就盖住占位。
+	var thumb_bad := 0
+	for card_value: Variant in panel._cards.values():
+		var c: EntryCard = card_value
+		if c._thumb == null or c._thumb_bg == null:
+			thumb_bad += 1
+	_check(thumb_bad == 0, "174 张卡片都带 3D 微缩图位（缺 %d 张）" % thumb_bad)
+	# headless（探针运行环境）没有渲染设备，渲染器应当自行停机而不是硬跑。
+	if panel._thumbs.is_enabled():
 		_check(
-			panel._preview_layer.visible and panel._preview_silhouette.visible,
-			"非游戏物种的预览卡退回界色剪影（%s）" % non_game_id,
+			panel._thumbs.pending_count() + panel._thumbs.cache_size() >= BestiaryData.get_entries().size(),
+			"微缩图渲染队列覆盖全部条目（待渲染 %d / 已缓存 %d）" % [
+				panel._thumbs.pending_count(), panel._thumbs.cache_size()
+			],
 		)
-		panel._close_preview()
+	else:
+		_check(true, "headless 无渲染设备时微缩图渲染器自行停机（卡片显示占位底色）")
+
+	# S-6.7 悬停预览：进入卡片浮出可旋转的 3D 模型，离开即收起并卸载模型。
+	panel._on_card_hovered("giant_panda")
+	await get_tree().process_frame
+	_check(
+		panel.is_hover_open()
+		and panel.hover_entry_id() == "giant_panda"
+		and panel._hover_stage.get_child_count() >= 1,
+		"鼠标悬停卡片弹出 3D 预览浮层（大熊猫）",
+	)
+	panel._on_card_hovered("asian_elephant")
+	await get_tree().process_frame
+	_check(
+		panel.hover_entry_id() == "asian_elephant" and panel._hover_stage.get_child_count() == 1,
+		"换悬停条目时旧模型被换掉（视口里始终只有一个）",
+	)
+	panel._hide_hover()
+	await get_tree().process_frame
+	_check(
+		not panel.is_hover_open() and panel._hover_stage.get_child_count() == 0,
+		"鼠标离开后悬停浮层收起并卸载模型",
+	)
 	panel._set_kingdom("")
 
 	# S-7 问答页：出题 → 答对计入进度 → 答错不计
@@ -2164,6 +2240,17 @@ func _check(cond: bool, label: String) -> void:
 ## 阶段 R 用：把异常清单拼成一句话（空则「无」）。
 func _join_or_none(items: PackedStringArray) -> String:
 	return "无" if items.is_empty() else ", ".join(items)
+
+
+## 阶段 S 用：递归数出一个模型里有多少个 MeshInstance3D。
+## 替身造型至少得有三五个零件才谈得上「看得出是个什么东西」。
+func _count_meshes(node: Node) -> int:
+	var total := 0
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			total += 1
+		total += _count_meshes(child)
+	return total
 
 
 ## 阶段 R 用：有成长链的物种数量。

@@ -3,7 +3,9 @@ extends Control
 ## 星球生物图鉴（F2）：两页签的模态窗口，配色与储物箱/说明书同色系。
 ##
 ##   图鉴页 —— 左栏三组筛选芯片（界 / 类 / 地区）+ 搜索框，右栏卡片网格；
-##             点击卡片弹出居中预览卡：游戏内物种配 3D 实体模型，其余配界色剪影。
+##             每张卡片左侧是 3D 渲染出的微缩图（BestiaryThumbs 后台排队拍，
+##             拍好一张补一张），鼠标悬停弹出实时旋转的 3D 预览，
+##             点击则在居中预览卡里查看完整资料。
 ##   问答页 —— data/bestiary/quiz.json 的题目打乱出题，答对计入 Progress
 ##             （沿用既有的「知识问答」成就与每 3 题发奖链路，不另建一套）。
 ##
@@ -60,10 +62,20 @@ var _detail_latin: Label
 var _detail_badges: HBoxContainer
 var _detail_fact: Label
 var _detail_game: Label
-var _preview_mobs: Node3D
-var _preview_silhouette: MeshInstance3D
+var _preview_stage: Node3D
 var _cards: Dictionary = {}
 var _selected_card: EntryCard
+
+## 缩略图渲染器：离屏一位一位地拍，拍好通过 thumbnail_ready 回吐。
+var _thumbs: BestiaryThumbs
+## 悬停预览浮层：挂在 UI 顶层，跟随鼠标右下，模型缓慢自转。
+var _hover_popup: PanelContainer
+var _hover_viewport: SubViewport
+var _hover_stage: Node3D
+var _hover_model: Node3D
+var _hover_name: Label
+var _hover_meta: Label
+var _hover_id := ""
 
 var _quiz_theme_label: Label
 var _quiz_question: Label
@@ -114,6 +126,7 @@ func close() -> void:
 	if not visible:
 		return
 	_close_preview()
+	_hide_hover()
 	visible = false
 	closed.emit()
 
@@ -165,6 +178,7 @@ func _build() -> void:
 
 	main.add_child(_build_status_bar())
 	_build_preview_popup()
+	_build_hover_popup()
 
 
 func _build_header() -> Control:
@@ -265,9 +279,9 @@ func _build_entry_page() -> Control:
 	return page
 
 
-## ── 预览卡：点击卡片弹出的居中浮层。左 3D 预览（游戏内物种放真模型，
-## 其余放界色剪影盒），右资料（名 / 学名 / 徽章 / 冷知识 / 游戏内指引）。
-## 点暗幕或 ✕ 关闭；不抢键盘焦点，Esc 仍由 HUD 统一处理关整个图鉴。
+## ── 预览卡：点击卡片弹出的居中浮层。左 3D 预览（BestiaryModel 出品：游戏内
+## 物种是真模型，其余是按界/类程序化搭的替身），右资料（名 / 学名 / 徽章 /
+## 冷知识 / 游戏内指引）。点暗幕或 ✕ 关闭；不抢键盘焦点，Esc 由 HUD 统一处理。
 func _build_preview_popup() -> void:
 	_preview_layer = Control.new()
 	_preview_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -305,38 +319,8 @@ func _build_preview_popup() -> void:
 	row.add_theme_constant_override("separation", 16)
 	card.add_child(row)
 
-	# 左：3D 预览视口（170×170），游戏内物种挂真模型，其余挂界色剪影。
-	var vpc := SubViewportContainer.new()
-	vpc.stretch = true
-	vpc.custom_minimum_size = Vector2(170, 170)
-	vpc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vpc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(vpc)
-	var viewport := SubViewport.new()
-	viewport.own_world_3d = true
-	viewport.transparent_bg = true
-	viewport.size = Vector2i(170, 170)
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	vpc.add_child(viewport)
-	var cam := Camera3D.new()
-	cam.position = Vector3(1.35, 1.2, 1.35)
-	viewport.add_child(cam)
-	cam.look_at(Vector3(0.0, 0.55, 0.0))
-	var light := DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-45.0, 30.0, 0.0)
-	viewport.add_child(light)
-	_preview_mobs = Node3D.new()
-	viewport.add_child(_preview_mobs)
-	_preview_silhouette = MeshInstance3D.new()
-	var sil_mesh := BoxMesh.new()
-	sil_mesh.size = Vector3(0.9, 0.9, 0.9)
-	var sil_mat := StandardMaterial3D.new()
-	sil_mat.albedo_color = Color(0.62, 0.47, 0.27)
-	sil_mesh.material = sil_mat
-	_preview_silhouette.mesh = sil_mesh
-	_preview_silhouette.rotation = Vector3(0.35, 0.6, 0.0)
-	_preview_silhouette.visible = false
-	_preview_mobs.add_child(_preview_silhouette)
+	# 左：3D 预览视口（170×170），模型由 BestiaryModel 现场造。
+	_preview_stage = _make_preview_stage(Vector2i(170, 170), row)
 
 	# 右：资料栏。
 	var column := VBoxContainer.new()
@@ -380,6 +364,160 @@ func _build_preview_popup() -> void:
 	_detail_game.add_theme_font_size_override("font_size", 13)
 	_detail_game.add_theme_color_override("font_color", GOOD_COLOR)
 	column.add_child(_detail_game)
+
+
+## 共用的 3D 小舞台：SubViewport + 固定取景相机 + 主/辅两盏灯 + 挂载点。
+## 相机敢用固定参数，是因为 BestiaryModel.normalize() 把任何物种都缩到同一个
+## 包围盒里——不需要为鲸和蘑菇分别调距离。
+func _make_preview_stage(size: Vector2i, parent: Control) -> Node3D:
+	var vpc := SubViewportContainer.new()
+	vpc.stretch = true
+	vpc.custom_minimum_size = Vector2(size)
+	vpc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vpc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	parent.add_child(vpc)
+
+	var viewport := SubViewport.new()
+	viewport.own_world_3d = true
+	viewport.transparent_bg = true
+	viewport.size = size
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vpc.add_child(viewport)
+
+	var cam := Camera3D.new()
+	cam.position = Vector3(1.45, 1.05, 1.45)
+	viewport.add_child(cam)
+	cam.look_at(Vector3(0.0, 0.0, 0.0))
+
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-42.0, 34.0, 0.0)
+	key.light_energy = 1.2
+	viewport.add_child(key)
+
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(28.0, -150.0, 0.0)
+	fill.light_energy = 0.45
+	viewport.add_child(fill)
+
+	var stage := Node3D.new()
+	viewport.add_child(stage)
+	return stage
+
+
+## ── 悬停预览：鼠标停在卡片上时，在光标右下浮出一个实时自转的 3D 模型。
+## 为什么要浮层而不是直接放大卡片里的微缩图：微缩图是拍好的静态贴图，
+## 转起来才看得出体积；浮层用一个共享视口，同一时刻只挂一个模型，开销恒定。
+func _build_hover_popup() -> void:
+	_hover_popup = PanelContainer.new()
+	_hover_popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_popup.visible = false
+	_hover_popup.z_index = 20
+	var style := StyleBoxFlat.new()
+	style.bg_color = PANEL_BG
+	style.border_color = PANEL_BORDER
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(10)
+	_hover_popup.add_theme_stylebox_override("panel", style)
+	add_child(_hover_popup)
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 3)
+	_hover_popup.add_child(column)
+
+	_hover_stage = _make_preview_stage(Vector2i(168, 168), column)
+
+	_hover_name = Label.new()
+	_hover_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_name.custom_minimum_size = Vector2(168.0, 0.0)
+	_hover_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hover_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hover_name.add_theme_font_size_override("font_size", 15)
+	_hover_name.add_theme_color_override("font_color", TITLE_COLOR)
+	column.add_child(_hover_name)
+
+	_hover_meta = Label.new()
+	_hover_meta.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_meta.custom_minimum_size = Vector2(168.0, 0.0)
+	_hover_meta.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hover_meta.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hover_meta.add_theme_font_size_override("font_size", 12)
+	_hover_meta.add_theme_color_override("font_color", BODY_COLOR)
+	column.add_child(_hover_meta)
+
+
+func _process(delta: float) -> void:
+	if _hover_model != null and is_instance_valid(_hover_model):
+		_hover_model.rotation.y += delta * 0.8
+	if _hover_popup != null and _hover_popup.visible:
+		_place_hover_popup()
+
+
+## 浮层跟随光标右下角；贴近屏幕右/下边时翻到另一侧，免得被裁掉一半。
+func _place_hover_popup() -> void:
+	var mouse := get_local_mouse_position()
+	var size := _hover_popup.size
+	var pos := mouse + Vector2(18.0, 18.0)
+	if pos.x + size.x > get_viewport_rect().size.x - 12.0:
+		pos.x = mouse.x - size.x - 18.0
+	if pos.y + size.y > get_viewport_rect().size.y - 12.0:
+		pos.y = mouse.y - size.y - 18.0
+	_hover_popup.position = pos
+
+
+func _on_card_hovered(entry_id: String) -> void:
+	if _tab != Tab.ENTRIES:
+		return
+	var entry := BestiaryData.get_entry(entry_id)
+	if entry.is_empty():
+		return
+	_show_hover(entry_id, entry)
+
+
+func _show_hover(entry_id: String, entry: Dictionary) -> void:
+	_hover_id = entry_id
+	_clear_hover_model()
+	var model := BestiaryModel.build(entry)
+	_hover_stage.add_child(model)
+	# 名牌在 add_child（触发 _ready）之后才存在，藏它必须放在入树之后。
+	BestiaryModel.hide_labels(model)
+	BestiaryModel.normalize(model)
+	_hover_model = model
+	_hover_name.text = "%s / %s" % [
+		String(entry.get("name_zh", "")),
+		String(entry.get("name_en", "")),
+	]
+	_hover_meta.text = "%s · %s" % [
+		BestiaryData.category_name(String(entry.get("category", ""))),
+		String(entry.get("region_name_zh", "")),
+	]
+	_hover_popup.visible = true
+	_place_hover_popup()
+
+
+func _hide_hover() -> void:
+	_hover_id = ""
+	if _hover_popup != null:
+		_hover_popup.visible = false
+	_clear_hover_model()
+
+
+## 换模型前先撤旧的：一次都清理干净，视口里就不会越点越挤。
+func _clear_hover_model() -> void:
+	if _hover_model == null:
+		return
+	if is_instance_valid(_hover_model):
+		_hover_model.queue_free()
+	_hover_model = null
+
+
+func is_hover_open() -> bool:
+	return _hover_popup != null and _hover_popup.visible
+
+
+func hover_entry_id() -> String:
+	return _hover_id
 
 
 func _close_preview() -> void:
@@ -492,13 +630,18 @@ func _on_bestiary_loaded() -> void:
 	_refresh_grid()
 
 
-## 卡片建一次：170+ 张卡片每张带三个子标签，反复重建会在切换筛选时明显卡顿。
+## 卡片建一次：170+ 张卡片每张带若干子标签，反复重建会在切换筛选时明显卡顿。
 func _build_cards() -> void:
 	if _grid == null:
 		return
 	for child in _grid.get_children():
 		child.queue_free()
 	_cards.clear()
+	if _thumbs == null:
+		_thumbs = BestiaryThumbs.new()
+		_thumbs.name = "Thumbs"
+		add_child(_thumbs)
+		_thumbs.thumbnail_ready.connect(_on_thumbnail_ready)
 	for entry_value: Variant in BestiaryData.get_entries():
 		var entry: Dictionary = entry_value
 		var card := EntryCard.new()
@@ -507,8 +650,22 @@ func _build_cards() -> void:
 			BestiaryData.mob_of_entry(entry) >= 0)
 		var entry_id := String(entry.get("id", ""))
 		card.pressed.connect(_on_card_pressed.bind(entry_id))
+		card.mouse_entered.connect(_on_card_hovered.bind(entry_id))
+		card.mouse_exited.connect(_hide_hover)
 		_grid.add_child(card)
 		_cards[entry_id] = card
+		# 缓存里已经有了（第二次打开图鉴）就立刻贴回去，不用再拍一遍。
+		var cached: Texture2D = _thumbs.cached(entry_id)
+		if cached != null:
+			card.set_thumbnail(cached)
+		_thumbs.request(entry_id)
+
+
+## 微缩图拍好后贴到对应卡片上。
+func _on_thumbnail_ready(entry_id: String, texture: Texture2D) -> void:
+	var card: EntryCard = _cards.get(entry_id)
+	if card != null and texture != null:
+		card.set_thumbnail(texture)
 
 
 func _rebuild_chips() -> void:
@@ -616,6 +773,9 @@ func _refresh_grid() -> void:
 	for entry_id: String in _cards:
 		var card: EntryCard = _cards[entry_id]
 		card.visible = visible_ids.has(entry_id)
+	# 未拍到的先让位给当前正在看的这批，滚到哪里都先有图。
+	if _thumbs != null:
+		_thumbs.prioritize(visible_ids.keys())
 	if _summary_label != null:
 		_summary_label.text = "筛选：%s · %s · %s · 命中 %d 种" % [
 			_filter_name(_kingdom, "全部界"),
@@ -683,25 +843,17 @@ func _show_detail(entry: Dictionary) -> void:
 		BestiaryData.category_color(String(entry.get("category", ""))))
 	_add_badge(String(entry.get("region_name_zh", "")), Color(0.35, 0.50, 0.62))
 
-	# 3D 预览：游戏内物种挂真模型（成体、关名牌），否则退回界色剪影盒。
+	# 3D 预览：所有人都有模型——游戏物种用真 Mob，其余用 BestiaryModel 的替身。
 	# 上一次的模型先撤走，避免多次点击后视口里叠一堆生物。
-	for child in _preview_mobs.get_children():
-		if child != _preview_silhouette:
-			_preview_mobs.remove_child(child)
-			child.queue_free()
+	for child in _preview_stage.get_children():
+		_preview_stage.remove_child(child)
+		child.queue_free()
 	var mob_type := BestiaryData.mob_of_entry(entry)
-	var show_sil := true
-	if mob_type >= 0:
-		var mob := Mob.new()
-		mob.setup(mob_type as Mob.MobType, null, null)
-		_preview_mobs.add_child(mob)
-		if mob.get("_nametag") != null:
-			(mob.get("_nametag") as Node3D).visible = false
-		show_sil = false
-	_preview_silhouette.visible = show_sil
-	if show_sil:
-		var mat := (_preview_silhouette.mesh as BoxMesh).material as StandardMaterial3D
-		mat.albedo_color = BestiaryData.kingdom_color(String(entry.get("kingdom", "")))
+	var model := BestiaryModel.build(entry)
+	_preview_stage.add_child(model)
+	# 名牌在 add_child（触发 _ready）之后才存在，藏它必须放在入树之后。
+	BestiaryModel.hide_labels(model)
+	BestiaryModel.normalize(model)
 
 	var extra := ""
 	if mob_type < 0:
@@ -742,6 +894,7 @@ func _add_badge(text: String, tint: Color) -> void:
 func _set_tab(tab: int) -> void:
 	_tab = clampi(tab, 0, 1)
 	_close_preview()
+	_hide_hover()
 	for i in _tab_buttons.size():
 		var style := _chip_style(CHIP_ACTIVE if i == _tab else CHIP_BG)
 		_tab_buttons[i].add_theme_stylebox_override("normal", style)
