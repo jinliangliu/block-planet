@@ -175,7 +175,7 @@ func _ready() -> void:
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 		btn.custom_minimum_size = Vector2(150, 40)
-		btn.add_theme_font_size_override("font_size", 17)
+		btn.add_theme_font_size_override("font_size", 16)
 		btn.add_theme_color_override("font_color", TITLE_COLOR)
 		btn.add_theme_color_override("font_hover_color", Color(0.20, 0.14, 0.06))
 		btn.add_theme_color_override("font_pressed_color", TITLE_COLOR)
@@ -195,7 +195,7 @@ func _ready() -> void:
 	columns.add_child(content)
 
 	_page_title = Label.new()
-	_page_title.add_theme_font_size_override("font_size", 24)
+	_page_title.add_theme_font_size_override("font_size", 23)
 	_page_title.add_theme_color_override("font_color", TITLE_COLOR)
 	content.add_child(_page_title)
 
@@ -206,7 +206,7 @@ func _ready() -> void:
 	_page_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_page_body.custom_minimum_size = Vector2(440, 0)
 	_page_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_page_body.add_theme_font_size_override("font_size", 18)
+	_page_body.add_theme_font_size_override("font_size", 17)
 	_page_body.add_theme_constant_override("line_spacing", 8)
 	_page_body.add_theme_color_override("font_color", BODY_COLOR)
 	content.add_child(_page_body)
@@ -233,14 +233,14 @@ func _ready() -> void:
 	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_status_label.add_theme_font_size_override("font_size", 14)
+	_status_label.add_theme_font_size_override("font_size", 13)
 	_status_label.add_theme_color_override("font_color", BODY_COLOR)
 	status_row.add_child(_status_label)
 
 	var keys_hint := Label.new()
 	keys_hint.text = "左右方向键翻页 · Esc 或 F1 关闭"
 	keys_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	keys_hint.add_theme_font_size_override("font_size", 13)
+	keys_hint.add_theme_font_size_override("font_size", 12)
 	keys_hint.add_theme_color_override("font_color", Color(BODY_COLOR, 0.7))
 	status_row.add_child(keys_hint)
 
