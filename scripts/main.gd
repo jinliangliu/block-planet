@@ -31,6 +31,10 @@ func _ready() -> void:
 		GameState.carried_inventory = null
 
 	_world.set_player(_player)
+	_player.day_night_ref = _day_night
+	# 村庄先于出生点生成：亚洲出生点锚定在村庄整平区内，扫描时读到的
+	# 必须是整平后的 GRASS+空气（set_block_deferred 的数据写入是同步的）。
+	_build_village()
 	var spawn_pos := _find_spawn_position()
 	_player.global_position = spawn_pos
 	_player.set_spawn_position(spawn_pos)
@@ -42,7 +46,6 @@ func _ready() -> void:
 	_mob_spawner.set_region(profile)
 	_player.died.connect(func(): Events.player_died.emit())
 	Events.region_entered.connect(_on_region_entered)
-	_build_village()
 
 	# 首次进入游戏先选地图；之后随时可用 M 键重新选择。
 	# 无头环境（探针 / CI）不自动弹出：模态界面会冻结玩家，阻塞自动化流程。
@@ -58,17 +61,41 @@ func _on_region_entered(region_id: int) -> void:
 
 
 ## 生成固定村庄与掠夺塔（含村民与掠夺者，挂载于本节点，不受昼夜清空管理）。
+## 每个区域建 3 座村庄：出生点旁一座（亚洲出生锚定该村），东西南各远处一座。
 func _build_village() -> void:
-	var builder := VillageBuilder.new()
-	builder.build(_world, _player, _day_night, self)
+	for offset: Vector3i in [
+		Vector3i.ZERO,
+		Vector3i(64, 0, 8),
+		Vector3i(8, 0, 64),
+	]:
+		var builder := VillageBuilder.new()
+		builder.build(_world, _player, _day_night, self, offset)
 
 
 ## 出生点：在出生列按真实方块向上扫描"两格空气 + 实心底"，双脚精确落在
 ## 实心底块顶面——胶囊高 1.8 m 恰占已验证的两格空气；任何悬空偏移都会
 ## 让身体上部嵌进头顶方块（如邻树树冠）。高度取样必须用出生列本身。
+##
+## 亚洲出生点锚定村庄整平区内的空地（广场西北侧空场），保证落地即见村庄；
+## 原默认出生 (8,8) 离村庄十余格且常被树木丘陵遮挡。锚点依次尝试，
+## 全部失败退回通用扫描 (8,8)。
 func _find_spawn_position() -> Vector3:
-	var x := 8
-	var z := 8
+	var anchors: Array[Vector2i] = [Vector2i(8, 8)]
+	if GameState.current_region == RegionAtlas.ASIA:
+		anchors = [
+			Vector2i(21, 25),  # 民居①与广场之间的空场
+			Vector2i(22, 20),  # 广场北侧空地
+			Vector2i(21, 21),
+			Vector2i(14, 26),  # 村庄西缘
+		]
+	for anchor: Vector2i in anchors:
+		var pos := _scan_spawn_column(anchor.x, anchor.y)
+		if pos != Vector3.ZERO:
+			return pos
+	return Vector3(8.5, float(_world.get_surface_height(8, 8)), 8.5)
+
+
+func _scan_spawn_column(x: int, z: int) -> Vector3:
 	var base_y := _world.get_surface_height(x, z)
 	for i in range(32):
 		var cell := Vector3i(x, base_y + i, z)
@@ -78,4 +105,4 @@ func _find_spawn_position() -> Vector3:
 			and _world.get_block(cell + Vector3i(0, -1, 0)) != BlockTypes.Block.AIR
 		):
 			return Vector3(x + 0.5, float(base_y + i), z + 0.5)
-	return Vector3(x + 0.5, float(base_y), z + 0.5)
+	return Vector3.ZERO

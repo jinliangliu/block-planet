@@ -62,8 +62,8 @@ func _run() -> void:
 		"猪属性：生命 8 / 掉落生猪排×2")
 	var wolf := Mob.new()
 	wolf.setup(Mob.MobType.WOLF, player, day_night)
-	_check(wolf.health == 7 and wolf.attack_damage == 2 and wolf.drop_item == BlockTypes.Block.AIR,
-		"狼属性：生命 7 / 攻击 2 / 无掉落")
+	_check(wolf.health == 7 and wolf.attack_damage == 1 and wolf.drop_item == BlockTypes.Block.AIR,
+		"狼属性：生命 7 / 攻击 1（调低）/ 无掉落")
 
 	var saw_pig := false
 	for i in range(200):
@@ -215,14 +215,35 @@ func _run() -> void:
 	var farm_o := VillageBuilder.FARM_ORIGIN
 	_check(world.get_block(Vector3i(farm_o.x, base_y, farm_o.z)) == BlockTypes.Block.FARMLAND,
 		"农田地块为耕地")
-	_check(world.get_block(Vector3i(farm_o.x + 1, base_y + 1, farm_o.z + 1)) == BlockTypes.Block.WHEAT_CROP,
-		"耕地上方种有小麦作物")
 	_check(world.get_block(Vector3i(farm_o.x + 3, base_y, farm_o.z + 3)) == BlockTypes.Block.WATER,
 		"农田中央一列为水")
 	_check(world.get_block(Vector3i(farm_o.x + 3, base_y + 1, farm_o.z + 3)) == BlockTypes.Block.AIR,
 		"水列上方不种作物")
 
-	var crop_cell := Vector3i(farm_o.x + 1, base_y + 1, farm_o.z + 1)
+	# 农田混种：扫整片田，统计四种作物齐全（小麦为主 + 三种新蔬菜）。
+	var crop_seen := {}
+	for x in range(6):
+		for z in range(6):
+			if x == 3:
+				continue
+			var b := world.get_block(Vector3i(farm_o.x + x, base_y + 1, farm_o.z + z))
+			if b in [BlockTypes.Block.WHEAT_CROP, BlockTypes.Block.CARROT_CROP,
+					BlockTypes.Block.POTATO_CROP, BlockTypes.Block.RADISH_CROP]:
+				crop_seen[b] = true
+	_check(crop_seen.size() == 4, "农田混种四种作物齐全（实际 %d 种）" % crop_seen.size())
+
+	# 找一株小麦收割，验证面包链路（新蔬菜掉落自身，见 BlockTypes.drop_for）。
+	var crop_cell := Vector3i.ZERO
+	for x in range(6):
+		for z in range(6):
+			if x == 3:
+				continue
+			var p := Vector3i(farm_o.x + x, base_y + 1, farm_o.z + z)
+			if world.get_block(p) == BlockTypes.Block.WHEAT_CROP:
+				crop_cell = p
+				break
+		if crop_cell != Vector3i.ZERO:
+			break
 	var wheat_before := player.inventory.count_item(ItemTypes.WHEAT)
 	player._finish_break(crop_cell, BlockTypes.Block.WHEAT_CROP)
 	_check(world.get_block(crop_cell) == BlockTypes.Block.AIR, "小麦作物可破坏")
@@ -1793,10 +1814,29 @@ func _run() -> void:
 				item_wrong.append("材料 %d" % item_id)
 				break
 	_check(
-		ItemTypes.TOOL_TYPE.size() == 26 and ItemTypes.ITEM_NAMES.size() == 25 and item_wrong.is_empty(),
+		ItemTypes.TOOL_TYPE.size() == 26 and ItemTypes.ITEM_NAMES.size() == 30 and item_wrong.is_empty(),
 		"工具 26 件四表齐、材料 %d 种三表齐（错项：%s）" % [
 			ItemTypes.ITEM_NAMES.size(), _join_or_none(item_wrong)
 		],
+	)
+
+	# R-9b 生活内容登记：床配方、蔬菜种植映射、可食用。
+	var bed_recipe := false
+	for r: Dictionary in ItemTypes.RECIPES:
+		if int(r["result"]) == BlockTypes.Block.BED:
+			bed_recipe = true
+	_check(bed_recipe, "羊毛+木板可合成床（配方已登记）")
+	_check(
+		ItemTypes.crop_of(ItemTypes.WHEAT) == BlockTypes.Block.WHEAT_CROP
+		and ItemTypes.crop_of(ItemTypes.CARROT) == BlockTypes.Block.CARROT_CROP
+		and ItemTypes.crop_of(ItemTypes.POTATO) == BlockTypes.Block.POTATO_CROP
+		and ItemTypes.crop_of(ItemTypes.RADISH) == BlockTypes.Block.RADISH_CROP,
+		"小麦/胡萝卜/土豆/白萝卜均可种在耕地（crop_of 映射）",
+	)
+	_check(
+		ItemTypes.is_food(ItemTypes.CARROT) and ItemTypes.food_value(ItemTypes.POTATO) > 0
+		and ItemTypes.is_food(ItemTypes.RADISH),
+		"新蔬菜胡萝卜/土豆/白萝卜可食用",
 	)
 
 	# R-10 区域图鉴卡片：字段齐、插画种类有画法

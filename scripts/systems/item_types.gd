@@ -73,6 +73,12 @@ const FEATHER := 222
 const FANG := 223
 # 弹药：弓需要消耗箭（创造模式不消耗）。
 const ARROW := 224
+# 生活用品：桶可装水饮水；胡萝卜/土豆/白萝卜为可种植的蔬菜作物。
+const BUCKET := 225
+const WATER_BUCKET := 226
+const CARROT := 227
+const POTATO := 228
+const RADISH := 229
 
 const TOOL_TYPE := {
 	WOOD_PICKAXE: "pickaxe",
@@ -249,6 +255,10 @@ const RECIPES := [
 	{"result": BlockTypes.Block.GLASS, "ingredients": {BlockTypes.Block.SAND: 2}},
 	{"result": BlockTypes.Block.CHEST, "ingredients": {BlockTypes.Block.WOOD: 6}},
 	{"result": BREAD, "ingredients": {WHEAT: 3}},
+	# 床：羊毛 + 木板（木板用木头代指），夜晚右键睡觉跳到清晨。
+	{"result": BlockTypes.Block.BED, "ingredients": {BlockTypes.Block.WOOL: 3, BlockTypes.Block.WOOD: 3}},
+	# 水桶：对着水右键装水，喝水回复体力。
+	{"result": BUCKET, "count": 1, "ingredients": {BlockTypes.Block.WOOD: 3}},
 	{"result": BlockTypes.Block.SMELTER, "ingredients": {BlockTypes.Block.COBBLESTONE: 8}},
 ]
 
@@ -289,6 +299,17 @@ const FOOD := {
 	RAW_FISH: 6,
 	RAW_SHRIMP: 4,
 	CRAB_MEAT: 5,
+	CARROT: 3,
+	POTATO: 4,
+	RADISH: 3,
+}
+
+# 蔬菜物品 → 对应的作物方块（在耕地上右键种植）。
+const CROP_PLANTABLE := {
+	WHEAT: BlockTypes.Block.WHEAT_CROP,
+	CARROT: BlockTypes.Block.CARROT_CROP,
+	POTATO: BlockTypes.Block.POTATO_CROP,
+	RADISH: BlockTypes.Block.RADISH_CROP,
 }
 
 # 非方块物品的名称（工具与方块之外的 ID）。
@@ -318,6 +339,11 @@ const ITEM_NAMES := {
 	FEATHER: "羽毛",
 	FANG: "獠牙",
 	ARROW: "箭",
+	BUCKET: "木桶",
+	WATER_BUCKET: "水桶",
+	CARROT: "胡萝卜",
+	POTATO: "土豆",
+	RADISH: "白萝卜",
 }
 
 const ITEM_SHORT_NAMES := {
@@ -346,6 +372,11 @@ const ITEM_SHORT_NAMES := {
 	FEATHER: "羽",
 	FANG: "牙",
 	ARROW: "箭",
+	BUCKET: "桶",
+	WATER_BUCKET: "水桶",
+	CARROT: "萝卜",
+	POTATO: "土豆",
+	RADISH: "萝",
 }
 
 # 非方块物品在掉落物/手持模型上使用的平涂颜色。
@@ -375,6 +406,11 @@ const ITEM_COLORS := {
 	FEATHER: Color(0.94, 0.94, 0.90),
 	FANG: Color(0.92, 0.90, 0.82),
 	ARROW: Color(0.66, 0.50, 0.30),
+	BUCKET: Color(0.62, 0.45, 0.25),
+	WATER_BUCKET: Color(0.30, 0.55, 0.85),
+	CARROT: Color(0.90, 0.55, 0.20),
+	POTATO: Color(0.80, 0.66, 0.38),
+	RADISH: Color(0.92, 0.93, 0.86),
 }
 
 # 工具微缩图/3D 预览用的按材质着色（木/石/青铜/铁/银/金）。
@@ -445,6 +481,12 @@ const ITEM_DESCRIPTIONS := {
 	IRON_FISHING_ROD: "更耐用的鱼竿，咬钩时机的容错更宽松。",
 	WOOD_BOW: "按住右键蓄力，松手射出箭，蓄得越满伤害越高。",
 	IRON_BOW: "射得更快也更耐用的弓，狩猎大型猎物更从容。",
+	BlockTypes.Block.BED: "夜晚右键睡觉，一觉睡到天亮。羊毛加木板合成。",
+	BUCKET: "对着水面右键装水。",
+	WATER_BUCKET: "右键喝水，恢复体力还回一点血。喝完变回空桶。",
+	CARROT: "可以生吃，也可以种在耕地上。",
+	POTATO: "饱腹感比胡萝卜强，也能种回地里。",
+	RADISH: "清脆的白萝卜，可食用可种植。",
 }
 
 # 村民交易配方：cost 为绿宝石数量，result/count 为产出。
@@ -586,6 +628,11 @@ static func is_food(id: int) -> bool:
 
 static func food_value(id: int) -> int:
 	return FOOD.get(id, 0)
+
+
+## 蔬菜/小麦物品对应的作物方块；不可种植返回 AIR。
+static func crop_of(id: int) -> int:
+	return CROP_PLANTABLE.get(id, BlockTypes.Block.AIR)
 
 
 ## 非方块、非工具的普通物品（肉/骨/线/锭/材料），用于掉落物与手持模型着色。

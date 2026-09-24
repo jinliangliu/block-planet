@@ -22,6 +22,9 @@ func _ready() -> void:
 	_block_material = StandardMaterial3D.new()
 	_block_material.albedo_texture = TextureAtlas.build_atlas_texture()
 	_block_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# 与世界图集材质一致：手持玻璃时中心透出背景（alpha scissor）。
+	_block_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	_block_material.alpha_scissor_threshold = 0.5
 
 
 func setup(player: Player) -> void:

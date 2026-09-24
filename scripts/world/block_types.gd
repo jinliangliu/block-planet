@@ -29,6 +29,10 @@ enum Block {
 	SNOW = 23,
 	IRON_ORE = 24,
 	GOLD_ORE = 25,
+	BED = 26,
+	CARROT_CROP = 27,
+	POTATO_CROP = 28,
+	RADISH_CROP = 29,
 }
 
 const NAMES := {
@@ -58,6 +62,10 @@ const NAMES := {
 	Block.SNOW: "雪块",
 	Block.IRON_ORE: "铁矿石",
 	Block.GOLD_ORE: "金矿石",
+	Block.BED: "床",
+	Block.CARROT_CROP: "胡萝卜",
+	Block.POTATO_CROP: "土豆",
+	Block.RADISH_CROP: "白萝卜",
 }
 
 const SOLID := {
@@ -87,6 +95,10 @@ const SOLID := {
 	Block.SNOW: true,
 	Block.IRON_ORE: true,
 	Block.GOLD_ORE: true,
+	Block.BED: true,
+	Block.CARROT_CROP: false,
+	Block.POTATO_CROP: false,
+	Block.RADISH_CROP: false,
 }
 
 const TRANSPARENT := {
@@ -116,6 +128,10 @@ const TRANSPARENT := {
 	Block.SNOW: false,
 	Block.IRON_ORE: false,
 	Block.GOLD_ORE: false,
+	Block.BED: false,
+	Block.CARROT_CROP: true,
+	Block.POTATO_CROP: true,
+	Block.RADISH_CROP: true,
 }
 
 # 每个方块的纹理瓦片：[顶面, 底面, 侧面]
@@ -145,6 +161,10 @@ const TILES := {
 	Block.SNOW: Vector3i(24, 24, 24),
 	Block.IRON_ORE: Vector3i(25, 25, 25),
 	Block.GOLD_ORE: Vector3i(26, 26, 26),
+	Block.BED: Vector3i(27, 5, 27),
+	Block.CARROT_CROP: Vector3i(28, 28, 28),
+	Block.POTATO_CROP: Vector3i(29, 29, 29),
+	Block.RADISH_CROP: Vector3i(30, 30, 30),
 }
 
 # 水生植物：生长在水中/水面的非固体装饰方块，徒手可采，可再放置。
@@ -195,6 +215,10 @@ const SHORT_NAMES := {
 	Block.SNOW: "雪",
 	Block.IRON_ORE: "铁",
 	Block.GOLD_ORE: "金",
+	Block.BED: "床",
+	Block.CARROT_CROP: "萝卜",
+	Block.POTATO_CROP: "土豆",
+	Block.RADISH_CROP: "萝",
 }
 
 # 可堆叠物品（方块/材料/食物）的每格上限。
@@ -226,6 +250,10 @@ const HARDNESS := {
 	Block.SNOW: 0.4,
 	Block.IRON_ORE: 4.5,
 	Block.GOLD_ORE: 5.0,
+	Block.BED: 0.4,
+	Block.CARROT_CROP: 0.1,
+	Block.POTATO_CROP: 0.1,
+	Block.RADISH_CROP: 0.1,
 }
 
 # 有效工具类型；空字符串表示徒手/任意工具即可。
@@ -255,6 +283,10 @@ const EFFECTIVE_TOOL := {
 	Block.LILY_PAD: "",
 	Block.LOTUS: "",
 	Block.SNOW: "shovel",
+	Block.BED: "axe",
+	Block.CARROT_CROP: "sickle",
+	Block.POTATO_CROP: "sickle",
+	Block.RADISH_CROP: "sickle",
 }
 
 # 采集该方块所需的最低工具等级（1 木 / 2 石 / 3 青铜 / 4 铁）。

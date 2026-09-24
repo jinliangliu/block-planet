@@ -51,6 +51,12 @@ const SWING_INTERVAL := 0.3
 # 防卡死：脚部与头部格均为实心且持续超过宽限帧数，判定嵌入地形并瞬间重生脱困。
 # 宽限 3 帧过滤传送/高速掠过的单帧误判，体感仍接近瞬间。
 const STUCK_GRACE_FRAMES := 3
+# 鱼群陪伴回血：身边 4m 内有鱼时每 5 秒回 1 点血（生命值不满才生效）。
+const FISH_HEAL_RADIUS := 4.0
+const FISH_HEAL_INTERVAL := 5.0
+# 饮用水恢复：解渴（饥饿）+ 少量生命。
+const DRINK_HUNGER := 4.0
+const DRINK_HEALTH := 1
 
 @export var flying := false
 
@@ -102,6 +108,10 @@ var _last_jump_ms := 0
 var _last_hunger_int := MAX_HUNGER
 var _stuck_frames := 0
 var _hurt_invuln := 0.0
+## 鱼群陪伴回血的计时器。
+var _fish_heal_timer := 0.0
+## 昼夜循环引用：睡觉跳过夜晚用（由 main 装配时注入）。
+var day_night_ref: DayNightCycle = null
 ## 防卡死累计脱困次数（探针/调试用）。
 var stuck_rescues := 0
 
@@ -205,11 +215,66 @@ func _end_use() -> void:
 ## 使用选中物品：手持食物且饥饿未满时优先食用，
 ## 其次与村民/酿灶台交互（打开交易面板），最后放置方块。
 func _use_selected() -> void:
+	if _use_bucket():
+		return
 	if _eat_selected():
 		return
 	if _interact_village():
 		return
 	_place_target()
+
+
+## 木桶/水桶逻辑：空桶对准水面装水；水桶右键饮水（解渴 + 少量回血）。
+## 装水不消耗水源方块（儿童向：河水取之不尽）。
+func _use_bucket() -> bool:
+	var id := get_selected_item()
+	if id == ItemTypes.BUCKET:
+		var hit := _raycast_water()
+		if hit.is_empty():
+			return false
+		inventory.remove_item(active_inventory_slot(), 1)
+		inventory.add_item(ItemTypes.WATER_BUCKET, 1)
+		Events.notice.emit("🪣 装满了一桶水。")
+		_held_item.swing()
+		return true
+	if id == ItemTypes.WATER_BUCKET:
+		if GameState.is_creative():
+			return false
+		if hunger >= float(MAX_HUNGER) and health >= MAX_HEALTH:
+			Events.notice.emit("💧 现在不渴也不饿。")
+			return true
+		hunger = minf(float(MAX_HUNGER), hunger + DRINK_HUNGER)
+		hunger_changed.emit(int(hunger))
+		if health < MAX_HEALTH:
+			health = mini(MAX_HEALTH, health + DRINK_HEALTH)
+			health_changed.emit(health)
+		inventory.remove_item(active_inventory_slot(), 1)
+		inventory.add_item(ItemTypes.BUCKET, 1)
+		Events.notice.emit("💧 咕嘟咕嘟~ 精神多了！")
+		_held_item.swing()
+		return true
+	return false
+
+
+## 只找水的射线：体素步进查找准星路径上的 WATER 方块（水无碰撞体，
+## 物理射线打不中）。命中返回 {position, cell}，未命中空字典。
+func _raycast_water() -> Dictionary:
+	if _world == null:
+		return {}
+	var from := _camera.global_position
+	var to := from + (-_camera.global_transform.basis.z) * REACH_DISTANCE
+	var dir := to - from
+	var length := dir.length()
+	if length < 0.001:
+		return {}
+	var step := dir / length * 0.05
+	var p := from
+	for i in range(int(length / 0.05) + 1):
+		p += step
+		var cell := Vector3i(p.floor())
+		if _world.get_block(cell) == BlockTypes.Block.WATER:
+			return {"position": p, "cell": cell}
+	return {}
 
 
 ## 右键指向村民/酿灶台时请求交易，指向储物箱时请求打开储物面板。
@@ -232,6 +297,13 @@ func _interact_village() -> bool:
 		return true
 	if _world != null and _world.get_block(cell) == BlockTypes.Block.SMELTER:
 		Events.request_smelt.emit()
+		return true
+	# 床：夜晚右键睡觉直接跳到清晨。
+	if _world != null and _world.get_block(cell) == BlockTypes.Block.BED:
+		if day_night_ref != null and day_night_ref.sleep_to_morning():
+			Events.notice.emit("🛏️ 睡了个好觉，天亮了！")
+		else:
+			Events.notice.emit("🛏️ 现在还不困，天亮了再睡吧。")
 		return true
 	return false
 
@@ -469,7 +541,9 @@ func _update_breaking(delta: float) -> void:
 
 	var pos: Vector3 = hit["position"]
 	var normal: Vector3 = hit["normal"]
-	var cell := Vector3i((pos - normal * 0.5).floor())
+	# 体素命中（作物等）带精确 cell；物理命中从面位置反推方块格。
+	var cell: Vector3i = hit["cell"] if hit.has("cell") \
+		else Vector3i((pos - normal * 0.5).floor())
 	var id := _world.get_block(cell)
 	if id == BlockTypes.Block.AIR or not BlockTypes.HARDNESS.has(id):
 		_reset_break()
@@ -598,6 +672,13 @@ func _place_target() -> void:
 	if hit.is_empty():
 		return
 
+	# 种植：手持蔬菜/小麦对准耕地右键，作物落在耕地上方一格。
+	var held := get_selected_item()
+	var crop := ItemTypes.crop_of(held)
+	if crop != BlockTypes.Block.AIR:
+		_plant_crop(crop, hit)
+		return
+
 	var pos: Vector3 = hit["position"]
 	var normal: Vector3 = hit["normal"]
 	var cell := Vector3i((pos + normal * 0.5).floor())
@@ -618,6 +699,24 @@ func _place_target() -> void:
 	_model.swing_arms()
 
 
+## 在耕地（或任意泥土顶面）上种下作物：目标格必须为空气且下方是耕地。
+func _plant_crop(crop: int, hit: Dictionary) -> void:
+	var pos: Vector3 = hit["position"]
+	var normal: Vector3 = hit["normal"]
+	var cell := Vector3i((pos + normal * 0.5).floor())
+	if _world.get_block(cell) != BlockTypes.Block.AIR:
+		return
+	if _world.get_block(cell + Vector3i(0, -1, 0)) != BlockTypes.Block.FARMLAND:
+		Events.notice.emit("🌱 作物只能种在耕地上。")
+		return
+	_world.set_block(cell, crop)
+	if GameState.is_survival():
+		inventory.remove_item(active_inventory_slot(), 1)
+	Events.block_placed.emit(crop, cell)
+	_held_item.swing()
+	_model.swing_arms()
+
+
 func _raycast_target() -> Dictionary:
 	var space := get_world_3d().direct_space_state
 	var from := _camera.global_position
@@ -625,7 +724,17 @@ func _raycast_target() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(from, to)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
-	return space.intersect_ray(query)
+	var hit := space.intersect_ray(query)
+	# 体素兜底：作物/水草等非固体方块没有碰撞面，物理射线会穿过去；
+	# 两条射线都命中时取更近的一个（正常方块物理面必然先命中，开销可忽略）。
+	if _world != null:
+		var vhit := _world.raycast_blocks(from, to)
+		if not vhit.is_empty():
+			if hit.is_empty() \
+					or (hit["position"] as Vector3).distance_squared_to(from) \
+					> (vhit["position"] as Vector3).distance_squared_to(from):
+				return vhit
+	return hit
 
 
 func _overlaps_player(cell: Vector3i) -> bool:
@@ -676,6 +785,30 @@ func _tick_survival(delta: float, sprinting: bool) -> void:
 			_damage(1, REASON_STARVE)
 	else:
 		_starvation_timer = 0.0
+
+	_tick_fish_companionship(delta)
+
+
+## 鱼群陪伴：身边有鱼在游时缓慢回血——「看到鱼心情就好」的轻量正向反馈。
+func _tick_fish_companionship(delta: float) -> void:
+	if health >= MAX_HEALTH:
+		return
+	var near_fish := false
+	for node in get_tree().get_nodes_in_group("mobs"):
+		var mob := node as Mob
+		if mob == null or mob.is_queued_for_deletion() or mob.type != Mob.MobType.FISH:
+			continue
+		if global_position.distance_to(mob.global_position) <= FISH_HEAL_RADIUS:
+			near_fish = true
+			break
+	if not near_fish:
+		_fish_heal_timer = 0.0
+		return
+	_fish_heal_timer += delta
+	if _fish_heal_timer >= FISH_HEAL_INTERVAL:
+		_fish_heal_timer = 0.0
+		health = mini(MAX_HEALTH, health + 1)
+		health_changed.emit(health)
 
 
 func _apply_fall_damage(fall_speed: float) -> void:

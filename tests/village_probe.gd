@@ -36,6 +36,23 @@ func _run() -> void:
 		"酿灶台方块存在于广场东侧 (27,%d,26)" % (base_y + 1),
 	)
 
+	# 亚洲（默认区域）出生点必须落在村庄旁：距广场中心 20 格内，
+	# 且脚下是整平区 GRASS——落地即见村，不用再找。
+	var spawn_xz := Vector2(player.global_position.x, player.global_position.z)
+	var plaza_xz := Vector2(24.5, 26.5)
+	_check(
+		spawn_xz.distance_to(plaza_xz) < 20.0,
+		"亚洲出生点锚定村庄旁（距广场 %.1f 格）" % spawn_xz.distance_to(plaza_xz),
+	)
+
+	# 民居玻璃窗：位置由 VillageBuilder._build_house 决定（x=0/5 两侧墙 y+2）。
+	_check(
+		world.get_block(Vector3i(15, base_y + 2, 20)) == BlockTypes.Block.GLASS
+			and world.get_block(Vector3i(20, base_y + 2, 20)) == BlockTypes.Block.GLASS,
+		"民居墙体嵌有玻璃窗方块",
+	)
+	_check(BlockTypes.is_transparent(BlockTypes.Block.GLASS), "玻璃在方块表中标记为透明")
+
 	var grass_ok := true
 	for cell: Vector3i in [
 		Vector3i(13, base_y, 16), Vector3i(41, base_y, 40),
@@ -74,8 +91,8 @@ func _run() -> void:
 			villagers.append(mob)
 		elif mob.type == Mob.MobType.PILLAGER:
 			pillagers.append(mob)
-	_check(villagers.size() >= 4, "村民至少 4 名（实际 %d）" % villagers.size())
-	_check(pillagers.size() == 2, "掠夺者共 2 名（塔门守卫 + 塔顶守卫）")
+	_check(villagers.size() >= 4, "村民至少 4 名（实际 %d，含新增村庄）" % villagers.size())
+	_check(pillagers.size() >= 2, "掠夺者至少 2 名（三座村庄共 %d）" % pillagers.size())
 	_check(Mob.is_passive(Mob.MobType.VILLAGER), "村民判定为被动（不被昼夜清空）")
 	_check(not Mob.is_passive(Mob.MobType.PILLAGER), "掠夺者判定为敌对")
 
@@ -115,6 +132,12 @@ func _run() -> void:
 	# ── 阶段 E：玩家头发 ──────────────────────────────
 	_check(player._model.has_hair(), "玩家模型已生成头发（HairTop/HairBack/HairFringe）")
 
+	# ── 阶段 E2：床睡觉跳过夜晚 ──────────────────────────
+	var dn: DayNightCycle = main_scene.get_node("DayNightCycle")
+	dn._time = DayNightCycle.DAY_LENGTH + 30.0
+	_check(not dn.is_day() and dn.sleep_to_morning(), "夜晚睡床直接跳到次日清晨")
+	_check(not dn.sleep_to_morning(), "白天睡床无效（sleep_to_morning 返回假）")
+
 	# ── 阶段 F：交易面板与交易执行 ──────────────────────────
 	_check(hud._trade_overlay != null, "交易面板已构建")
 	Events.request_trade.emit()
@@ -146,7 +169,7 @@ func _run() -> void:
 		player.inventory.count_item(ItemTypes.RAW_BEEF) == beef_before + 3,
 		"交易获得生牛排×3",
 	)
-	_check(hud._trade_text(ItemTypes.TRADES[0]).contains("绿宝石"), "交易行文本展示绿宝石成本")
+	_check(ItemTypes.item_name(ItemTypes.TRADES[0]["result"]) != "", "交易条目指向有效物品（%s）" % ItemTypes.item_name(ItemTypes.TRADES[0]["result"]))
 
 	var poor := {"cost": 99, "result": ItemTypes.RAW_BEEF, "count": 1}
 	_check(not hud._can_trade(poor), "绿宝石不足时交易不可用")

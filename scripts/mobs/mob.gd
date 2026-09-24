@@ -28,6 +28,10 @@ const SKELETON_STANDOFF_MAX := 9.0
 const SWIM_WALK_MIN := 2.0
 const SWIM_WALK_MAX := 4.5
 const SWIM_RADIUS := 6.0
+## 鱼的好奇半径：玩家进入后鱼会游过来绕着转，不再各自乱游。
+const FISH_CURIOUS_RADIUS := 7.0
+## 鱼与玩家保持的距离：贴太近会吓跑（只绕圈，不贴脸）。
+const FISH_KEEP_DISTANCE := 1.8
 ## 蜻蜓/蝴蝶悬停半径与上下浮动参数。
 const FLY_RADIUS := 5.0
 const FLY_BOB_SPEED := 2.6
@@ -643,11 +647,26 @@ func _start_wander() -> void:
 
 
 ## 鱼虾水下游动：无重力悬停，受击逃向远离玩家方向，活动范围围绕出生点。
+## 玩家在水边/水中时，鱼会好奇地游近并绕着玩家转圈（玩家陪伴回血的来源）。
 func _process_swimming(delta: float) -> void:
 	_remember_home()
 	if _flee_timer > 0.0:
 		_flee_timer -= delta
 		_swim_toward(global_position - player.global_position)
+		return
+
+	# 好奇跟随：玩家不远时游向玩家，到达保持距离后切向绕圈。
+	if player != null and global_position.distance_to(player.global_position) < FISH_CURIOUS_RADIUS:
+		var to_player := player.global_position + Vector3(0.0, 0.6, 0.0) - global_position
+		var dist := to_player.length()
+		if dist > FISH_KEEP_DISTANCE + 0.4:
+			_swim_toward(to_player)
+		else:
+			var tangent := to_player.cross(Vector3.UP)
+			if tangent.length_squared() < 0.001:
+				tangent = Vector3(1.0, 0.0, 0.0)
+			var bob := sin(Time.get_ticks_msec() * 0.002 + float(get_instance_id() % 7)) * 0.3
+			_swim_toward(tangent.normalized() + Vector3(0.0, bob, 0.0))
 		return
 
 	_wander_timer -= delta
@@ -836,7 +855,8 @@ func _apply_type_stats() -> void:
 		MobType.WOLF:
 			health = 7
 			speed = 3.2
-			attack_damage = 2
+			# 狼咬人只掉半颗心：儿童向，狼群围上来不至于瞬间致死。
+			attack_damage = 1
 			attack_range = 1.5
 			attack_cooldown = 1.0
 			drop_item = BlockTypes.Block.AIR
@@ -853,7 +873,11 @@ func _apply_type_stats() -> void:
 			attack_damage = 2
 			attack_range = 1.5
 			attack_cooldown = 1.2
+			# 保底图腾 + 绿宝石×2；约五成概率额外掉一袋绿宝石×10，
+			# 打败掠夺者因此偶尔有「大丰收」的惊喜。
 			drop_table = [[ItemTypes.TOTEM, 1], [ItemTypes.EMERALD, 2]]
+			if randf() < 0.5:
+				drop_table.append([ItemTypes.EMERALD, 10])
 		MobType.FISH:
 			health = 3
 			speed = 1.8

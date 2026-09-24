@@ -169,6 +169,35 @@ func get_block(world_pos: Vector3i) -> int:
 	return chunk.get_block_local(world_pos - chunk_to_world(coord))
 
 
+## 体素射线：从 from 向 to 步进采样，找第一个「可破坏」方块（非 AIR 且在
+## HARDNESS 表中）。物理射线只能命中碰撞面，而作物/水草等非固体方块没有
+## 碰撞面——玩家对着稻田左键毫无反应的根因就在这。水不在 HARDNESS 表，
+## 射线自然穿过水面，可以采到水下的作物。未命中返回空字典。
+func raycast_blocks(from: Vector3, to: Vector3) -> Dictionary:
+	var dir := to - from
+	var length := dir.length()
+	if length < 0.001:
+		return {}
+	var step := dir / length * 0.05
+	var last_cell := Vector3i(from.floor())
+	var p := from
+	for i in range(int(length / 0.05) + 1):
+		p += step
+		var cell := Vector3i(p.floor())
+		if cell == last_cell:
+			continue
+		var id := get_block(cell)
+		if id != BlockTypes.Block.AIR and BlockTypes.HARDNESS.has(id):
+			return {
+				"position": p,
+				"normal": Vector3(last_cell - cell),
+				"cell": cell,
+				"id": id,
+			}
+		last_cell = cell
+	return {}
+
+
 func set_block(world_pos: Vector3i, id: int) -> void:
 	var coord := world_to_chunk(Vector3(world_pos))
 	var chunk: Chunk = _chunks.get(coord)
@@ -346,6 +375,10 @@ func _build_atlas_material() -> void:
 	var material := StandardMaterial3D.new()
 	material.albedo_texture = texture
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# 玻璃瓦片中心 alpha=0（见 TextureAtlas._paint_tile）：alpha scissor 把
+	# 半透明像素直接剔除，得到「透明窗」，且无需排序、其余不透明瓦片零开销。
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	material.alpha_scissor_threshold = 0.5
 	# 面绕向已保证法线朝外，使用默认背面剔除，减半片元开销并避免看到内壁。
 	_atlas_material = material
 

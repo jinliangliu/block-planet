@@ -26,6 +26,26 @@ static func _paint_tile(image: Image, tile: int) -> void:
 	var ox := (tile % ATLAS_TILES) * TILE_SIZE
 	var oy := (tile / ATLAS_TILES) * TILE_SIZE
 
+	# 玻璃（瓦片 9）：不透明浅蓝边框 + 全透明中心 + 两道斜向高光，
+	# 配合图集材质的 alpha scissor 渲染成「有框的透明窗」。
+	# 中心像素 RGB 保留玻璃色（alpha=0），万一在不支持透明的材质上
+	# 兜底显示为浅蓝而不是黑色。
+	if tile == 9:
+		for y in range(TILE_SIZE):
+			for x in range(TILE_SIZE):
+				var edge := x == 0 or x == TILE_SIZE - 1 or y == 0 or y == TILE_SIZE - 1
+				var c := color
+				if edge:
+					if _hash2(x, y) % 7 == 0:
+						c = c.darkened(0.12)
+					c.a = 1.0
+				elif x - y == 4 or x - y == 5:
+					c = Color(1.0, 1.0, 1.0, 0.9)
+				else:
+					c.a = 0.0
+				image.set_pixel(ox + x, oy + y, c)
+		return
+
 	for y in range(TILE_SIZE):
 		for x in range(TILE_SIZE):
 			var c := color
@@ -93,6 +113,18 @@ static func _tile_color(tile: int) -> Color:
 			return Color(0.70, 0.60, 0.50)
 		26:
 			return Color(0.76, 0.68, 0.36)
+		27:
+			# 床：红毯色（底面瓦片用木头 5）。
+			return Color(0.78, 0.22, 0.24)
+		28:
+			# 胡萝卜作物：绿叶间的橙色萝卜头。
+			return Color(0.86, 0.52, 0.18)
+		29:
+			# 土豆作物：土黄叶丛。
+			return Color(0.74, 0.62, 0.30)
+		30:
+			# 白萝卜作物：绿叶与露白的萝卜身。
+			return Color(0.88, 0.90, 0.80)
 		_:
 			return Color(1.0, 0.0, 1.0)
 
