@@ -15,9 +15,16 @@ const PITCH_LIMIT := 1.55
 const REACH_DISTANCE := 8.0
 const MAX_HEALTH := 20
 const MAX_HUNGER := 20
-const HUNGER_DRAIN_PER_SECOND := 0.08
-const SPRINT_HUNGER_DRAIN := 0.12
-const STARVATION_DAMAGE_INTERVAL := 4.0
+## 饥饿消耗：站着不动满饥饿可撑 1000 秒（白天 600 秒，约 1.7 个白天）。
+## 早期是 0.08/秒——满饥饿 250 秒就见底，站着发呆 4 分钟就开始掉血，
+## 玩家只觉得「血掉得莫名其妙」；放慢到 0.02 后饥饿仍是压力，但给得起反应时间。
+const HUNGER_DRAIN_PER_SECOND := 0.02
+## 冲刺额外消耗：叠加后 0.08/秒，连续冲刺约 250 秒见底（原 0.12 → 100 秒）。
+const SPRINT_HUNGER_DRAIN := 0.06
+const STARVATION_DAMAGE_INTERVAL := 5.0
+## 受击无敌帧：被生物命中后 0.5 秒内的再次命中全部忽略。
+## 没有它时一群怪会在同一帧把 20 点血一次性打空——玩家只看到血条瞬间归零。
+const HURT_INVULN_TIME := 0.5
 # 落地速度阈值：sqrt(2 * GRAVITY * 3) ≈ 12 m/s，对应约 3 格内免伤。
 const FALL_DAMAGE_THRESHOLD := 12.0
 const FALL_DAMAGE_SCALE := 0.5
@@ -66,6 +73,15 @@ signal selected_slot_changed(slot: int)
 signal health_changed(value: int)
 signal hunger_changed(value: int)
 signal died
+## 每次扣血都广播来源（"饥饿" / "摔落" / 生物名 / "箭"），HUD 据此提示玩家
+## 血是怎么掉的——看不见原因的掉血只会让人以为是 bug。
+signal damage_taken(amount: int, reason: String, remaining: int)
+
+## 伤害来源常量：HUD 提示与探针断言共用同一套措辞。
+const REASON_STARVE := "饥饿"
+const REASON_FALL := "摔落"
+const REASON_ARROW := "箭矢"
+const REASON_STUCK := "卡住"
 
 var health := MAX_HEALTH
 var hunger := float(MAX_HUNGER)
@@ -85,6 +101,7 @@ var _last_attack_ms := 0
 var _last_jump_ms := 0
 var _last_hunger_int := MAX_HUNGER
 var _stuck_frames := 0
+var _hurt_invuln := 0.0
 ## 防卡死累计脱困次数（探针/调试用）。
 var stuck_rescues := 0
 
@@ -262,6 +279,8 @@ func _physics_process(delta: float) -> void:
 	if not flying:
 		_update_fall_state()
 	_tick_survival(delta, sprinting)
+	if _hurt_invuln > 0.0:
+		_hurt_invuln = maxf(0.0, _hurt_invuln - delta)
 
 	if virtual_look != Vector2.ZERO:
 		_rotate_view(virtual_look * TOUCH_LOOK_SENSITIVITY)
@@ -294,6 +313,7 @@ func _check_stuck() -> void:
 
 ## 防卡死脱困：瞬间清空生命走死亡表现，再从出生点安全重生。
 func _force_unstuck() -> void:
+	damage_taken.emit(health, REASON_STUCK, 0)
 	health = 0
 	died.emit()
 	_respawn()
@@ -653,7 +673,7 @@ func _tick_survival(delta: float, sprinting: bool) -> void:
 		_starvation_timer += delta
 		if _starvation_timer >= STARVATION_DAMAGE_INTERVAL:
 			_starvation_timer = 0.0
-			_damage(1)
+			_damage(1, REASON_STARVE)
 	else:
 		_starvation_timer = 0.0
 
@@ -662,13 +682,15 @@ func _apply_fall_damage(fall_speed: float) -> void:
 	var excess := fall_speed - FALL_DAMAGE_THRESHOLD
 	if excess <= 0.0:
 		return
-	_damage(int(ceil(excess * FALL_DAMAGE_SCALE)))
+	_damage(int(ceil(excess * FALL_DAMAGE_SCALE)), REASON_FALL)
 
 
-func _damage(amount: int) -> void:
+## 真正的扣血入口：集中处理无敌、死亡、重生与来源广播。
+func _damage(amount: int, reason: String = "") -> void:
 	if GameState.is_creative():
 		return
 	health -= amount
+	damage_taken.emit(amount, reason, maxi(0, health))
 	if health <= 0:
 		# 不死图腾：致命一击时自动消耗，恢复半血并免于死亡。
 		if inventory.consume_item(ItemTypes.TOTEM, 1):
@@ -682,14 +704,20 @@ func _damage(amount: int) -> void:
 	health_changed.emit(health)
 
 
-func take_damage(amount: int) -> void:
-	_damage(amount)
+## 外部（生物近战、箭矢）打玩家走这里：带来源 + 受击无敌帧。
+## 无敌帧只拦这条路，不走 _damage，因此卡死脱困与探针直接扣血不受影响。
+func take_damage(amount: int, source: String = "") -> void:
+	if _hurt_invuln > 0.0:
+		return
+	_hurt_invuln = HURT_INVULN_TIME
+	_damage(amount, source)
 
 
 func _respawn() -> void:
 	health = MAX_HEALTH
 	hunger = float(MAX_HUNGER)
 	_starvation_timer = 0.0
+	_hurt_invuln = 0.0
 	velocity = Vector3.ZERO
 	# 清空坠落速度：重生前残留的坠落速度会在落地瞬间被误判为跌落伤害。
 	_fall_speed = 0.0

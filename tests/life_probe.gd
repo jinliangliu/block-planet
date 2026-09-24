@@ -8,6 +8,8 @@ extends Node
 var _failed := 0
 ## 成长事件计数（lambda 捕获成员而非局部变量，便于统计）。
 var _grown_events := 0
+## 掉血来源记录（同上：lambda 捕获局部变量是拷贝，必须用成员）。
+var _damage_reasons: PackedStringArray = []
 ## 受保护名录里「不算图鉴物种」的三项：村民是人不是物种；蜻蜓、蝴蝶是游戏里
 ## 陪伴玩家的益虫，图鉴未收录它们的资料。给它们补条目时请一并删掉这条豁免。
 const PROTECTED_WITHOUT_ENTRY := [
@@ -1405,6 +1407,41 @@ func _run() -> void:
 	_check(player.hunger < float(player.MAX_HUNGER),
 		"探索模式饥饿照常消耗（满 20 → %.1f）" % player.hunger)
 	player.hunger = float(player.MAX_HUNGER)
+
+	# Q-2b 掉血可解释性：饥饿速度够慢、饥饿伤害有间隔、受击有无敌帧、来源有广播。
+	# 早期饥饿 0.08/秒——站着发呆 4 分钟就见底，玩家只看到血条莫名其妙地掉。
+	var q_hunger0 := player.hunger
+	player._tick_survival(1.0, false)
+	var drain_per_sec := q_hunger0 - player.hunger
+	var full_seconds := float(Player.MAX_HUNGER) / drain_per_sec
+	_check(is_equal_approx(drain_per_sec, Player.HUNGER_DRAIN_PER_SECOND),
+		"静止 1 秒饥饿消耗 %.2f（与常量一致）" % drain_per_sec)
+	_check(full_seconds > 600.0,
+		"站着不动满饥饿可撑过整个白天（%.0f 秒 > 600 秒）" % full_seconds)
+
+	player.damage_taken.connect(func(_a: int, r: String, _rem: int): _damage_reasons.append(r))
+	player.hunger = 0.0
+	player.health = Player.MAX_HEALTH
+	player._starvation_timer = 0.0
+	for i in range(4):
+		player._tick_survival(1.0, false)
+	_check(player.health == Player.MAX_HEALTH, "饥饿归零后 4 秒内不掉血（留出找食物的时间）")
+	player._tick_survival(1.0, false)
+	_check(player.health == Player.MAX_HEALTH - 1, "饥饿归零满 5 秒才扣 1 点")
+	_check(_damage_reasons.has(Player.REASON_STARVE), "饥饿扣血广播来源「饥饿」（HUD 据此提示）")
+
+	player.health = Player.MAX_HEALTH
+	player._hurt_invuln = 0.0
+	player.take_damage(2, "僵尸")
+	player.take_damage(2, "蜘蛛")
+	_check(player.health == Player.MAX_HEALTH - 2, "受击 0.5 秒无敌帧：连挨两下只结算一次")
+	player._hurt_invuln = 0.0
+	player.take_damage(2, "僵尸")
+	_check(player.health == Player.MAX_HEALTH - 4, "无敌帧结束后可再次受伤")
+	player._hurt_invuln = 0.0
+	player.health = Player.MAX_HEALTH
+	player.hunger = float(player.MAX_HUNGER)
+	player._starvation_timer = 0.0
 
 	player.inventory.slots[5] = {
 		"item": ItemTypes.WOOD_PICKAXE, "count": 1,

@@ -537,7 +537,7 @@ func _process_hostile(delta: float) -> void:
 		velocity.x = 0.0
 		velocity.z = 0.0
 		if _attack_timer <= 0.0 and _has_line_of_sight():
-			player.take_damage(attack_damage)
+			player.take_damage(attack_damage, display_name())
 			_attack_timer = attack_cooldown
 
 
@@ -632,7 +632,7 @@ func _process_counter() -> void:
 	velocity.z = 0.0
 	look_at(global_position + flat, Vector3.UP)
 	if _attack_timer <= 0.0 and _has_line_of_sight():
-		player.take_damage(maxi(1, _base_attack_damage))
+		player.take_damage(maxi(1, _base_attack_damage), display_name())
 		_attack_timer = attack_cooldown
 
 

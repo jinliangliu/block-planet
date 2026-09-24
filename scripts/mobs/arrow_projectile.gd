@@ -81,7 +81,7 @@ func _physics_process(delta: float) -> void:
 				else:
 					Events.notice.emit("🛡 %s 受到保护，箭被弹开了。" % (collider as Mob).stage_name())
 		elif collider is Player:
-			(collider as Player).take_damage(_damage)
+			(collider as Player).take_damage(_damage, Player.REASON_ARROW)
 		queue_free()
 		return
 
@@ -92,5 +92,5 @@ func _physics_process(delta: float) -> void:
 	# 兜底：极少数穿透情况下按距离判定。
 	if _mode == Mode.HOSTILE and _player != null and is_instance_valid(_player):
 		if global_position.distance_to(_player.global_position + Vector3(0.0, 0.9, 0.0)) < HIT_RADIUS:
-			_player.take_damage(_damage)
+			_player.take_damage(_damage, Player.REASON_ARROW)
 			queue_free()

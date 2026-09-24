@@ -15,6 +15,8 @@ const MODE_BADGE_OUTLINE_SIZE := 5
 const MODE_BADGE_OUTLINE := Color(0.06, 0.08, 0.12, 0.96)
 const MODE_BADGE_HEIGHT := 32.0
 const MODE_BADGE_GAP := 4.0
+## 饥饿低于该值时提示一次「该吃东西了」（满值 20，即剩 1/5 时提醒）。
+const HUNGER_WARN_LEVEL := 4
 
 var _player: Player
 var _root: Control
@@ -84,6 +86,8 @@ func setup(player: Player) -> void:
 	_player.selected_slot_changed.connect(_on_player_slot_changed)
 	_player.health_changed.connect(_on_health_changed)
 	_player.hunger_changed.connect(_on_hunger_changed)
+	# 掉血提示：把「血怎么没的」显示出来（饥饿 / 摔落 / 被谁打了）。
+	_player.damage_taken.connect(_on_damage_taken)
 	_player.inventory.changed.connect(_refresh_hotbar)
 	# 背包变化时若合成台开着，同步刷新按钮可用态，避免「攒够材料按钮却还灰着」。
 	_player.inventory.changed.connect(_on_inventory_changed_for_craft)
@@ -1905,6 +1909,23 @@ func _on_health_changed(_value: int) -> void:
 
 func _on_hunger_changed(_value: int) -> void:
 	_refresh_stats()
+	# 快见底时提醒一次（只在跨过阈值那一次提示，不每点都刷屏）。
+	if _player != null and int(_player.hunger) == HUNGER_WARN_LEVEL:
+		_show_toast("🍖 饿得发慌了，找点东西吃吧")
+
+
+## 掉血播报：把来源和数值一起说清楚，站着不动莫名掉血时玩家能立刻看懂原因。
+func _on_damage_taken(amount: int, reason: String, remaining: int) -> void:
+	if amount <= 0:
+		return
+	var label := "被%s打中了" % reason if not reason.is_empty() else "受伤"
+	if reason == Player.REASON_STARVE:
+		label = "饿坏了"
+	elif reason == Player.REASON_FALL:
+		label = "摔了一跤"
+	elif reason == Player.REASON_STUCK:
+		label = "卡进方块里了"
+	_show_toast("💔 %s −%d（剩 %d）" % [label, amount, remaining])
 
 
 func _on_time_changed(_percent: float, _is_day: bool) -> void:
