@@ -14,11 +14,14 @@ const DRAG_SPEED := 0.015
 const PITCH_LIMIT := 80.0
 ## 两极标记与球面的间距。
 const POLE_MARKER_LIFT := 0.10
+## 区域名称标签与球面的间距（略高于球面即可，避免与网格 z-fighting）。
+const REGION_LABEL_LIFT := 0.03
 
 var _yaw := -30.0
 var _pitch := 6.0
 var _mesh_instance: MeshInstance3D
 var _pole_markers: Array[Node3D] = []
+var _region_labels: Array[Label3D] = []
 
 
 func _ready() -> void:
@@ -109,6 +112,36 @@ func _add_pole_markers() -> void:
 	_pole_markers.clear()
 	_pole_markers.append(_make_pole_marker("北极", Color(0.95, 0.35, 0.30), RADIUS + POLE_MARKER_LIFT))
 	_pole_markers.append(_make_pole_marker("南极", Color(0.94, 0.96, 0.99), -(RADIUS + POLE_MARKER_LIFT)))
+	_add_region_labels()
+
+
+## 七大洲四大洋名称贴在球面对应位置：锚点经纬度经 lat_lon_to_dir 映射到球面
+## （与网格/拾取共用同一函数对，保证「名贴其位」）。标签朝向由 _process
+## 按与相机的夹角渐隐，转到背面时整条淡出，避免轮廓线截断文字。
+## 可重复调用（幂等）。
+func _add_region_labels() -> void:
+	for label in _region_labels:
+		label.queue_free()
+	_region_labels.clear()
+	for region_id in RegionAtlas.COUNT:
+		var anchor: Vector2 = RegionAtlas.REGION_ANCHORS[region_id]
+		var pos: Vector3 = RegionAtlas.lat_lon_to_dir(anchor.x, anchor.y) * (RADIUS + REGION_LABEL_LIFT)
+		var is_land: bool = region_id >= RegionAtlas.ASIA
+		_region_labels.append(_make_region_label(RegionAtlas.title_of(region_id), pos, is_land))
+
+
+func _process(_delta: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var cam_pos := cam.global_position
+	for label in _region_labels:
+		var normal := (label.global_position - global_position).normalized()
+		var facing := normal.dot((cam_pos - label.global_position).normalized())
+		var fade := clampf((facing - 0.05) / 0.30, 0.0, 1.0)
+		var base: float = label.get_meta("base_alpha", 1.0)
+		label.modulate.a = base * fade
+		label.outline_modulate.a = fade
 
 
 func _make_pole_marker(text: String, color: Color, y: float) -> Label3D:
@@ -122,6 +155,27 @@ func _make_pole_marker(text: String, color: Color, y: float) -> Label3D:
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
 	label.position = Vector3(0.0, y, 0.0)
+	add_child(label)
+	return label
+
+
+func _make_region_label(text: String, pos: Vector3, is_land: bool) -> Label3D:
+	var label := Label3D.new()
+	label.text = text
+	var base_alpha := 1.0
+	if is_land:
+		label.font_size = 26
+		label.modulate = Color(0.99, 0.97, 0.90)
+	else:
+		label.font_size = 20
+		label.modulate = Color(0.74, 0.88, 1.0)
+		base_alpha = 0.92
+	label.pixel_size = 0.0038
+	label.outline_size = 9
+	label.outline_modulate = Color(0.06, 0.09, 0.16)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.set_meta("base_alpha", base_alpha)
+	label.position = pos
 	add_child(label)
 	return label
 

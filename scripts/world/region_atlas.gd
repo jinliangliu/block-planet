@@ -29,6 +29,22 @@ const ANTARCTICA := 10
 const COUNT := 11
 const DEFAULT_REGION := ASIA
 
+## 各区域在球体上的名称标签锚点（纬度, 经度）。
+## 选在区域视觉中心附近，并与相邻区域/两极标记拉开距离避免文字重叠。
+const REGION_ANCHORS := [
+	Vector2(0.0, -150.0),    # 太平洋
+	Vector2(10.0, -35.0),    # 大西洋
+	Vector2(-25.0, 80.0),    # 印度洋
+	Vector2(78.0, -45.0),    # 北冰洋
+	Vector2(42.0, 95.0),     # 亚洲
+	Vector2(53.0, 22.0),     # 欧洲
+	Vector2(4.0, 18.0),      # 非洲
+	Vector2(45.0, -101.0),   # 北美洲
+	Vector2(-15.0, -60.0),   # 南美洲
+	Vector2(-25.0, 140.0),   # 大洋洲
+	Vector2(-76.0, 60.0),    # 南极洲
+]
+
 ## 四大洋归属判据（仅用于掩码中的海洋格）。
 const ARCTIC_MIN_LAT := 66.0
 const ATLANTIC_LON := Vector2(-70.0, 20.0)
