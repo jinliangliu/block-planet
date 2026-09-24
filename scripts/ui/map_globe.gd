@@ -9,19 +9,23 @@ extends Node3D
 
 const RADIUS := 1.0
 ## 拖动灵敏度：像素 → 弧度。
-const DRAG_SPEED := 0.008
+const DRAG_SPEED := 0.015
 ## 俯仰限幅：留出余量，避免极点在视觉上翻过去。
 const PITCH_LIMIT := 80.0
+## 两极标记与球面的间距。
+const POLE_MARKER_LIFT := 0.10
 
 var _yaw := -30.0
-var _pitch := 12.0
+var _pitch := 6.0
 var _mesh_instance: MeshInstance3D
+var _pole_markers: Array[Node3D] = []
 
 
 func _ready() -> void:
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
 	_build_sphere()
+	_add_pole_markers()
 	_apply_view()
 
 
@@ -30,6 +34,7 @@ func build() -> void:
 		_mesh_instance = MeshInstance3D.new()
 		add_child(_mesh_instance)
 	_build_sphere()
+	_add_pole_markers()
 	_apply_view()
 
 
@@ -94,6 +99,31 @@ func _build_sphere() -> void:
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mesh.surface_set_material(0, material)
 	_mesh_instance.mesh = mesh
+
+
+## 两极标记：Label3D「北极」「南极」，始终面向相机；位置挂在球节点下，
+## 随俯仰旋转上下移动，直观指示自转轴两端。可重复调用（幂等）。
+func _add_pole_markers() -> void:
+	for marker in _pole_markers:
+		marker.queue_free()
+	_pole_markers.clear()
+	_pole_markers.append(_make_pole_marker("北极", Color(0.95, 0.35, 0.30), RADIUS + POLE_MARKER_LIFT))
+	_pole_markers.append(_make_pole_marker("南极", Color(0.94, 0.96, 0.99), -(RADIUS + POLE_MARKER_LIFT)))
+
+
+func _make_pole_marker(text: String, color: Color, y: float) -> Label3D:
+	var label := Label3D.new()
+	label.text = text
+	label.font_size = 30
+	label.pixel_size = 0.004
+	label.modulate = color
+	label.outline_size = 10
+	label.outline_modulate = Color(0.08, 0.10, 0.16)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.position = Vector3(0.0, y, 0.0)
+	add_child(label)
+	return label
 
 
 func _add_cell(st: SurfaceTool, row: int, col: int) -> void:

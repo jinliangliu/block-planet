@@ -233,9 +233,9 @@ func _build_globe_page() -> void:
 	stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stage.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	stage.offset_left = -VIEW_SIZE * 0.5
-	stage.offset_top = -VIEW_SIZE * 0.5 - 20.0
+	stage.offset_top = -VIEW_SIZE * 0.5 + 14.0
 	stage.offset_right = VIEW_SIZE * 0.5
-	stage.offset_bottom = VIEW_SIZE * 0.5 - 20.0
+	stage.offset_bottom = VIEW_SIZE * 0.5 + 14.0
 	_globe_page.add_child(stage)
 
 	_viewport = SubViewport.new()
@@ -260,25 +260,25 @@ func _build_globe_page() -> void:
 	_hover_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hover_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hover_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	_hover_label.offset_top = -98.0
-	_hover_label.offset_bottom = -66.0
+	_hover_label.offset_top = -56.0
+	_hover_label.offset_bottom = -26.0
 	_globe_page.add_child(_hover_label)
 
 	_build_legend(_globe_page)
 
 
-## 区域图例：11 个色块 + 名称，两行排布，提示海洋同样可进入。
+## 区域图例：11 个色块 + 名称，界面左侧竖列排布。
 func _build_legend(parent: Control) -> void:
 	var grid := GridContainer.new()
-	grid.columns = 6
+	grid.columns = 1
 	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	grid.add_theme_constant_override("h_separation", 18)
-	grid.add_theme_constant_override("v_separation", 6)
-	grid.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	grid.offset_left = -330.0
-	grid.offset_right = 330.0
-	grid.offset_top = -60.0
-	grid.offset_bottom = -6.0
+	grid.add_theme_constant_override("v_separation", 8)
+	grid.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
+	grid.offset_left = 24.0
+	grid.offset_right = 154.0
+	grid.offset_top = -160.0
+	grid.offset_bottom = 160.0
 	parent.add_child(grid)
 
 	for region_id in RegionAtlas.COUNT:
