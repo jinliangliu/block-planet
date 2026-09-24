@@ -983,6 +983,8 @@ func _play_craft_fly(item_id: int) -> void:
 	)
 
 
+## 交易面板（T 键）：样式对齐储物箱——米色窗体 + 棕色描边 + ItemSlot 微缩图。
+## 两列网格，每格「绿宝石×N → 成品×M」+ 交换按钮；悬停物品格出 3D 提示。
 func _build_trade_panel(root: Control) -> void:
 	_trade_overlay = Control.new()
 	_trade_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -999,30 +1001,55 @@ func _build_trade_panel(root: Control) -> void:
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_trade_overlay.add_child(center)
 
+	var wrapper := Control.new()
+	# 13 条交易排两列（7 行 × 54px）+ 标题提示行，500 高度放得下且不出屏。
+	wrapper.custom_minimum_size = Vector2(640, 500)
+	center.add_child(wrapper)
+
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(500, 480)
-	center.add_child(panel)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.95, 0.92, 0.84)
+	panel_style.border_color = Color(0.62, 0.47, 0.27)
+	panel_style.set_border_width_all(3)
+	panel_style.set_corner_radius_all(12)
+	panel_style.set_content_margin_all(16)
+	panel.add_theme_stylebox_override("panel", panel_style)
+	wrapper.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
 	var title := Label.new()
-	title.text = "村庄交易（用绿宝石交换）"
+	title.text = "村庄交易"
 	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(0.36, 0.26, 0.13))
 	vbox.add_child(title)
 
+	var hint := Label.new()
+	hint.text = "用绿宝石交换物资（悬停物品格查看详情）"
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
+	vbox.add_child(hint)
+
 	_trade_list = VBoxContainer.new()
-	_trade_list.add_theme_constant_override("separation", 8)
+	_trade_list.add_theme_constant_override("separation", 6)
 	vbox.add_child(_trade_list)
 
-	var close := Button.new()
-	close.text = "关闭"
-	close.custom_minimum_size = Vector2(0, 44)
+	# 面板 ✕：UiKit 统一透明底（与储物箱一致），红字形直接压在窗面上。
+	var close := UiKit.make_close()
 	close.pressed.connect(func(): set_trade_open(false))
-	vbox.add_child(close)
+	wrapper.add_child(close)
+	close.anchor_left = 1.0
+	close.anchor_right = 1.0
+	close.offset_left = -44.0
+	close.offset_right = -10.0
+	close.offset_top = 10.0
+	close.offset_bottom = 44.0
 
 	_trade_overlay.visible = false
+	_build_item_tip()
 	_refresh_trade_panel()
 
 
@@ -1039,40 +1066,66 @@ func set_trade_open(open: bool) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
 	if open:
 		_refresh_trade_panel()
+	else:
+		_hide_item_tip()
 
 
 func _refresh_trade_panel() -> void:
 	if _trade_list == null:
 		return
+	_hide_item_tip()
 	for child in _trade_list.get_children():
 		_trade_list.remove_child(child)
 		child.queue_free()
 
+	# 两列网格：13 条交易排 7 行，整面板与储物箱同高可容纳。
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 6)
+	_trade_list.add_child(grid)
+
 	for trade in ItemTypes.TRADES:
 		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 10)
-		_trade_list.add_child(row)
+		row.add_theme_constant_override("separation", 6)
+		grid.add_child(row)
 
-		var label := Label.new()
-		label.text = _trade_text(trade)
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(label)
+		# 价：绿宝石×cost → 货：成品×count，都用物品微缩图（储物箱同款格子）。
+		row.add_child(_make_trade_slot(ItemTypes.EMERALD, int(trade["cost"])))
+		var arrow := Label.new()
+		arrow.text = "→"
+		arrow.add_theme_font_size_override("font_size", 16)
+		arrow.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
+		row.add_child(arrow)
+		row.add_child(_make_trade_slot(int(trade["result"]), int(trade["count"])))
+
+		var name_label := Label.new()
+		name_label.text = ItemTypes.item_name(int(trade["result"]))
+		name_label.add_theme_font_size_override("font_size", 15)
+		name_label.add_theme_color_override("font_color", Color(0.28, 0.20, 0.10))
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(name_label)
 
 		var button := Button.new()
 		button.text = "交换"
-		button.custom_minimum_size = Vector2(84, 40)
+		button.custom_minimum_size = Vector2(56, 40)
 		button.focus_mode = Control.FOCUS_NONE
+		# 暖金色系与米色窗体同调（合成台「合成」同款），禁用变灰一目了然。
+		UiKit.apply_warm_style(button)
 		button.disabled = not _can_trade(trade)
 		button.pressed.connect(_on_trade_pressed.bind(trade))
 		row.add_child(button)
 
 
-func _trade_text(trade: Dictionary) -> String:
-	return "绿宝石×%d  →  %s×%d" % [
-		int(trade["cost"]),
-		ItemTypes.item_name(trade["result"]),
-		int(trade["count"]),
-	]
+## 交易行的微缩物品格（储物箱同款 ItemSlot）：角标 ×N，悬停出 3D 物品提示。
+func _make_trade_slot(item: int, count: int) -> ItemSlot:
+	var slot := ItemSlot.new()
+	slot.custom_minimum_size = Vector2(48, 48)
+	slot.set_slot({"item": item, "count": count})
+	slot.mouse_entered.connect(_show_item_tip.bind(slot, item))
+	slot.mouse_exited.connect(_hide_item_tip)
+	return slot
 
 
 func _can_trade(trade: Dictionary) -> bool:
@@ -1262,6 +1315,8 @@ func _push_log(message: String) -> void:
 
 ## 悬停预览卡：3D 旋转模型 + 名称 + 简介，弹在触发格子右侧并钳制在屏内。
 func _build_item_tip() -> void:
+	if _tip_panel != null:
+		return
 	_tip_panel = PanelContainer.new()
 	_tip_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tip_panel.z_index = 20

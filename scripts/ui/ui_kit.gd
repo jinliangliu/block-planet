@@ -52,3 +52,22 @@ static func apply_transparent(button: Button) -> void:
 	button.add_theme_stylebox_override("pressed", empty)
 	button.add_theme_stylebox_override("disabled", empty)
 	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+
+
+## 暖金色动作按钮（合成台的「合成」、交易行的「交换」）：与米色窗体同色系，
+## 悬停提亮、禁用变灰。字形与底图三态一起定义，避免两处配色各自漂移。
+static func apply_warm_style(button: Button) -> void:
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color(0.87, 0.72, 0.42)
+	normal.set_corner_radius_all(8)
+	var hover := normal.duplicate()
+	hover.bg_color = Color(0.93, 0.80, 0.52)
+	var disabled := normal.duplicate()
+	disabled.bg_color = Color(0.78, 0.74, 0.66)
+	button.add_theme_stylebox_override("normal", normal)
+	button.add_theme_stylebox_override("hover", hover)
+	button.add_theme_stylebox_override("pressed", hover)
+	button.add_theme_stylebox_override("disabled", disabled)
+	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	button.add_theme_color_override("font_color", Color(0.30, 0.20, 0.08))
+	button.add_theme_color_override("font_disabled_color", Color(0.52, 0.48, 0.42))
