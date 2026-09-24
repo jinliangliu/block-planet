@@ -465,6 +465,24 @@ const TRADES := [
 	{"cost": 10, "result": SILVER_INGOT, "count": 1},
 ]
 
+## 村庄收购（物资换绿宝石）：生存前期容易获得的物资打包出售。
+## 与买入交易同一面板的「卖出」页签——前期砍树挖石收麦就能换到启动资金。
+const SELL_TRADES := [
+	{"item": BlockTypes.Block.WOOD, "count": 10},
+	{"item": BlockTypes.Block.COBBLESTONE, "count": 12},
+	{"item": BlockTypes.Block.SAND, "count": 12},
+	{"item": WHEAT, "count": 6},
+	{"item": FEATHER, "count": 6},
+	{"item": STRING, "count": 4},
+	{"item": RAW_BEEF, "count": 4},
+	{"item": RAW_FISH, "count": 4},
+]
+
+## 收购打包价（绿宝石）：单件售价 × 件数 × 1.5 向上取整——
+## 刻意比背包待售区的一键售卖划算 50%，奖励走村庄交易这条主动行为。
+static func sell_bundle_price(item: int, count: int) -> int:
+	return int(ceil(float(sell_price(item) * count) * 1.5))
+
 ## 珍稀材料的售价覆盖（按件计价，未列出的走分类默认价）。
 const PRICE_OVERRIDE := {
 	GOLD_INGOT: 12,

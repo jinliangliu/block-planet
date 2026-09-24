@@ -61,6 +61,9 @@ var _log_label: Label
 var _log_lines := PackedStringArray()
 var _trade_overlay: Control
 var _trade_list: VBoxContainer
+## 交易面板页签：0 买入（绿宝石换物资）/ 1 卖出（物资换绿宝石）。
+var _trade_tab := 0
+var _trade_tab_buttons: Array[Button] = []
 var _box_overlay: Control
 var _box_grid: GridContainer
 var _box_player_grid: GridContainer
@@ -1027,7 +1030,36 @@ func _build_trade_panel(root: Control) -> void:
 	title.add_theme_color_override("font_color", Color(0.36, 0.26, 0.13))
 	vbox.add_child(title)
 
+	# 页签：买入（绿宝石换物资）/ 卖出（物资换绿宝石），样式与合成台页签同源。
+	var tab_row := HBoxContainer.new()
+	tab_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(tab_row)
+	var tab_group := ButtonGroup.new()
+	var tab_defs := [
+		["买入（绿宝石换物资）", "花绿宝石换食物、工具和材料"],
+		["卖出（物资换绿宝石）", "前期易得的物资打包卖，比一键售卖划算 50%"],
+	]
+	for t in tab_defs.size():
+		var chip := Button.new()
+		chip.text = String(tab_defs[t][0])
+		chip.tooltip_text = String(tab_defs[t][1])
+		chip.toggle_mode = true
+		chip.button_group = tab_group
+		chip.button_pressed = t == _trade_tab
+		chip.focus_mode = Control.FOCUS_NONE
+		chip.custom_minimum_size = Vector2(0, 32)
+		chip.add_theme_font_size_override("font_size", 14)
+		chip.add_theme_color_override("font_color", Color(0.36, 0.26, 0.13))
+		chip.add_theme_color_override("font_pressed_color", Color(0.30, 0.20, 0.08))
+		chip.add_theme_stylebox_override("normal", _craft_chip_style(false))
+		chip.add_theme_stylebox_override("hover", _craft_chip_style(false))
+		chip.add_theme_stylebox_override("pressed", _craft_chip_style(true))
+		chip.pressed.connect(_on_trade_tab.bind(t))
+		tab_row.add_child(chip)
+		_trade_tab_buttons.append(chip)
+
 	var hint := Label.new()
+	hint.name = "TradeHint"
 	hint.text = "用绿宝石交换物资（悬停物品格查看详情）"
 	hint.add_theme_font_size_override("font_size", 16)
 	hint.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
@@ -1077,45 +1109,115 @@ func _refresh_trade_panel() -> void:
 	for child in _trade_list.get_children():
 		_trade_list.remove_child(child)
 		child.queue_free()
+	var hint := _trade_overlay.find_child("TradeHint", true, false) as Label
+	if hint != null:
+		hint.text = ("用绿宝石交换物资（悬停物品格查看详情）" if _trade_tab == 0
+			else "打包卖出手头的物资，比待售区一键售卖划算 50%（悬停查看详情）")
 
-	# 两列网格：13 条交易排 7 行，整面板与储物箱同高可容纳。
+	# 两列网格：买入 13 条 / 卖出 8 条各排 7 行与 4 行，整面板同高可容纳。
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 12)
 	grid.add_theme_constant_override("v_separation", 6)
 	_trade_list.add_child(grid)
 
-	for trade in ItemTypes.TRADES:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 6)
-		grid.add_child(row)
+	if _trade_tab == 0:
+		for trade in ItemTypes.TRADES:
+			_add_buy_row(grid, trade)
+	else:
+		for trade in ItemTypes.SELL_TRADES:
+			_add_sell_row(grid, trade)
 
-		# 价：绿宝石×cost → 货：成品×count，都用物品微缩图（储物箱同款格子）。
-		row.add_child(_make_trade_slot(ItemTypes.EMERALD, int(trade["cost"])))
-		var arrow := Label.new()
-		arrow.text = "→"
-		arrow.add_theme_font_size_override("font_size", 16)
-		arrow.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
-		row.add_child(arrow)
-		row.add_child(_make_trade_slot(int(trade["result"]), int(trade["count"])))
 
-		var name_label := Label.new()
-		name_label.text = ItemTypes.item_name(int(trade["result"]))
-		name_label.add_theme_font_size_override("font_size", 15)
-		name_label.add_theme_color_override("font_color", Color(0.28, 0.20, 0.10))
-		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(name_label)
+func _on_trade_tab(tab: int) -> void:
+	_trade_tab = clampi(tab, 0, 1)
+	_refresh_trade_panel()
 
-		var button := Button.new()
-		button.text = "交换"
-		button.custom_minimum_size = Vector2(56, 40)
-		button.focus_mode = Control.FOCUS_NONE
-		# 暖金色系与米色窗体同调（合成台「合成」同款），禁用变灰一目了然。
-		UiKit.apply_warm_style(button)
-		button.disabled = not _can_trade(trade)
-		button.pressed.connect(_on_trade_pressed.bind(trade))
-		row.add_child(button)
+
+## 买入行：绿宝石×cost → 成品×count + 「交换」按钮。
+func _add_buy_row(grid: GridContainer, trade: Dictionary) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	grid.add_child(row)
+
+	row.add_child(_make_trade_slot(ItemTypes.EMERALD, int(trade["cost"])))
+	row.add_child(_make_arrow_label())
+	row.add_child(_make_trade_slot(int(trade["result"]), int(trade["count"])))
+
+	var name_label := _make_trade_name(ItemTypes.item_name(int(trade["result"])))
+	row.add_child(name_label)
+
+	var button := Button.new()
+	button.text = "交换"
+	button.custom_minimum_size = Vector2(56, 40)
+	button.focus_mode = Control.FOCUS_NONE
+	# 暖金色系与米色窗体同调（合成台「合成」同款），禁用变灰一目了然。
+	UiKit.apply_warm_style(button)
+	button.disabled = not _can_trade(trade)
+	button.pressed.connect(_on_trade_pressed.bind(trade))
+	row.add_child(button)
+
+
+## 卖出行：物资×count → 绿宝石×bundle + 「出售」按钮（物资不足置灰）。
+func _add_sell_row(grid: GridContainer, trade: Dictionary) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	grid.add_child(row)
+
+	var item := int(trade["item"])
+	var count := int(trade["count"])
+	var bundle := ItemTypes.sell_bundle_price(item, count)
+	row.add_child(_make_trade_slot(item, count))
+	row.add_child(_make_arrow_label())
+	row.add_child(_make_trade_slot(ItemTypes.EMERALD, bundle))
+
+	var name_label := _make_trade_name("%s ×%d" % [ItemTypes.item_name(item), count])
+	row.add_child(name_label)
+
+	var button := Button.new()
+	button.text = "出售"
+	button.custom_minimum_size = Vector2(56, 40)
+	button.focus_mode = Control.FOCUS_NONE
+	UiKit.apply_warm_style(button)
+	if _player != null:
+		button.disabled = _player.inventory.count_item(item) < count
+	button.pressed.connect(_on_sell_pressed.bind(trade))
+	row.add_child(button)
+
+
+func _make_arrow_label() -> Label:
+	var arrow := Label.new()
+	arrow.text = "→"
+	arrow.add_theme_font_size_override("font_size", 16)
+	arrow.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
+	return arrow
+
+
+func _make_trade_name(text: String) -> Label:
+	var name_label := Label.new()
+	name_label.text = text
+	name_label.add_theme_font_size_override("font_size", 15)
+	name_label.add_theme_color_override("font_color", Color(0.28, 0.20, 0.10))
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return name_label
+
+
+## 点「出售」：扣物资、发绿宝石，播报与刷新同买入一致。
+func _on_sell_pressed(trade: Dictionary) -> void:
+	if _player == null:
+		return
+	var item := int(trade["item"])
+	var count := int(trade["count"])
+	if _player.inventory.count_item(item) < count:
+		return
+	_player.inventory.consume_item(item, count)
+	var bundle := ItemTypes.sell_bundle_price(item, count)
+	_player.inventory.add_item(ItemTypes.EMERALD, bundle)
+	Progress.notify("traded")
+	_refresh_trade_panel()
+	_refresh_hotbar()
+	Events.notice.emit("卖出了 %s×%d，获得绿宝石×%d" % [ItemTypes.item_name(item), count, bundle])
 
 
 ## 交易行的微缩物品格（储物箱同款 ItemSlot）：角标 ×N，悬停出 3D 物品提示。

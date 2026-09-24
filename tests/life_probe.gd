@@ -373,6 +373,49 @@ func _run() -> void:
 		if trade["result"] in [ItemTypes.RAW_PORK, ItemTypes.BREAD, ItemTypes.WHEAT]:
 			has_food_trade = true
 	_check(has_food_trade, "交易列表含食物条目（猪排/面包/小麦）")
+
+	# 村庄收购（卖出页签）：清单非空、打包价严格高于一键售卖、UI 可切换可成交。
+	_check(
+		ItemTypes.SELL_TRADES.size() >= 6,
+		"村庄收购 %d 条（前期易得物资）" % ItemTypes.SELL_TRADES.size(),
+	)
+	var generous := true
+	for sell_trade: Dictionary in ItemTypes.SELL_TRADES:
+		var sell_item := int(sell_trade["item"])
+		var sell_cnt := int(sell_trade["count"])
+		if ItemTypes.sell_bundle_price(sell_item, sell_cnt) <= ItemTypes.sell_price(sell_item) * sell_cnt:
+			generous = false
+	_check(generous, "收购打包价严格高于一键售卖价（×1.5 奖励）")
+	var wood_trade: Dictionary = {}
+	for sell_trade2: Dictionary in ItemTypes.SELL_TRADES:
+		if int(sell_trade2["item"]) == BlockTypes.Block.WOOD:
+			wood_trade = sell_trade2
+			break
+	_check(not wood_trade.is_empty(), "收购清单含木头（前期最易得物资）")
+	hud.set_trade_open(true)
+	hud._on_trade_tab(1)
+	await get_tree().process_frame
+	var sell_grid := (hud._trade_list.get_child(0) as GridContainer)
+	_check(sell_grid.get_child_count() == ItemTypes.SELL_TRADES.size(),
+		"卖出页签显示 %d 行" % sell_grid.get_child_count())
+	if not wood_trade.is_empty():
+		var em_before := player.inventory.count_item(ItemTypes.EMERALD)
+		player.inventory.add_item(BlockTypes.Block.WOOD, int(wood_trade["count"]) + 3)
+		hud._refresh_trade_panel()
+		await get_tree().process_frame
+		# 刷新会整表重建，按钮要重新取（旧引用已随旧节点释放）。
+		var wood_row := (hud._trade_list.get_child(0) as GridContainer).get_child(0) as HBoxContainer
+		var wood_btn := wood_row.get_child(wood_row.get_child_count() - 1) as Button
+		_check(not wood_btn.disabled, "补足木头后「出售」按钮可用")
+		wood_btn.pressed.emit()
+		await get_tree().process_frame
+		_check(
+			player.inventory.count_item(ItemTypes.EMERALD)
+				== em_before + ItemTypes.sell_bundle_price(BlockTypes.Block.WOOD, int(wood_trade["count"])),
+			"出售木头后绿宝石到账（打包价 ×1.5）",
+		)
+	hud._on_trade_tab(0)
+	hud.set_trade_open(false)
 	_check(ItemTypes.is_food(ItemTypes.RAW_PORK) and ItemTypes.is_food(ItemTypes.BREAD),
 		"生猪排与面包判定为食物")
 

@@ -26,8 +26,11 @@ func _run() -> void:
 		hud.close_map_selector()
 		for i in range(10):
 			await get_tree().process_frame
-	# 给玩家 10 颗绿宝石：可见「可交换」与「不足置灰」两种按钮状态。
-	main_scene.get_node("Player").inventory.add_item(ItemTypes.EMERALD, 10)
+	# 给玩家 10 颗绿宝石 + 一些前期物资：可见「可交换/置灰」与「可出售」两种状态。
+	var player: Player = main_scene.get_node("Player")
+	player.inventory.add_item(ItemTypes.EMERALD, 10)
+	player.inventory.add_item(BlockTypes.Block.WOOD, 14)
+	player.inventory.add_item(BlockTypes.Block.COBBLESTONE, 20)
 	hud.set_trade_open(true)
 	for i in range(20):
 		await get_tree().process_frame
@@ -35,4 +38,13 @@ func _run() -> void:
 	var shot_path := _shot_path("trade_panel_shot.png")
 	get_viewport().get_texture().get_image().save_png(shot_path)
 	print("TRADE_SHOT_DONE ", shot_path)
+
+	# 卖出页签：物资换绿宝石的打包收购行。
+	hud._on_trade_tab(1)
+	for i in range(20):
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	var sell_path := _shot_path("trade_sell_shot.png")
+	get_viewport().get_texture().get_image().save_png(sell_path)
+	print("TRADE_SELL_SHOT_DONE ", sell_path)
 	get_tree().quit(0)
