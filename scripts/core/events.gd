@@ -25,3 +25,15 @@ signal region_entered(region_id: int)
 ## 右键命中冶炼炉方块时发出，HUD 监听后打开冶炼面板。
 signal request_smelt
 
+## 生物死亡后广播（mob_type 为 Mob.MobType 常量），进度核心据此累计击杀。
+signal mob_killed(mob_type: int)
+
+## 玩家死亡后广播（Main 转发 Player.died）。
+signal player_died
+
+## 玩家在合成台完成一次合成后广播，进度核心据此累计。
+signal craft_done(item_id: int)
+
+## 玩家在冶炼炉完成一次冶炼后广播，进度核心据此累计。
+signal smelt_done(item_id: int)
+

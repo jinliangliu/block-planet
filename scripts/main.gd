@@ -40,6 +40,7 @@ func _ready() -> void:
 	_hud.set_map_name(String(profile["title"]))
 	_mob_spawner.setup(_player, _world, _day_night)
 	_mob_spawner.set_region(profile)
+	_player.died.connect(func(): Events.player_died.emit())
 	Events.region_entered.connect(_on_region_entered)
 	_build_village()
 

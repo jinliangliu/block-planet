@@ -428,6 +428,7 @@ func _has_line_of_sight() -> bool:
 
 
 func _die() -> void:
+	Events.mob_killed.emit(type)
 	_spawn_drop()
 	queue_free()
 

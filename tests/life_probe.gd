@@ -658,6 +658,60 @@ func _run() -> void:
 	hud.close_manual()
 	_check(not manual.is_open(), "关闭说明书后状态复位")
 
+	# 阶段 L：任务与成就系统。先备份真实进度再清空，保证断言确定性。
+	var saved_counters: Dictionary = Progress.counters.duplicate()
+	var saved_states: Dictionary = Progress.states.duplicate()
+	Progress.counters.clear()
+	Progress.states.clear()
+
+	_check(QuestData.quests().size() == 8, "新手任务链共 8 环")
+	_check(QuestData.achievements().size() == 14, "成就共 14 枚")
+	var first_q := QuestData.quests()[0]
+	var second_q := QuestData.quests()[1]
+	_check(Progress.is_visible(first_q) and not Progress.is_visible(second_q),
+		"任务链首环可见、次环锁定")
+	_check(Progress.state_of(String(first_q["id"])) == Progress.State.ACTIVE,
+		"首环初始为进行中")
+	Progress.notify(String(first_q["goal"]["key"]), int(first_q["goal"]["count"]) + 1)
+	_check(Progress.state_of(String(first_q["id"])) == Progress.State.DONE,
+		"达成目标后任务进入可领奖")
+	_check(Progress.goal_progress(first_q["goal"]).x == int(first_q["goal"]["count"]),
+		"进度值被钳制在目标值内")
+	var reward: Dictionary = Progress.claim(String(first_q["id"]))
+	_check(not reward.is_empty()
+		and Progress.state_of(String(first_q["id"])) == Progress.State.CLAIMED,
+		"领奖后任务标记为已领取并返回奖励")
+	_check(Progress.is_visible(second_q), "前序领奖后下一环解锁")
+	_check(Progress.goal_progress({"type": "regions", "count": 5}).y == 5,
+		"区域型目标可计算进度")
+
+	var quiz_hits: Array[Dictionary] = []
+	Progress.quiz_reward_earned.connect(func(item: int, count: int):
+		quiz_hits.append({"item": item, "count": count}))
+	Progress.answer_quiz(true)
+	Progress.answer_quiz(true)
+	_check(quiz_hits.is_empty(), "答对 2 题尚未触发连对奖励")
+	Progress.answer_quiz(true)
+	_check(quiz_hits.size() == 1 and int(quiz_hits[0]["count"]) == 2,
+		"答对 3 题触发一次连对奖励（面包 ×2）")
+	_check(int(Progress.counters.get("quiz_correct", 0)) == 3,
+		"答对题数计入计数器")
+
+	_check(FileAccess.file_exists("user://progress.json"), "进度已持久化到 user://")
+
+	hud.open_quest_panel()
+	_check(hud._quest_panel.is_open() and not player.is_physics_processing(),
+		"可打开任务面板且玩家被冻结（J 键路径）")
+	hud._quest_panel.set_tab(1)
+	_check(hud._quest_panel.get_tab() == 1, "可切换到成就页签")
+	hud.close_quest_panel()
+	_check(not hud._quest_panel.is_open() and player.is_physics_processing(),
+		"关闭任务面板后玩家恢复物理处理")
+
+	Progress.counters = saved_counters
+	Progress.states = saved_states
+	Progress._save()
+
 	# 区域化世界生成：独立 World 实例按区域配置产出地表材质与树木密度。
 	var polar := World.new()
 	polar.set_region(RegionAtlas.ANTARCTICA)

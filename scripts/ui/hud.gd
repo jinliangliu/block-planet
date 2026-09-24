@@ -22,6 +22,9 @@ var _mode_label: Label
 var _map_name_label: Label
 var _map_selector: MapSelector
 var _manual: ManualPanel
+var _quest_panel: QuestPanel
+var _toast_label: Label
+var _toast_tween: Tween
 var _day_night: DayNightCycle
 var _craft_overlay: Control
 var _craft_result_grid: GridContainer
@@ -98,6 +101,9 @@ func _build() -> void:
 	_build_smelt_panel(root)
 	_build_minimap(root)
 	_build_manual(root)
+	_build_quest_panel(root)
+	_build_toast(root)
+	_connect_progress()
 	_build_map_name(root)
 	_build_map_selector(root)
 
@@ -116,6 +122,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			close_manual()
 			get_viewport().set_input_as_handled()
 		return
+	# 任务面板为模态窗口：ESC / J 关闭，其余热键让位。
+	if _quest_panel != null and _quest_panel.is_open():
+		if event is InputEventKey and event.pressed and not event.echo \
+				and (event.keycode == KEY_ESCAPE or event.keycode == KEY_J):
+			close_quest_panel()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.is_action_pressed("toggle_craft"):
 			_toggle_craft_panel()
@@ -124,9 +137,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.is_action_pressed("toggle_trade"):
 			_toggle_trade_panel()
 		elif event.is_action_pressed("toggle_map"):
+			Progress.notify("map_opened")
 			open_map_selector()
 		elif event.is_action_pressed("toggle_manual"):
 			open_manual()
+		elif event.is_action_pressed("toggle_quests"):
+			open_quest_panel()
 		elif event.keycode == KEY_ESCAPE and _box_overlay != null and _box_overlay.visible:
 			set_box_open(false)
 			get_viewport().set_input_as_handled()
@@ -791,6 +807,7 @@ func _on_craft_pressed() -> void:
 	var recipe: Dictionary = ItemTypes.RECIPES[_selected_recipe]
 	if not _player.inventory.craft(recipe):
 		return
+	Events.craft_done.emit(int(recipe["result"]))
 	_refresh_craft_path()
 	_refresh_hotbar()
 	_play_craft_fly(int(recipe["result"]))
@@ -928,6 +945,7 @@ func _on_trade_pressed(trade: Dictionary) -> void:
 		return
 	if _player.inventory.consume_item(ItemTypes.EMERALD, int(trade["cost"])):
 		_player.inventory.add_item(trade["result"], int(trade["count"]))
+		Progress.notify("traded")
 		_refresh_trade_panel()
 		_refresh_hotbar()
 
@@ -1402,6 +1420,7 @@ func _on_smelt_pressed(recipe: Dictionary) -> void:
 	if _player == null:
 		return
 	if _player.inventory.craft(recipe):
+		Events.smelt_done.emit(int(recipe["result"]))
 		_refresh_smelt_panel()
 		_refresh_hotbar()
 
@@ -1510,6 +1529,98 @@ func _on_manual_closed() -> void:
 		or (_smelt_overlay != null and _smelt_overlay.visible)
 	if not overlay_open and not DisplayServer.is_touchscreen_available():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## 任务与成就面板：模态窗口，冻结玩家（同地图选择器）。
+func _build_quest_panel(root: Control) -> void:
+	_quest_panel = QuestPanel.new()
+	_quest_panel.closed.connect(_on_quest_panel_closed)
+	root.add_child(_quest_panel)
+
+
+func open_quest_panel() -> void:
+	if _quest_panel == null:
+		return
+	_quest_panel.open()
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_quest_panel() -> void:
+	if _quest_panel == null:
+		return
+	_quest_panel.close()
+
+
+func _on_quest_panel_closed() -> void:
+	_set_player_frozen(false)
+	_on_manual_closed()
+
+
+## 进度信号 → 面板刷新 / 奖励入包 / 顶部 Toast 提示。
+func _connect_progress() -> void:
+	Progress.quest_completed.connect(_on_quest_completed)
+	Progress.quest_claimed.connect(_on_quest_claimed)
+	Progress.achievement_unlocked.connect(_on_achievement_unlocked)
+	Progress.quiz_reward_earned.connect(_on_quiz_reward)
+
+
+func _on_quest_completed(id: String) -> void:
+	var entry := QuestData.entry_by_id(id)
+	_show_toast("任务达成：%s（打开任务面板领取奖励）" % String(entry.get("title", id)))
+
+
+func _on_quest_claimed(_id: String, reward: Dictionary) -> void:
+	if _player != null:
+		_player.inventory.add_item(int(reward["item"]), int(reward["count"]))
+		_refresh_hotbar()
+	_show_toast("已领取：%s ×%d" % [
+		ItemTypes.item_name(int(reward["item"])), int(reward["count"]),
+	])
+	if _quest_panel != null:
+		_quest_panel.refresh()
+
+
+func _on_achievement_unlocked(id: String) -> void:
+	var entry := QuestData.entry_by_id(id)
+	_show_toast("成就达成：◆ %s" % String(entry.get("title", id)))
+
+
+func _on_quiz_reward(item: int, count: int) -> void:
+	if _player != null:
+		_player.inventory.add_item(item, count)
+		_refresh_hotbar()
+	_show_toast("问答连对奖励：%s ×%d" % [ItemTypes.item_name(item), count])
+
+
+## 顶部居中 Toast：短暂浮现后淡出，不阻塞操作。
+func _build_toast(root: Control) -> void:
+	_toast_label = Label.new()
+	_toast_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_toast_label.offset_left = -320.0
+	_toast_label.offset_right = 320.0
+	_toast_label.offset_top = 64.0
+	_toast_label.offset_bottom = 96.0
+	_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast_label.add_theme_font_size_override("font_size", 20)
+	_toast_label.add_theme_color_override("font_color", Color(1.0, 0.96, 0.85))
+	_toast_label.add_theme_color_override("font_outline_color", Color(0.16, 0.11, 0.05))
+	_toast_label.add_theme_constant_override("outline_size", 6)
+	_toast_label.modulate.a = 0.0
+	root.add_child(_toast_label)
+
+
+func _show_toast(text: String) -> void:
+	if _toast_label == null:
+		return
+	_toast_label.text = text
+	if _toast_tween != null:
+		_toast_tween.kill()
+	_toast_label.modulate.a = 1.0
+	_toast_tween = create_tween()
+	_toast_tween.tween_interval(2.2)
+	_toast_tween.tween_property(_toast_label, "modulate:a", 0.0, 0.6)
 
 
 ## 全屏模态期间冻结玩家：关闭物理与输入处理，避免镜头与移动在背后漂移。

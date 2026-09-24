@@ -18,6 +18,7 @@ config/features=PackedStringArray("4.6")
 
 Events="*res://scripts/core/events.gd"
 GameState="*res://scripts/core/game_state.gd"
+Progress="*res://scripts/systems/progress_manager.gd"
 
 [display]
 
