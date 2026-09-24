@@ -110,12 +110,18 @@ func _draw() -> void:
 	else:
 		_draw_item_icon(center, half, base)
 
-	# 有耐久信息的工具角标显示耐久；其余（含无耐久信息的工具预览格）显示数量。
-	var corner := "×%d" % _count
-	if ItemTypes.is_tool_item(_item_id) and _durability >= 0:
-		corner = str(_durability)
-	draw_string(get_theme_default_font(), Vector2(4.0, size.y - 5.0), corner,
+	# 角标一律显示数量 ×N。耐久不再用裸数字角标——木镐耐久 60 曾被读成
+	# 「合成了 60 个」；改为底部耐久条（绿→红），只在受损后出现。
+	draw_string(get_theme_default_font(), Vector2(4.0, size.y - 7.0), "×%d" % _count,
 		HORIZONTAL_ALIGNMENT_RIGHT, size.x - 8.0, 14, _text_color)
+	if ItemTypes.is_tool_item(_item_id) and _durability >= 0:
+		var max_dur := ItemTypes.tool_durability(_item_id)
+		if max_dur > 0 and _durability < max_dur:
+			var ratio := clampf(float(_durability) / float(max_dur), 0.0, 1.0)
+			var bar_color := Color(0.85, 0.20, 0.15).lerp(Color(0.25, 0.80, 0.25), ratio)
+			var bar_rect := Rect2(Vector2(3.0, size.y - 4.0), Vector2(size.x - 6.0, 3.0))
+			draw_rect(bar_rect, Color(0.0, 0.0, 0.0, 0.35))
+			draw_rect(Rect2(bar_rect.position, Vector2(bar_rect.size.x * ratio, 3.0)), bar_color)
 
 
 ## 等距小立方体微缩图：顶/左/右三面明暗区分，颜色取自方块顶面瓦片。
