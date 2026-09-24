@@ -15,7 +15,6 @@ var _slot_buttons: Array[Button] = []
 var _hunger_label: Label
 var _name_label: Label
 var _hearts: Control
-var _hint_label: Label
 var _minimap: MiniMap
 var _time_label: Label
 var _mode_label: Label
@@ -91,8 +90,6 @@ func _build() -> void:
 		_build_joystick(root)
 		_build_look_area(root)
 		_build_action_buttons(root)
-	else:
-		_build_desktop_hint(root)
 
 	_build_hotbar(root)
 	_build_craft_panel(root)
@@ -149,8 +146,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_ESCAPE and _craft_overlay != null and _craft_overlay.visible:
 			set_craft_open(false)
 			get_viewport().set_input_as_handled()
-		elif event.keycode == KEY_F2 and _hint_label:
-			_hint_label.visible = not _hint_label.visible
 
 
 func _process(_delta: float) -> void:
@@ -445,16 +440,6 @@ func _anchor_bottom_right(root: Control, control: Control, right_margin: float, 
 	control.offset_top = -(bottom_margin + s.y)
 	control.offset_right = -right_margin
 	control.offset_bottom = -bottom_margin
-
-
-func _build_desktop_hint(root: Control) -> void:
-	_hint_label = Label.new()
-	_hint_label.text = "WASD 移动 · 鼠标视角 · 滚轮拉近/拉远(拉远看角色) · 左键按住破坏/左键攻击 · 右键放置/吃食物/开箱/冶炼 · 1-9 选方块 · E 合成 · B 交易 · M 地图 · G 切换模式 · 空格跳跃 · 双击空格飞行(创造) · Ctrl 下降 · Shift冲刺 · Esc释放鼠标 · F1 说明书 · F2 显示/隐藏本提示"
-	_hint_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.9))
-	_hint_label.add_theme_font_size_override("font_size", 18)
-	_hint_label.position = Vector2(16, 120)
-	_hint_label.visible = false
-	root.add_child(_hint_label)
 
 
 func _on_joystick_changed(value: Vector2) -> void:
