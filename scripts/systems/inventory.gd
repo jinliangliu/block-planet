@@ -1,14 +1,14 @@
 class_name Inventory
 extends RefCounted
-## 物品背包：玩家为 27 格（0~17 常用区 + 18~26 待售区），储物箱等可另指定容量。
+## 物品背包：玩家为 36 格（0~26 常用区 + 27~35 待售区），储物箱等可另指定容量。
 ## 每个槽位包含物品 ID 与数量。
 ## 自动入包（拾取/合成产物）只落在 fill_limit 之内的槽位，待售区由玩家手动放入。
 
 signal changed
 
-const SLOT_COUNT := 27
-## 常用区容量：自动入包与手工整理的区域。
-const COMMON_COUNT := 18
+const SLOT_COUNT := 36
+## 常用区容量：自动入包与手工整理的区域（面板按 9 格一行排布）。
+const COMMON_COUNT := 27
 ## 待售区容量：可整区一键售卖给交易中心。
 const SELL_COUNT := 9
 ## 快捷栏位数：映射到背包槽索引（hotbar_map），物品本体仍存在背包中。

@@ -984,7 +984,7 @@ func _on_trade_pressed(trade: Dictionary) -> void:
 		_refresh_hotbar()
 
 
-## 储物箱面板：上 27 格为箱内格子、下 9 格为玩家快捷栏。
+## 储物箱面板：上 36 格为箱内格子、下方为玩家背包（36 格，含待售区）。
 ## 点击任一格把该格整叠转移到另一侧（工具不可堆叠按容量截断）。
 func _build_box_panel(root: Control) -> void:
 	_box_overlay = Control.new()
@@ -1003,7 +1003,8 @@ func _build_box_panel(root: Control) -> void:
 	_box_overlay.add_child(center)
 
 	var wrapper := Control.new()
-	wrapper.custom_minimum_size = Vector2(664, 620)
+	# 玩家背包扩至 36 格后，下方背包网格由 3 行变 4 行，面板需相应加高。
+	wrapper.custom_minimum_size = Vector2(664, 664)
 	center.add_child(wrapper)
 
 	var panel := PanelContainer.new()

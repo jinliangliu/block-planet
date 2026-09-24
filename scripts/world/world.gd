@@ -32,7 +32,7 @@ var _atlas_material: StandardMaterial3D
 var _noise := FastNoiseLite.new()
 var _player: Player
 var _neighbor_lookup: Callable
-# 储物箱内容物：按方块坐标记录独立 27 格背包，破坏时散落至地面。
+# 储物箱内容物：按方块坐标记录独立 36 格背包，破坏时散落至地面。
 var box_contents: Dictionary[Vector3i, Inventory] = {}
 # 水体分类缓存：水面格 → WATER_LARGE / WATER_POND，同一水体只洪泛一次。
 var _water_kind_cache: Dictionary[Vector2i, int] = {}
@@ -191,7 +191,7 @@ func set_block(world_pos: Vector3i, id: int) -> void:
 		_rebuild_chunk(coord + Vector3i(0, 0, 1))
 
 
-## 获取指定储物箱的背包；首次访问时创建 27 格空背包。
+## 获取指定储物箱的背包；首次访问时创建 36 格空背包。
 func get_box(cell: Vector3i) -> Inventory:
 	if not box_contents.has(cell):
 		box_contents[cell] = Inventory.new(36)

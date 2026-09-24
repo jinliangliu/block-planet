@@ -158,8 +158,8 @@ func _run() -> void:
 	box.add_item(BlockTypes.Block.WOOD, 10)
 	_check(world.get_box(chest_cell) == box, "同一箱体重复访问返回同一背包实例")
 	_check(box.count_item(BlockTypes.Block.WOOD) == 10, "箱内存入木头×10")
-	_check(player.inventory.slots.size() == Inventory.SLOT_COUNT and Inventory.SLOT_COUNT == 27,
-		"玩家背包扩至 27 格")
+	_check(player.inventory.slots.size() == Inventory.SLOT_COUNT and Inventory.SLOT_COUNT == 36,
+		"玩家背包扩至 36 格")
 
 	# 玩家面向储物箱右键 → 事件开面板。
 	player.global_position = Vector3(30.5, base_y + 1.1, 26.5)
@@ -764,10 +764,11 @@ func _run() -> void:
 
 	# ── 阶段 O：背包分区、快捷栏指派与待售区一键售卖 ──
 	var bag := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
-	_check(bag.slots.size() == 27 and Inventory.COMMON_COUNT == 18 and Inventory.SELL_COUNT == 9,
-		"背包 27 格 = 常用区 18 + 待售区 9")
-	_check(not bag.is_sell_slot(0) and bag.is_sell_slot(18) and bag.is_sell_slot(26)
-		and not bag.is_sell_slot(27), "待售区槽位判定覆盖 18~26")
+	_check(bag.slots.size() == 36 and Inventory.COMMON_COUNT == 27 and Inventory.SELL_COUNT == 9,
+		"背包 36 格 = 常用区 27 + 待售区 9")
+	_check(not bag.is_sell_slot(0) and not bag.is_sell_slot(26) and bag.is_sell_slot(27)
+		and bag.is_sell_slot(35) and not bag.is_sell_slot(36), "待售区槽位判定覆盖 27~35")
+	_check(InventoryPanel.COMMON_COLUMNS == 9, "背包面板常用区每行 9 格")
 	_check(bag.hotbar_map.size() == 9 and bag.hotbar_slot(0) == 0 and bag.hotbar_slot(8) == 8,
 		"快捷栏默认映射背包前 9 格")
 
@@ -778,12 +779,12 @@ func _run() -> void:
 	_check(leftover == 3 and bag.get_item(Inventory.COMMON_COUNT) == BlockTypes.Block.AIR,
 		"常用区满时拾取不再落入待售区")
 
-	# 快捷栏指派：新槽位直接指派，占用中的槽位互换。
+	# 快捷栏指派：新槽位直接指派，占用中的槽位互换（顺带覆盖待售区槽位可指派）。
 	var assign_bag := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
-	assign_bag.slots[20] = {"item": ItemTypes.EMERALD, "count": 5, "durability": -1}
-	_check(assign_bag.assign_hotbar(0, 20) and assign_bag.hotbar_item(0) == ItemTypes.EMERALD,
-		"可把背包第 21 格指派到快捷栏 1 号位")
-	_check(assign_bag.assign_hotbar(1, 20) and assign_bag.hotbar_item(1) == ItemTypes.EMERALD
+	assign_bag.slots[31] = {"item": ItemTypes.EMERALD, "count": 5, "durability": -1}
+	_check(assign_bag.assign_hotbar(0, 31) and assign_bag.hotbar_item(0) == ItemTypes.EMERALD,
+		"可把背包第 32 格（待售区）指派到快捷栏 1 号位")
+	_check(assign_bag.assign_hotbar(1, 31) and assign_bag.hotbar_item(1) == ItemTypes.EMERALD
 		and assign_bag.hotbar_item(0) == BlockTypes.Block.AIR,
 		"重复指派同一背包槽时与原快捷位互换")
 	_check(assign_bag.swap_hotbar(1, 3) and assign_bag.hotbar_item(3) == ItemTypes.EMERALD,

@@ -1,6 +1,6 @@
 class_name InventoryPanel
 extends Control
-## 背包窗口（B 键唤出）：常用区 18 格 + 待售区 9 格 + 快捷栏 1~9 管理行。
+## 背包窗口（B 键唤出）：常用区 27 格（9 格一行）+ 待售区 9 格 + 快捷栏 1~9 管理行。
 ## 支持拖拽搬运、数量加减与待售区一键售卖（兑换绿宝石）。配色与储物箱同色系。
 ## 快捷栏为背包槽的视图映射：拖入背包物品即把该槽指派到对应快捷位。
 
@@ -16,7 +16,7 @@ const TEXT_MUTED := Color(0.48, 0.40, 0.28)
 const ACCENT := Color(0.62, 0.42, 0.12)
 const SLOT_SIZE := 50.0
 const SLOT_GAP := 8.0
-const COMMON_COLUMNS := 6
+const COMMON_COLUMNS := 9
 
 ## 可拖拽物品格：携带来源分区与索引，由面板统一结算落点。
 class Cell extends ItemSlot:
@@ -208,7 +208,7 @@ func _build() -> void:
 	panel.add_child(vbox)
 
 	vbox.add_child(_build_header())
-	vbox.add_child(_make_section_title("常用物品（18 格）"))
+	vbox.add_child(_make_section_title("常用物品（%d 格）" % Inventory.COMMON_COUNT))
 	_common_cells = _build_grid(vbox, Inventory.COMMON_COUNT, COMMON_COLUMNS, 0, "common")
 	vbox.add_child(_build_sell_header())
 	_sell_cells = _build_grid(vbox, Inventory.SELL_COUNT, Inventory.SELL_COUNT,
@@ -221,7 +221,7 @@ func _build() -> void:
 	_report_label.add_theme_font_size_override("font_size", 15)
 	_report_label.add_theme_color_override("font_color", TEXT_MUTED)
 	_report_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_report_label.custom_minimum_size = Vector2(560.0, 0.0)
+	_report_label.custom_minimum_size = Vector2(514.0, 0.0)
 	vbox.add_child(_report_label)
 
 
