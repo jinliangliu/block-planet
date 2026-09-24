@@ -9,6 +9,20 @@ const SIZE := 132.0
 const MAP_RADIUS := 11
 ## 采样周期（秒）：低频采样避免每帧扫描地形。
 const SAMPLE_INTERVAL := 0.6
+## 底盘与色块透明度：底盘半透明，可见后方 3D 画面。
+const BASE_ALPHA := 0.42
+const TILE_ALPHA := 0.78
+## 指南针框体配色与四方位（北为 -z，与地图上方一致）。
+const FRAME_BRASS := Color(0.80, 0.64, 0.34)
+const FRAME_DARK := Color(0.30, 0.22, 0.12)
+const FRAME_INNER := Color(0.24, 0.18, 0.10, 0.85)
+const NORTH_COLOR := Color(0.90, 0.26, 0.24)
+const CARDINALS := [
+	{"label": "北", "dir": Vector2(0.0, -1.0), "north": true},
+	{"label": "东", "dir": Vector2(1.0, 0.0), "north": false},
+	{"label": "南", "dir": Vector2(0.0, 1.0), "north": false},
+	{"label": "西", "dir": Vector2(-1.0, 0.0), "north": false},
+]
 
 var _player: Player
 var _world: World
@@ -72,8 +86,8 @@ func _top_block(wx: int, wz: int) -> int:
 
 func _draw() -> void:
 	var center := size / 2.0
-	var radius := SIZE / 2.0 - 4.0
-	draw_circle(center, radius, Color(0.08, 0.10, 0.14, 0.85))
+	var radius := SIZE / 2.0 - 13.0
+	draw_circle(center, radius, Color(0.08, 0.10, 0.14, BASE_ALPHA))
 
 	var cells := MAP_RADIUS * 2 + 1
 	var step := radius * 2.0 / float(cells)
@@ -85,7 +99,7 @@ func _draw() -> void:
 		var color: Color = _samples[pos]
 		draw_rect(
 			Rect2(center + offset - Vector2.ONE * step * 0.5, Vector2.ONE * step),
-			color
+			Color(color.r, color.g, color.b, TILE_ALPHA)
 		)
 
 	# 观察方向箭头：取相机水平前向，玩家转向时箭头同步旋转。
@@ -104,4 +118,33 @@ func _draw() -> void:
 				Color(1.0, 0.85, 0.25)
 			)
 
-	draw_arc(center, radius, 0.0, TAU, 48, Color(1.0, 1.0, 1.0, 0.55), 2.0, true)
+	_draw_compass_frame(center, radius)
+
+
+## 指南针框体：黄铜环带（内含四方位字，北为红色）+ 内外细沿 + 十二刻度。
+func _draw_compass_frame(center: Vector2, radius: float) -> void:
+	var band_mid := radius + 6.0
+	draw_arc(center, band_mid, 0.0, TAU, 64, FRAME_BRASS, 11.0, true)
+	draw_arc(center, radius - 0.5, 0.0, TAU, 64, FRAME_INNER, 1.5, true)
+	draw_arc(center, radius + 11.5, 0.0, TAU, 64, FRAME_DARK, 1.5, true)
+	for i in range(16):
+		if i % 4 == 0:
+			continue
+		var a := TAU * float(i) / 16.0
+		var dir := Vector2(sin(a), -cos(a))
+		draw_line(
+			center + dir * (radius + 1.0),
+			center + dir * (radius + 5.5),
+			FRAME_DARK,
+			1.5,
+			true
+		)
+	var font := get_theme_default_font()
+	for card: Dictionary in CARDINALS:
+		var label: String = card["label"]
+		var color: Color = NORTH_COLOR if card["north"] else FRAME_DARK
+		var font_size := 15 if card["north"] else 13
+		var extent := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+		var dir: Vector2 = card["dir"]
+		var at := center + dir * band_mid - extent * 0.5 + Vector2(0.0, extent.y * 0.3)
+		draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)

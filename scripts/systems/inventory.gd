@@ -5,7 +5,7 @@ extends RefCounted
 
 signal changed
 
-const SLOT_COUNT := 9
+const SLOT_COUNT := 18
 
 var slots: Array[Dictionary] = []
 

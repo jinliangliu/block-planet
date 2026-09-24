@@ -30,6 +30,10 @@ const BREAD := 208
 const COPPER_INGOT := 209
 const TIN_INGOT := 210
 const BRONZE_INGOT := 211
+# 水生物掉落：下水捕鱼捉虾摸蟹，肉可食用。
+const RAW_FISH := 212
+const RAW_SHRIMP := 213
+const CRAB_MEAT := 214
 
 const TOOL_TYPE := {
 	WOOD_PICKAXE: "pickaxe",
@@ -112,6 +116,9 @@ const FOOD := {
 	RAW_CHICKEN: 5,
 	RAW_PORK: 6,
 	BREAD: 7,
+	RAW_FISH: 6,
+	RAW_SHRIMP: 4,
+	CRAB_MEAT: 5,
 }
 
 # 非方块物品的名称（工具与方块之外的 ID）。
@@ -128,6 +135,9 @@ const ITEM_NAMES := {
 	COPPER_INGOT: "铜锭",
 	TIN_INGOT: "锡锭",
 	BRONZE_INGOT: "青铜锭",
+	RAW_FISH: "生鱼",
+	RAW_SHRIMP: "生虾",
+	CRAB_MEAT: "蟹肉",
 }
 
 const ITEM_SHORT_NAMES := {
@@ -143,6 +153,9 @@ const ITEM_SHORT_NAMES := {
 	COPPER_INGOT: "铜",
 	TIN_INGOT: "锡",
 	BRONZE_INGOT: "青铜",
+	RAW_FISH: "鱼",
+	RAW_SHRIMP: "虾",
+	CRAB_MEAT: "蟹肉",
 }
 
 # 非方块物品在掉落物/手持模型上使用的平涂颜色。
@@ -159,6 +172,46 @@ const ITEM_COLORS := {
 	COPPER_INGOT: Color(0.83, 0.51, 0.30),
 	TIN_INGOT: Color(0.78, 0.78, 0.82),
 	BRONZE_INGOT: Color(0.68, 0.50, 0.30),
+	RAW_FISH: Color(0.58, 0.72, 0.82),
+	RAW_SHRIMP: Color(0.94, 0.62, 0.52),
+	CRAB_MEAT: Color(0.90, 0.45, 0.38),
+}
+
+# 工具微缩图/3D 预览用的按材质着色（木/石/青铜）。
+const TOOL_COLORS := {
+	WOOD_PICKAXE: Color(0.62, 0.45, 0.25),
+	WOOD_AXE: Color(0.62, 0.45, 0.25),
+	WOOD_SHOVEL: Color(0.62, 0.45, 0.25),
+	STONE_PICKAXE: Color(0.58, 0.58, 0.61),
+	STONE_AXE: Color(0.58, 0.58, 0.61),
+	STONE_SHOVEL: Color(0.58, 0.58, 0.61),
+	BRONZE_PICKAXE: Color(0.72, 0.52, 0.30),
+	BRONZE_AXE: Color(0.72, 0.52, 0.30),
+	BRONZE_SHOVEL: Color(0.72, 0.52, 0.30),
+}
+
+# 悬停简介：特殊条目查表，未列出的按分类生成通用说明。
+const ITEM_DESCRIPTIONS := {
+	BlockTypes.Block.STONE: "坚硬的石头，需要镐才能采集。",
+	BlockTypes.Block.GLASS: "透明方块，两份沙子可合成。",
+	BlockTypes.Block.WATER: "会流动的水，无法拾取。",
+	BlockTypes.Block.BREWING: "村庄里的酿灶台。",
+	BlockTypes.Block.CHEST: "可存放 36 组物品，右键打开。",
+	BlockTypes.Block.FARMLAND: "村庄耕地，种着小麦。",
+	BlockTypes.Block.WHEAT_CROP: "成熟后可收获小麦，三份小麦能合成面包。",
+	BlockTypes.Block.COPPER_ORE: "石层中的有色金属矿，两份矿石可炼成铜锭。",
+	BlockTypes.Block.TIN_ORE: "更深岩层里的有色金属矿，两份矿石可炼成锡锭。",
+	BlockTypes.Block.SMELTER: "右键打开冶炼炉，把矿石炼成金属锭。",
+	BlockTypes.Block.WATERWEED: "大河底部的水草，水下小鱼的藏身处。",
+	BlockTypes.Block.ALGAE: "深水里成片的藻类，可徒手采集。",
+	BlockTypes.Block.DUCKWEED: "池塘水面上的细小浮萍。",
+	BlockTypes.Block.LILY_PAD: "池塘水面的荷叶，青蛙喜欢蹲在上面。",
+	BlockTypes.Block.LOTUS: "池塘里开出的莲花，很漂亮。",
+	RAW_FISH: "河里的鱼，可食用，也能喂猫。",
+	RAW_SHRIMP: "河里的虾，生吃也能填肚子。",
+	CRAB_MEAT: "河底的蟹肉，鲜美的一餐。",
+	EMERALD: "村民交易的货币。",
+	TOTEM: "稀有材料，可向村民兑换。",
 }
 
 # 村民交易配方：cost 为绿宝石数量，result/count 为产出。
@@ -239,6 +292,30 @@ static func category(id: int) -> int:
 	return 0
 
 
+## 物品/方块的展示基色：工具按材质、普通物品查表、方块取顶面瓦片色。
+static func item_color(id: int) -> Color:
+	if is_tool_item(id):
+		return TOOL_COLORS.get(id, Color(0.7, 0.7, 0.7))
+	if ITEM_COLORS.has(id):
+		return ITEM_COLORS.get(id, Color.WHITE)
+	if BlockTypes.TILES.has(id):
+		return TextureAtlas.tile_color(BlockTypes.TILES[id].x)
+	return Color(0.8, 0.8, 0.8)
+
+
+## 悬停简介文本：特殊条目查表，其余按分类生成。
+static func item_description(id: int) -> String:
+	if ITEM_DESCRIPTIONS.has(id):
+		return ITEM_DESCRIPTIONS.get(id, "")
+	if is_tool_item(id):
+		return "采集工具：速度 ×%d，耐久 %d。" % [int(tool_speed(id)), tool_durability(id)]
+	if is_food(id):
+		return "食用可恢复 %d 点饥饿。" % food_value(id)
+	if is_plain_item(id):
+		return "合成与交易用的材料。"
+	return "可放置的建筑方块。"
+
+
 static func is_placeable(id: int) -> bool:
-	return id >= BlockTypes.Block.GRASS and id <= BlockTypes.Block.SMELTER
+	return id >= BlockTypes.Block.GRASS and id <= BlockTypes.Block.LOTUS
 

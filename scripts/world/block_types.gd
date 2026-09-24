@@ -21,6 +21,11 @@ enum Block {
 	COPPER_ORE = 15,
 	TIN_ORE = 16,
 	SMELTER = 17,
+	WATERWEED = 18,
+	ALGAE = 19,
+	DUCKWEED = 20,
+	LILY_PAD = 21,
+	LOTUS = 22,
 }
 
 const NAMES := {
@@ -42,6 +47,11 @@ const NAMES := {
 	Block.COPPER_ORE: "铜矿石",
 	Block.TIN_ORE: "锡矿石",
 	Block.SMELTER: "冶炼炉",
+	Block.WATERWEED: "水草",
+	Block.ALGAE: "藻类",
+	Block.DUCKWEED: "浮萍",
+	Block.LILY_PAD: "荷叶",
+	Block.LOTUS: "莲花",
 }
 
 const SOLID := {
@@ -63,6 +73,11 @@ const SOLID := {
 	Block.COPPER_ORE: true,
 	Block.TIN_ORE: true,
 	Block.SMELTER: true,
+	Block.WATERWEED: false,
+	Block.ALGAE: false,
+	Block.DUCKWEED: false,
+	Block.LILY_PAD: false,
+	Block.LOTUS: false,
 }
 
 const TRANSPARENT := {
@@ -84,6 +99,11 @@ const TRANSPARENT := {
 	Block.COPPER_ORE: false,
 	Block.TIN_ORE: false,
 	Block.SMELTER: false,
+	Block.WATERWEED: true,
+	Block.ALGAE: true,
+	Block.DUCKWEED: true,
+	Block.LILY_PAD: true,
+	Block.LOTUS: true,
 }
 
 # 每个方块的纹理瓦片：[顶面, 底面, 侧面]
@@ -105,6 +125,20 @@ const TILES := {
 	Block.COPPER_ORE: Vector3i(16, 16, 16),
 	Block.TIN_ORE: Vector3i(17, 17, 17),
 	Block.SMELTER: Vector3i(18, 18, 18),
+	Block.WATERWEED: Vector3i(19, 19, 19),
+	Block.ALGAE: Vector3i(20, 20, 20),
+	Block.DUCKWEED: Vector3i(21, 21, 21),
+	Block.LILY_PAD: Vector3i(22, 22, 22),
+	Block.LOTUS: Vector3i(23, 23, 23),
+}
+
+# 水生植物：生长在水中/水面的非固体装饰方块，徒手可采，可再放置。
+const WATER_PLANTS := {
+	Block.WATERWEED: true,
+	Block.ALGAE: true,
+	Block.DUCKWEED: true,
+	Block.LILY_PAD: true,
+	Block.LOTUS: true,
 }
 
 # 创造模式快捷栏显示的方块顺序。
@@ -138,6 +172,11 @@ const SHORT_NAMES := {
 	Block.COPPER_ORE: "铜",
 	Block.TIN_ORE: "锡",
 	Block.SMELTER: "炉",
+	Block.WATERWEED: "水草",
+	Block.ALGAE: "藻",
+	Block.DUCKWEED: "萍",
+	Block.LILY_PAD: "荷",
+	Block.LOTUS: "莲",
 }
 
 # 可堆叠物品（方块/材料/食物）的每格上限。
@@ -161,6 +200,11 @@ const HARDNESS := {
 	Block.COPPER_ORE: 3.0,
 	Block.TIN_ORE: 3.5,
 	Block.SMELTER: 2.0,
+	Block.WATERWEED: 0.1,
+	Block.ALGAE: 0.1,
+	Block.DUCKWEED: 0.1,
+	Block.LILY_PAD: 0.1,
+	Block.LOTUS: 0.1,
 }
 
 # 有效工具类型；空字符串表示徒手/任意工具即可。
@@ -181,6 +225,11 @@ const EFFECTIVE_TOOL := {
 	Block.COPPER_ORE: "pickaxe",
 	Block.TIN_ORE: "pickaxe",
 	Block.SMELTER: "pickaxe",
+	Block.WATERWEED: "",
+	Block.ALGAE: "",
+	Block.DUCKWEED: "",
+	Block.LILY_PAD: "",
+	Block.LOTUS: "",
 }
 
 
@@ -190,6 +239,11 @@ static func is_solid(id: int) -> bool:
 
 static func is_transparent(id: int) -> bool:
 	return TRANSPARENT.get(id, true)
+
+
+## 水生植物：长在水里/水面的装饰方块（不挡路、徒手可采）。
+static func is_water_plant(id: int) -> bool:
+	return WATER_PLANTS.has(id)
 
 
 static func display_name(id: int) -> String:

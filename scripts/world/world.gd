@@ -9,6 +9,16 @@ const LOAD_RADIUS := 2
 const CHUNKS_PER_FRAME := 2
 const SEA_LEVEL := 22
 
+## 水体分类：按连通水面格数区分「大河/湖泊」与「小池塘」。
+## 阈值取自世界水情勘察（321×321 采样区共 23 处水体，最大 352 格，
+## 6 处 ≥150 格，其余 ≤128 格），故以 120 格为界。
+const WATER_NONE := 0
+const WATER_LARGE := 1
+const WATER_POND := 2
+const LARGE_WATER_MIN_TILES := 120
+## 洪泛格数上限：达到上限即判定为大水体，避免超大水体拖慢区块生成。
+const WATER_FLOOD_CAP := 300
+
 @export var seed_value := 12345
 
 var _chunks: Dictionary[Vector3i, Chunk] = {}
@@ -24,6 +34,8 @@ var _player: Player
 var _neighbor_lookup: Callable
 # 储物箱内容物：按方块坐标记录独立 27 格背包，破坏时散落至地面。
 var box_contents: Dictionary[Vector3i, Inventory] = {}
+# 水体分类缓存：水面格 → WATER_LARGE / WATER_POND，同一水体只洪泛一次。
+var _water_kind_cache: Dictionary[Vector2i, int] = {}
 
 
 func _ready() -> void:
@@ -46,6 +58,51 @@ func _process(_delta: float) -> void:
 
 func get_surface_height(wx: int, wz: int) -> int:
 	return _terrain_height(wx, wz) + 1
+
+
+## 该列水深（水面到地形顶面的格数）；陆地返回 0。
+func water_depth(wx: int, wz: int) -> int:
+	return maxi(0, SEA_LEVEL - _terrain_height(wx, wz))
+
+
+## 该列是否为水面（地形顶面低于海平面即为水）。
+func is_water_column(wx: int, wz: int) -> bool:
+	return _terrain_height(wx, wz) < SEA_LEVEL
+
+
+## 水体类型：以连通水面格数区分「大河/湖泊」（≥120 格）与「小池塘」。
+## 连通域用有界洪泛计算，同一水体的结果缓存到每个水格，区块生成时均摊常数级。
+func water_kind(wx: int, wz: int) -> int:
+	var cell := Vector2i(wx, wz)
+	if _water_kind_cache.has(cell):
+		return _water_kind_cache[cell]
+	if not is_water_column(wx, wz):
+		_water_kind_cache[cell] = WATER_NONE
+		return WATER_NONE
+
+	var region := _flood_water(cell)
+	# 洪泛上限（300）大于大水体阈值（120），故被截断的水体必然是大水体。
+	var kind := WATER_LARGE if region.size() >= LARGE_WATER_MIN_TILES else WATER_POND
+	for c: Vector2i in region:
+		_water_kind_cache[c] = kind
+	return kind
+
+
+## 有界洪泛：返回起始格所在水体的水面格（最多 WATER_FLOOD_CAP 格）。
+func _flood_water(start: Vector2i) -> Array[Vector2i]:
+	var region: Array[Vector2i] = [start]
+	var seen := {start: true}
+	var queue: Array[Vector2i] = [start]
+	while not queue.is_empty() and region.size() < WATER_FLOOD_CAP:
+		var cur: Vector2i = queue.pop_back()
+		for offset: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var nxt: Vector2i = cur + offset
+			if seen.has(nxt) or not is_water_column(nxt.x, nxt.y):
+				continue
+			seen[nxt] = true
+			queue.append(nxt)
+			region.append(nxt)
+	return region
 
 
 ## 结构生成支持：强制同步加载区域内全部区块。
@@ -119,7 +176,7 @@ func set_block(world_pos: Vector3i, id: int) -> void:
 ## 获取指定储物箱的背包；首次访问时创建 27 格空背包。
 func get_box(cell: Vector3i) -> Inventory:
 	if not box_contents.has(cell):
-		box_contents[cell] = Inventory.new(27)
+		box_contents[cell] = Inventory.new(36)
 	return box_contents[cell]
 
 
@@ -250,6 +307,7 @@ func _generate_chunk(chunk: Chunk, coord: Vector3i) -> void:
 				chunk.set_block_local(Vector3i(x, y, z), _block_at(wx, y, wz, height))
 
 	_generate_trees(chunk, origin)
+	_generate_water_life(chunk, origin)
 
 
 func _terrain_height(wx: int, wz: int) -> int:
@@ -332,3 +390,45 @@ func _in_chunk(p: Vector3i) -> bool:
 		and p.z >= 0
 		and p.z < CHUNK_SIZE.z
 	)
+
+
+## 水生植物：大河底部生成水草/藻类，小池塘水面生成浮萍/荷叶/莲花。
+## 逐列确定性散布（种子固定），密度稀疏以免遮挡水体本身。
+func _generate_water_life(chunk: Chunk, origin: Vector3i) -> void:
+	for x in CHUNK_SIZE.x:
+		for z in CHUNK_SIZE.z:
+			var wx := origin.x + x
+			var wz := origin.z + z
+			var depth := SEA_LEVEL - _terrain_height(wx, wz)
+			if depth <= 0:
+				continue
+
+			var r := _water_life_rng(wx, wz)
+			var kind := water_kind(wx, wz)
+			if kind == WATER_LARGE:
+				# 水下植物贴在水底（地形顶面之上），需至少两格水深才在水面之下。
+				if depth < 2:
+					continue
+				if r < 0.10:
+					_set_chunk_block(chunk, Vector3i(x, SEA_LEVEL - depth + 1, z), BlockTypes.Block.WATERWEED)
+				elif r < 0.16:
+					_set_chunk_block(chunk, Vector3i(x, SEA_LEVEL - depth + 1, z), BlockTypes.Block.ALGAE)
+				continue
+
+			# 池塘：水面浮生植物。
+			if r < 0.14:
+				_set_chunk_block(chunk, Vector3i(x, SEA_LEVEL, z), BlockTypes.Block.DUCKWEED)
+			elif r < 0.22:
+				_set_chunk_block(chunk, Vector3i(x, SEA_LEVEL, z), BlockTypes.Block.LILY_PAD)
+			elif r < 0.26:
+				_set_chunk_block(chunk, Vector3i(x, SEA_LEVEL, z), BlockTypes.Block.LOTUS)
+
+
+func _set_chunk_block(chunk: Chunk, local: Vector3i, id: int) -> void:
+	if _in_chunk(local):
+		chunk.set_block_local(local, id)
+
+
+func _water_life_rng(x: int, z: int) -> float:
+	var h := hash(Vector3i(x, seed_value * 31 + 7, z))
+	return float(h & 0xFFFF) / 65535.0

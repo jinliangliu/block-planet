@@ -3,18 +3,32 @@ class_name HUD
 ## 移动端触屏 HUD：左侧摇杆、右侧视角滑动、右下角动作按钮。
 ## 桌面环境显示键位提示。
 
+## 生命爱心条：5 颗心换算 20 点生命，每颗 4 点。
+const HEART_COUNT := 5
+const HEARTS_PER_POINT := 4
+
 var _player: Player
+var _root: Control
 var _slot_group: ButtonGroup
+var _recipe_group: ButtonGroup
 var _slot_buttons: Array[Button] = []
 var _hunger_label: Label
 var _name_label: Label
-var _hp_bar: ProgressBar
+var _hearts: Control
+var _hint_label: Label
 var _minimap: MiniMap
 var _time_label: Label
 var _mode_label: Label
 var _day_night: DayNightCycle
 var _craft_overlay: Control
-var _craft_list: VBoxContainer
+var _craft_result_grid: GridContainer
+var _craft_result_slot: ItemSlot
+var _craft_tree: Control
+var _craft_material_row: HBoxContainer
+var _craft_craft_button: Button
+var _selected_recipe := 0
+var _log_label: Label
+var _log_lines := PackedStringArray()
 var _trade_overlay: Control
 var _trade_list: VBoxContainer
 var _box_overlay: Control
@@ -22,6 +36,11 @@ var _box_grid: GridContainer
 var _box_player_grid: GridContainer
 var _open_box_cell := Vector3i.ZERO
 var _box_inventory: Inventory
+var _tip_panel: PanelContainer
+var _tip_name: Label
+var _tip_desc: Label
+var _tip_viewport: SubViewport
+var _tip_mesh: MeshInstance3D
 var _smelt_overlay: Control
 var _smelt_list: VBoxContainer
 var _fly_button: Button
@@ -56,9 +75,11 @@ func _build() -> void:
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
+	_root = root
 
 	_build_stats(root)
 	_build_crosshair(root)
+	_build_log(root)
 
 	if DisplayServer.is_touchscreen_available():
 		_build_joystick(root)
@@ -83,9 +104,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_game_mode()
 		elif event.is_action_pressed("toggle_trade"):
 			_toggle_trade_panel()
+		elif event.keycode == KEY_ESCAPE and _box_overlay != null and _box_overlay.visible:
+			set_box_open(false)
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_ESCAPE and _craft_overlay != null and _craft_overlay.visible:
+			set_craft_open(false)
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_F1 and _hint_label:
+			_hint_label.visible = not _hint_label.visible
 
 
 func _process(_delta: float) -> void:
+	if _tip_panel != null and _tip_panel.visible and _tip_mesh != null:
+		_tip_mesh.rotation.y += _delta * 1.5
 	if _player == null or _break_bar == null:
 		return
 	var breaking := _player.is_breaking()
@@ -261,11 +292,11 @@ func _build_hotbar(root: Control) -> void:
 
 	_slot_group = ButtonGroup.new()
 	for i in range(blocks.size()):
-		var b := Button.new()
+		var b := ItemSlot.new()
+		b.set_dark_style()
 		b.toggle_mode = true
 		b.button_group = _slot_group
 		b.custom_minimum_size = Vector2(slot_size, slot_size)
-		b.focus_mode = Control.FOCUS_NONE
 		b.position = Vector2(i * (slot_size + gap), 0)
 		b.pressed.connect(_on_slot_pressed.bind(i))
 		_slot_buttons.append(b)
@@ -276,21 +307,13 @@ func _build_hotbar(root: Control) -> void:
 	_refresh_hotbar()
 
 
-## 左上角状态面板：头像 + 姓名 + 生命条 + 饥饿/时间/模式文本。
+## 左上角状态面板：姓名 + 红色爱心生命（5 颗心，每颗 4 点）+ 饥饿文本。
+## 时间显示在右上角小地图正下方，模式显示在左下角。
 func _build_stats(root: Control) -> void:
-	var row := HBoxContainer.new()
-	row.position = Vector2(16, 16)
-	row.add_theme_constant_override("separation", 10)
-	root.add_child(row)
-
-	var avatar := Control.new()
-	avatar.custom_minimum_size = Vector2(48, 48)
-	avatar.draw.connect(_draw_avatar.bind(avatar))
-	row.add_child(avatar)
-
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 4)
-	row.add_child(box)
+	box.position = Vector2(16, 16)
+	box.add_theme_constant_override("separation", 6)
+	root.add_child(box)
 
 	_name_label = Label.new()
 	_name_label.text = "小方块"
@@ -298,20 +321,11 @@ func _build_stats(root: Control) -> void:
 	_name_label.add_theme_font_size_override("font_size", 20)
 	box.add_child(_name_label)
 
-	_hp_bar = ProgressBar.new()
-	_hp_bar.min_value = 0
-	_hp_bar.max_value = Player.MAX_HEALTH
-	_hp_bar.show_percentage = false
-	_hp_bar.custom_minimum_size = Vector2(150, 14)
-	var bar_bg := StyleBoxFlat.new()
-	bar_bg.bg_color = Color(0.12, 0.12, 0.14, 0.9)
-	bar_bg.set_corner_radius_all(4)
-	var bar_fill := StyleBoxFlat.new()
-	bar_fill.bg_color = Color(0.85, 0.25, 0.25)
-	bar_fill.set_corner_radius_all(4)
-	_hp_bar.add_theme_stylebox_override("background", bar_bg)
-	_hp_bar.add_theme_stylebox_override("fill", bar_fill)
-	box.add_child(_hp_bar)
+	_hearts = Control.new()
+	_hearts.custom_minimum_size = Vector2(HEART_COUNT * 20.0 + (HEART_COUNT - 1) * 2.0, 20.0)
+	_hearts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hearts.draw.connect(_draw_hearts.bind(_hearts))
+	box.add_child(_hearts)
 
 	_hunger_label = Label.new()
 	_hunger_label.add_theme_color_override("font_color", Color(1.0, 0.78, 0.35))
@@ -321,27 +335,64 @@ func _build_stats(root: Control) -> void:
 	_time_label = Label.new()
 	_time_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.95))
 	_time_label.add_theme_font_size_override("font_size", 18)
-	box.add_child(_time_label)
+	_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(_time_label)
+	_time_label.anchor_left = 1.0
+	_time_label.anchor_right = 1.0
+	_time_label.offset_left = -(MiniMap.SIZE + 20.0)
+	_time_label.offset_right = -20.0
+	_time_label.offset_top = MiniMap.SIZE + 28.0
 
 	_mode_label = Label.new()
 	_mode_label.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0, 0.95))
 	_mode_label.add_theme_font_size_override("font_size", 18)
-	box.add_child(_mode_label)
+	root.add_child(_mode_label)
+	_mode_label.anchor_top = 1.0
+	_mode_label.anchor_bottom = 1.0
+	_mode_label.offset_left = 16.0
+	_mode_label.offset_top = -36.0
+	_mode_label.offset_bottom = -12.0
+	_mode_label.offset_right = 236.0
 
 	_refresh_stats()
 
 
-## 块状像素头像：发/脸/眼/嘴，与方块世界风格一致。
-func _draw_avatar(avatar: Control) -> void:
-	var cell := avatar.size.x / 8.0
-	if cell <= 0.0:
-		return
-	avatar.draw_rect(Rect2(Vector2.ZERO, avatar.size), Color(0.14, 0.14, 0.18))
-	avatar.draw_rect(Rect2(Vector2(cell, 0), Vector2(cell * 6, cell * 2)), Color(0.36, 0.22, 0.12))
-	avatar.draw_rect(Rect2(Vector2(cell, cell * 2), Vector2(cell * 6, cell * 5)), Color(0.94, 0.78, 0.62))
-	avatar.draw_rect(Rect2(Vector2(cell * 2, cell * 3.4), Vector2(cell, cell * 0.8)), Color(0.10, 0.10, 0.14))
-	avatar.draw_rect(Rect2(Vector2(cell * 5, cell * 3.4), Vector2(cell, cell * 0.8)), Color(0.10, 0.10, 0.14))
-	avatar.draw_rect(Rect2(Vector2(cell * 3, cell * 5.6), Vector2(cell * 2, cell * 0.7)), Color(0.72, 0.40, 0.40))
+## 生命爱心条：共 5 颗心，每颗代表 4 点生命（满 20），余量 2 点时绘制半心。
+func _draw_hearts(hearts: Control) -> void:
+	var health := _player.health if _player else 0
+	var s := 20.0
+	var gap := 2.0
+	for i in range(HEART_COUNT):
+		var pos := Vector2(i * (s + gap), 0.0)
+		_draw_heart(hearts, pos, s, Color(0.30, 0.10, 0.10, 0.85))
+		var here: int = health - i * HEARTS_PER_POINT
+		if here >= HEARTS_PER_POINT:
+			_draw_heart(hearts, pos, s, Color(0.88, 0.20, 0.22))
+		elif here >= HEARTS_PER_POINT / 2:
+			_draw_half_heart(hearts, pos, s, Color(0.88, 0.20, 0.22))
+
+
+## 心形：两个圆瓣 + 底部三角。
+func _draw_heart(canvas: Control, pos: Vector2, s: float, fill: Color) -> void:
+	canvas.draw_circle(pos + Vector2(s * 0.27, s * 0.28), s * 0.27, fill)
+	canvas.draw_circle(pos + Vector2(s * 0.73, s * 0.28), s * 0.27, fill)
+	var tri := PackedVector2Array([
+		pos + Vector2(s * 0.02, s * 0.36),
+		pos + Vector2(s * 0.98, s * 0.36),
+		pos + Vector2(s * 0.5, s * 0.96),
+	])
+	canvas.draw_colored_polygon(tri, fill)
+
+
+## 半心：在底色心上叠左瓣与左半三角。
+func _draw_half_heart(canvas: Control, pos: Vector2, s: float, fill: Color) -> void:
+	canvas.draw_circle(pos + Vector2(s * 0.27, s * 0.28), s * 0.27, fill)
+	var tri := PackedVector2Array([
+		pos + Vector2(s * 0.02, s * 0.36),
+		pos + Vector2(s * 0.5, s * 0.36),
+		pos + Vector2(s * 0.5, s * 0.96),
+	])
+	canvas.draw_colored_polygon(tri, fill)
 
 
 func _anchor_bottom_right(root: Control, control: Control, right_margin: float, bottom_margin: float) -> void:
@@ -358,12 +409,13 @@ func _anchor_bottom_right(root: Control, control: Control, right_margin: float, 
 
 
 func _build_desktop_hint(root: Control) -> void:
-	var label := Label.new()
-	label.text = "WASD 移动 · 鼠标视角 · 滚轮拉近/拉远(拉远看角色) · 左键按住破坏/左键攻击 · 右键放置/吃食物/开箱/冶炼 · 1-9 选方块 · E 合成 · M 切换模式 · 空格跳跃 · 双击空格飞行(创造) · Ctrl 下降 · Shift冲刺 · Esc释放鼠标"
-	label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.9))
-	label.add_theme_font_size_override("font_size", 18)
-	label.position = Vector2(16, 12)
-	root.add_child(label)
+	_hint_label = Label.new()
+	_hint_label.text = "WASD 移动 · 鼠标视角 · 滚轮拉近/拉远(拉远看角色) · 左键按住破坏/左键攻击 · 右键放置/吃食物/开箱/冶炼 · 1-9 选方块 · E 合成 · M 切换模式 · 空格跳跃 · 双击空格飞行(创造) · Ctrl 下降 · Shift冲刺 · Esc释放鼠标 · F1 显示/隐藏本提示"
+	_hint_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.9))
+	_hint_label.add_theme_font_size_override("font_size", 18)
+	_hint_label.position = Vector2(16, 120)
+	_hint_label.visible = false
+	root.add_child(_hint_label)
 
 
 func _on_joystick_changed(value: Vector2) -> void:
@@ -438,21 +490,40 @@ func _refresh_hotbar() -> void:
 		return
 	var blocks := BlockTypes.HOTBAR_BLOCKS
 	for i in range(_slot_buttons.size()):
-		var b := _slot_buttons[i]
+		var b := _slot_buttons[i] as ItemSlot
 		if GameState.is_creative():
 			if i < blocks.size():
-				b.text = BlockTypes.short_name(blocks[i])
+				b.set_slot({"item": blocks[i], "count": 1})
+			else:
+				b.set_slot({"item": 0, "count": 0})
 		else:
 			var item := _player.inventory.get_item(i)
 			if item == BlockTypes.Block.AIR:
-				b.text = "-"
+				b.set_slot({"item": 0, "count": 0})
 			elif ItemTypes.is_tool_item(item):
-				b.text = "%s %d" % [ItemTypes.item_short_name(item), _player.inventory.get_durability(i)]
+				b.set_slot({"item": item, "count": 1, "durability": _player.inventory.get_durability(i)})
 			else:
-				var count := _player.inventory.get_count(i)
-				b.text = "%s×%d" % [BlockTypes.short_name(item), count]
+				b.set_slot({"item": item, "count": _player.inventory.get_count(i)})
 
 
+## 合成台面板：储物箱同款淡色设计。左栏成品栏（3 格一行），右栏自上而下
+## 合成路径图：顶端成品、下层材料格（不足红框），悬停弹出预览简介，
+## 面板红叉按钮：背景与面板同色（无色差），悬停轻微加深提示可点。
+func _style_panel_close(button: Button, panel_bg: Color) -> void:
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = panel_bg
+	normal.set_corner_radius_all(8)
+	var hover := normal.duplicate()
+	hover.bg_color = panel_bg.darkened(0.08)
+	var pressed := normal.duplicate()
+	pressed.bg_color = panel_bg.darkened(0.16)
+	button.add_theme_stylebox_override("normal", normal)
+	button.add_theme_stylebox_override("hover", hover)
+	button.add_theme_stylebox_override("pressed", pressed)
+	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+
+
+## 点「开始合成」执行，成品飞入背包动画 + 系统日志播报。
 func _build_craft_panel(root: Control) -> void:
 	_craft_overlay = Control.new()
 	_craft_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -469,28 +540,129 @@ func _build_craft_panel(root: Control) -> void:
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_craft_overlay.add_child(center)
 
+	var wrapper := Control.new()
+	wrapper.custom_minimum_size = Vector2(660, 440)
+	center.add_child(wrapper)
+
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(500, 480)
-	center.add_child(panel)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.95, 0.92, 0.84)
+	panel_style.border_color = Color(0.62, 0.47, 0.27)
+	panel_style.set_border_width_all(3)
+	panel_style.set_corner_radius_all(12)
+	panel_style.set_content_margin_all(16)
+	panel.add_theme_stylebox_override("panel", panel_style)
+	wrapper.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
 	var title := Label.new()
 	title.text = "合成台"
 	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(0.36, 0.26, 0.13))
 	vbox.add_child(title)
 
-	_craft_list = VBoxContainer.new()
-	_craft_list.add_theme_constant_override("separation", 8)
-	vbox.add_child(_craft_list)
+	var columns := HBoxContainer.new()
+	columns.add_theme_constant_override("separation", 24)
+	vbox.add_child(columns)
+
+	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", 8)
+	columns.add_child(left)
+
+	var left_title := Label.new()
+	left_title.text = "成品（点击选择）"
+	left_title.add_theme_font_size_override("font_size", 16)
+	left_title.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
+	left.add_child(left_title)
+
+	_craft_result_grid = GridContainer.new()
+	_craft_result_grid.columns = 3
+	_craft_result_grid.add_theme_constant_override("h_separation", 6)
+	_craft_result_grid.add_theme_constant_override("v_separation", 6)
+	left.add_child(_craft_result_grid)
+
+	_recipe_group = ButtonGroup.new()
+	for i in range(ItemTypes.RECIPES.size()):
+		var b := ItemSlot.new()
+		b.toggle_mode = true
+		b.button_group = _recipe_group
+		b.custom_minimum_size = Vector2(64, 64)
+		b.pressed.connect(_on_recipe_selected.bind(i))
+		b.mouse_entered.connect(_on_slot_hover.bind(b))
+		b.mouse_exited.connect(_hide_item_tip)
+		_craft_result_grid.add_child(b)
+
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", 6)
+	columns.add_child(right)
+
+	var right_title := Label.new()
+	right_title.text = "合成路径"
+	right_title.add_theme_font_size_override("font_size", 16)
+	right_title.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
+	right.add_child(right_title)
+
+	var top_row := HBoxContainer.new()
+	top_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	right.add_child(top_row)
+	_craft_result_slot = ItemSlot.new()
+	_craft_result_slot.custom_minimum_size = Vector2(64, 64)
+	_craft_result_slot.mouse_entered.connect(_on_slot_hover.bind(_craft_result_slot))
+	_craft_result_slot.mouse_exited.connect(_hide_item_tip)
+	top_row.add_child(_craft_result_slot)
+
+	_craft_tree = Control.new()
+	_craft_tree.custom_minimum_size = Vector2(320, 36)
+	_craft_tree.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_craft_tree.draw.connect(_draw_craft_links)
+	right.add_child(_craft_tree)
+
+	_craft_material_row = HBoxContainer.new()
+	_craft_material_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_craft_material_row.add_theme_constant_override("separation", 8)
+	right.add_child(_craft_material_row)
+
+	_craft_craft_button = Button.new()
+	_craft_craft_button.text = "开始合成"
+	_craft_craft_button.custom_minimum_size = Vector2(0, 46)
+	_craft_craft_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_craft_craft_button.focus_mode = Control.FOCUS_NONE
+	_craft_craft_button.pressed.connect(_on_craft_pressed)
+	var btn_style := StyleBoxFlat.new()
+	btn_style.bg_color = Color(0.87, 0.72, 0.42)
+	btn_style.set_corner_radius_all(8)
+	var btn_hover := btn_style.duplicate()
+	btn_hover.bg_color = Color(0.93, 0.80, 0.52)
+	var btn_disabled := btn_style.duplicate()
+	btn_disabled.bg_color = Color(0.78, 0.74, 0.66)
+	_craft_craft_button.add_theme_stylebox_override("normal", btn_style)
+	_craft_craft_button.add_theme_stylebox_override("hover", btn_hover)
+	_craft_craft_button.add_theme_stylebox_override("pressed", btn_hover)
+	_craft_craft_button.add_theme_stylebox_override("disabled", btn_disabled)
+	_craft_craft_button.add_theme_color_override("font_color", Color(0.30, 0.20, 0.08))
+	_craft_craft_button.add_theme_color_override("font_disabled_color", Color(0.52, 0.48, 0.42))
+	right.add_child(_craft_craft_button)
 
 	var close := Button.new()
-	close.text = "关闭"
-	close.custom_minimum_size = Vector2(0, 44)
+	close.text = "✕"
+	close.focus_mode = Control.FOCUS_NONE
+	close.add_theme_color_override("font_color", Color(0.85, 0.22, 0.20))
+	close.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
+	close.add_theme_color_override("font_pressed_color", Color(0.70, 0.15, 0.14))
+	close.add_theme_font_size_override("font_size", 22)
+	_style_panel_close(close, Color(0.95, 0.92, 0.84))
 	close.pressed.connect(func(): set_craft_open(false))
-	vbox.add_child(close)
+	wrapper.add_child(close)
+	close.anchor_left = 1.0
+	close.anchor_right = 1.0
+	close.offset_left = -44.0
+	close.offset_right = -10.0
+	close.offset_top = 10.0
+	close.offset_bottom = 44.0
 
 	_craft_overlay.visible = false
 	_refresh_craft_panel()
@@ -509,32 +681,72 @@ func set_craft_open(open: bool) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
 	if open:
 		_refresh_craft_panel()
+	else:
+		_hide_item_tip()
 
 
 func _refresh_craft_panel() -> void:
-	if _craft_list == null:
+	if _craft_result_grid == null:
 		return
-	for child in _craft_list.get_children():
-		_craft_list.remove_child(child)
+	_hide_item_tip()
+	for i in range(ItemTypes.RECIPES.size()):
+		var b := _craft_result_grid.get_child(i) as ItemSlot
+		b.set_slot({"item": ItemTypes.RECIPES[i]["result"], "count": 1})
+	_selected_recipe = clampi(_selected_recipe, 0, ItemTypes.RECIPES.size() - 1)
+	var selected := _craft_result_grid.get_child(_selected_recipe) as ItemSlot
+	selected.button_pressed = true
+	_refresh_craft_path()
+
+
+## 右侧路径图刷新：顶端成品格 + 下层材料格（拥有量不足描红框）。
+func _refresh_craft_path() -> void:
+	if _craft_result_slot == null or _craft_material_row == null:
+		return
+	var recipe: Dictionary = ItemTypes.RECIPES[_selected_recipe]
+	_craft_result_slot.set_slot({"item": recipe["result"], "count": 1})
+	for child in _craft_material_row.get_children():
+		_craft_material_row.remove_child(child)
 		child.queue_free()
+	for ingredient in recipe["ingredients"]:
+		var need := int(recipe["ingredients"][ingredient])
+		var b := ItemSlot.new()
+		b.custom_minimum_size = Vector2(64, 64)
+		b.set_slot({"item": ingredient, "count": need})
+		b.set_deficit(_player == null or _player.inventory.count_item(ingredient) < need)
+		b.mouse_entered.connect(_on_slot_hover.bind(b))
+		b.mouse_exited.connect(_hide_item_tip)
+		_craft_material_row.add_child(b)
+	if _craft_craft_button:
+		_craft_craft_button.disabled = not _can_craft(recipe)
+	if _craft_tree:
+		_craft_tree.queue_redraw()
 
-	for recipe in ItemTypes.RECIPES:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 10)
-		_craft_list.add_child(row)
 
-		var label := Label.new()
-		label.text = _recipe_text(recipe)
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(label)
+## 连线自上而下：顶端成品中心扇出到各材料格中心。
+func _draw_craft_links() -> void:
+	if _craft_tree == null or _craft_tree.size.x <= 0.0:
+		return
+	var recipe: Dictionary = ItemTypes.RECIPES[_selected_recipe]
+	var n: int = recipe["ingredients"].size()
+	var w := _craft_tree.size.x
+	var top := Vector2(w * 0.5, 0.0)
+	var col := Color(0.55, 0.42, 0.25)
+	_craft_tree.draw_circle(top, 4.0, col)
+	for i in range(n):
+		var x := w * 0.5 + (float(i) - float(n - 1) * 0.5) * 72.0
+		var end := Vector2(x, _craft_tree.size.y)
+		_craft_tree.draw_line(top, end, col, 3.0)
+		_craft_tree.draw_circle(end, 4.0, col)
 
-		var button := Button.new()
-		button.text = "制作"
-		button.custom_minimum_size = Vector2(84, 40)
-		button.focus_mode = Control.FOCUS_NONE
-		button.disabled = not _can_craft(recipe)
-		button.pressed.connect(_on_craft_pressed.bind(recipe))
-		row.add_child(button)
+
+func _on_recipe_selected(index: int) -> void:
+	_selected_recipe = index
+	_refresh_craft_path()
+
+
+## 悬停预览：直接读取格子当前物品，供成品/材料格共用。
+func _on_slot_hover(slot: ItemSlot) -> void:
+	_show_item_tip(slot, slot.item_id())
 
 
 func _recipe_text(recipe: Dictionary) -> String:
@@ -550,12 +762,42 @@ func _can_craft(recipe: Dictionary) -> bool:
 	return _player.inventory.can_craft(recipe)
 
 
-func _on_craft_pressed(recipe: Dictionary) -> void:
+func _on_craft_pressed() -> void:
 	if _player == null:
 		return
-	if _player.inventory.craft(recipe):
-		_refresh_craft_panel()
-		_refresh_hotbar()
+	var recipe: Dictionary = ItemTypes.RECIPES[_selected_recipe]
+	if not _player.inventory.craft(recipe):
+		return
+	_refresh_craft_path()
+	_refresh_hotbar()
+	_play_craft_fly(int(recipe["result"]))
+
+
+## 成品飞入背包动画：从成品格飞向底部快捷栏中心，落地后播报获得。
+func _play_craft_fly(item_id: int) -> void:
+	if _root == null or _craft_result_slot == null:
+		_push_log("获得 %s×1" % ItemTypes.item_name(item_id))
+		return
+	var icon := ItemSlot.new()
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = Vector2(56, 56)
+	icon.size = Vector2(56, 56)
+	icon.pivot_offset = Vector2(28, 28)
+	icon.z_index = 60
+	icon.set_slot({"item": item_id, "count": 1})
+	_root.add_child(icon)
+	var start := _craft_result_slot.get_global_rect().position + Vector2(4.0, 4.0)
+	var vp := _root.get_viewport_rect().size
+	icon.position = start
+	var end := Vector2(vp.x * 0.5 - 28.0, vp.y - 78.0)
+	var tw := create_tween()
+	tw.tween_property(icon, "position", end, 0.7) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	tw.parallel().tween_property(icon, "rotation_degrees", 360.0, 0.7)
+	tw.tween_callback(func():
+		icon.queue_free()
+		_push_log("获得 %s×1" % ItemTypes.item_name(item_id))
+	)
 
 
 func _build_trade_panel(root: Control) -> void:
@@ -685,9 +927,20 @@ func _build_box_panel(root: Control) -> void:
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_box_overlay.add_child(center)
 
+	var wrapper := Control.new()
+	wrapper.custom_minimum_size = Vector2(664, 560)
+	center.add_child(wrapper)
+
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(560, 540)
-	center.add_child(panel)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.95, 0.92, 0.84)
+	panel_style.border_color = Color(0.62, 0.47, 0.27)
+	panel_style.set_border_width_all(3)
+	panel_style.set_corner_radius_all(12)
+	panel_style.set_content_margin_all(16)
+	panel.add_theme_stylebox_override("panel", panel_style)
+	wrapper.add_child(panel)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 8)
@@ -696,50 +949,67 @@ func _build_box_panel(root: Control) -> void:
 	var title := Label.new()
 	title.text = "储物箱"
 	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(0.36, 0.26, 0.13))
 	vbox.add_child(title)
 
 	var box_label := Label.new()
-	box_label.text = "箱子（点击整叠取出）"
+	box_label.text = "箱子（点击整叠取出，悬停查看物品）"
 	box_label.add_theme_font_size_override("font_size", 16)
+	box_label.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
 	vbox.add_child(box_label)
 
 	_box_grid = GridContainer.new()
 	_box_grid.columns = 9
-	_box_grid.add_theme_constant_override("h_separation", 4)
-	_box_grid.add_theme_constant_override("v_separation", 4)
+	_box_grid.add_theme_constant_override("h_separation", 6)
+	_box_grid.add_theme_constant_override("v_separation", 6)
 	vbox.add_child(_box_grid)
 
 	var player_label := Label.new()
 	player_label.text = "背包（点击整叠存入）"
 	player_label.add_theme_font_size_override("font_size", 16)
+	player_label.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
 	vbox.add_child(player_label)
 
 	_box_player_grid = GridContainer.new()
 	_box_player_grid.columns = 9
-	_box_player_grid.add_theme_constant_override("h_separation", 4)
-	_box_player_grid.add_theme_constant_override("v_separation", 4)
+	_box_player_grid.add_theme_constant_override("h_separation", 6)
+	_box_player_grid.add_theme_constant_override("v_separation", 6)
 	vbox.add_child(_box_player_grid)
 
 	var close := Button.new()
-	close.text = "关闭"
-	close.custom_minimum_size = Vector2(0, 44)
+	close.text = "✕"
+	close.focus_mode = Control.FOCUS_NONE
+	close.add_theme_color_override("font_color", Color(0.85, 0.22, 0.20))
+	close.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
+	close.add_theme_color_override("font_pressed_color", Color(0.70, 0.15, 0.14))
+	close.add_theme_font_size_override("font_size", 22)
+	_style_panel_close(close, Color(0.95, 0.92, 0.84))
 	close.pressed.connect(func(): set_box_open(false))
-	vbox.add_child(close)
+	wrapper.add_child(close)
+	close.anchor_left = 1.0
+	close.anchor_right = 1.0
+	close.offset_left = -44.0
+	close.offset_right = -10.0
+	close.offset_top = 10.0
+	close.offset_bottom = 44.0
 
-	for i in range(27):
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(52, 52)
-		b.focus_mode = Control.FOCUS_NONE
+	for i in range(36):
+		var b := ItemSlot.new()
+		b.custom_minimum_size = Vector2(64, 64)
 		b.pressed.connect(_on_box_slot_pressed.bind(i))
+		b.mouse_entered.connect(_on_box_slot_hover.bind(i, true, b))
+		b.mouse_exited.connect(_hide_item_tip)
 		_box_grid.add_child(b)
 	for i in range(Inventory.SLOT_COUNT):
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(52, 52)
-		b.focus_mode = Control.FOCUS_NONE
+		var b := ItemSlot.new()
+		b.custom_minimum_size = Vector2(64, 64)
 		b.pressed.connect(_on_box_player_slot_pressed.bind(i))
+		b.mouse_entered.connect(_on_box_slot_hover.bind(i, false, b))
+		b.mouse_exited.connect(_hide_item_tip)
 		_box_player_grid.add_child(b)
 
 	_box_overlay.visible = false
+	_build_item_tip()
 	Events.request_box_open.connect(_on_request_box_open)
 	Events.block_broken.connect(_on_box_block_broken)
 
@@ -766,6 +1036,8 @@ func set_box_open(open: bool) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
 	if open:
 		_refresh_box_panel()
+	else:
+		_hide_item_tip()
 
 
 func _refresh_box_panel() -> void:
@@ -773,26 +1045,209 @@ func _refresh_box_panel() -> void:
 		return
 	if _box_inventory == null or _player == null:
 		return
+	_hide_item_tip()
 	for i in range(27):
-		var b := _box_grid.get_child(i) as Button
-		_set_slot_text(b, _box_inventory.slots[i])
+		var b := _box_grid.get_child(i) as ItemSlot
+		b.set_slot(_box_inventory.slots[i])
 	for i in range(Inventory.SLOT_COUNT):
-		var b := _box_player_grid.get_child(i) as Button
-		_set_slot_text(b, _player.inventory.slots[i])
+		var b := _box_player_grid.get_child(i) as ItemSlot
+		b.set_slot(_player.inventory.slots[i])
 
 
-func _set_slot_text(b: Button, slot: Dictionary) -> void:
-	var item: int = slot["item"]
-	var count: int = slot["count"]
-	if item == BlockTypes.Block.AIR or count <= 0:
-		b.text = "-"
+## 系统日志区：透明背景文本，悬浮主界面左下角，鼠标事件穿透不可选中。
+func _build_log(root: Control) -> void:
+	_log_label = Label.new()
+	_log_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_log_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.95))
+	_log_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.8))
+	_log_label.add_theme_constant_override("outline_size", 8)
+	_log_label.add_theme_font_size_override("font_size", 18)
+	_log_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	root.add_child(_log_label)
+	_log_label.anchor_top = 1.0
+	_log_label.anchor_bottom = 1.0
+	_log_label.offset_left = 16.0
+	_log_label.offset_right = 460.0
+	_log_label.offset_top = -190.0
+	_log_label.offset_bottom = -48.0
+
+
+## 追加一条系统播报，最多保留最近 5 条。
+func _push_log(message: String) -> void:
+	_log_lines.append(message)
+	while _log_lines.size() > 5:
+		_log_lines.remove_at(0)
+	if _log_label:
+		_log_label.text = "\n".join(_log_lines)
+
+
+## 悬停预览卡：3D 旋转模型 + 名称 + 简介，弹在触发格子右侧并钳制在屏内。
+func _build_item_tip() -> void:
+	_tip_panel = PanelContainer.new()
+	_tip_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tip_panel.z_index = 20
+	var tip_style := StyleBoxFlat.new()
+	tip_style.bg_color = Color(0.97, 0.94, 0.86, 0.98)
+	tip_style.border_color = Color(0.62, 0.47, 0.27)
+	tip_style.set_border_width_all(2)
+	tip_style.set_corner_radius_all(10)
+	tip_style.set_content_margin_all(10)
+	_tip_panel.add_theme_stylebox_override("panel", tip_style)
+
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	_tip_panel.add_child(v)
+
+	var vpc := SubViewportContainer.new()
+	vpc.stretch = true
+	vpc.custom_minimum_size = Vector2(120, 120)
+	vpc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(vpc)
+
+	_tip_viewport = SubViewport.new()
+	_tip_viewport.own_world_3d = true
+	_tip_viewport.transparent_bg = true
+	_tip_viewport.size = Vector2i(120, 120)
+	_tip_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vpc.add_child(_tip_viewport)
+
+	var cam := Camera3D.new()
+	cam.position = Vector3(1.27, 1.26, 1.27)
+	cam.rotation_degrees = Vector3(-35.0, 45.0, 0.0)
+	_tip_viewport.add_child(cam)
+
+	var light := DirectionalLight3D.new()
+	light.rotation_degrees = Vector3(-45.0, 30.0, 0.0)
+	_tip_viewport.add_child(light)
+
+	_tip_mesh = MeshInstance3D.new()
+	_tip_viewport.add_child(_tip_mesh)
+
+	_tip_name = Label.new()
+	_tip_name.add_theme_font_size_override("font_size", 18)
+	_tip_name.add_theme_color_override("font_color", Color(0.30, 0.20, 0.08))
+	v.add_child(_tip_name)
+
+	_tip_desc = Label.new()
+	_tip_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tip_desc.custom_minimum_size = Vector2(170, 0)
+	_tip_desc.add_theme_font_size_override("font_size", 14)
+	_tip_desc.add_theme_color_override("font_color", Color(0.35, 0.27, 0.16))
+	v.add_child(_tip_desc)
+
+	_tip_panel.visible = false
+	_root.add_child(_tip_panel)
+
+
+func _on_box_slot_hover(index: int, from_box: bool, slot: ItemSlot) -> void:
+	if _player == null or (from_box and _box_inventory == null):
 		return
-	if ItemTypes.is_tool_item(item):
-		b.text = "%s %d" % [ItemTypes.item_short_name(item), int(slot["durability"])]
-	elif ItemTypes.is_plain_item(item):
-		b.text = "%s×%d" % [ItemTypes.item_short_name(item), count]
+	var inv := _box_inventory if from_box else _player.inventory
+	_show_item_tip(slot, int(inv.slots[index]["item"]))
+
+
+func _show_item_tip(slot: ItemSlot, item_id: int) -> void:
+	if _tip_panel == null:
+		return
+	if item_id == 0:
+		_tip_panel.visible = false
+		return
+	_tip_name.text = ItemTypes.item_name(item_id)
+	_tip_desc.text = ItemTypes.item_description(item_id)
+	_apply_tip_mesh(item_id)
+	_tip_panel.reset_size()
+	var pos := slot.get_global_rect().position + Vector2(slot.size.x + 8.0, 0.0)
+	pos = pos.clamp(Vector2.ZERO, slot.get_viewport_rect().size - _tip_panel.size)
+	_tip_panel.position = pos
+	_tip_panel.visible = true
+
+
+## 预览模型与实物匹配：方块=立方体（储物箱带木纹栅格面与锁扣）、
+## 工具=木柄+头部组合、金属锭=棱柱条、其余物品=扁盒，颜色与格子微缩图同源。
+func _apply_tip_mesh(item_id: int) -> void:
+	for child in _tip_mesh.get_children():
+		_tip_mesh.remove_child(child)
+		child.queue_free()
+	_tip_mesh.mesh = null
+	var base: Color = ItemTypes.item_color(item_id)
+	if ItemTypes.category(item_id) == 0:
+		if item_id == BlockTypes.Block.CHEST:
+			_build_tip_chest(base)
+		else:
+			_add_tip_part(Vector3.ONE, base, Vector3.ZERO)
+	elif ItemTypes.is_tool_item(item_id):
+		_build_tip_tool(item_id, base)
+	elif item_id in [ItemTypes.COPPER_INGOT, ItemTypes.TIN_INGOT, ItemTypes.BRONZE_INGOT]:
+		var prism := PrismMesh.new()
+		prism.size = Vector3(1.0, 0.45, 0.55)
+		prism.material = _tip_material(base)
+		var ingot := MeshInstance3D.new()
+		ingot.mesh = prism
+		ingot.rotation_degrees = Vector3(0.0, 90.0, 0.0)
+		_tip_mesh.add_child(ingot)
 	else:
-		b.text = "%s×%d" % [BlockTypes.short_name(item), count]
+		_add_tip_part(Vector3(0.85, 0.35, 0.6), base, Vector3.ZERO)
+	_tip_mesh.rotation = Vector3(0.35, 0.6, 0.0)
+
+
+func _tip_material(base: Color) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = base
+	return mat
+
+
+## 往预览场景追加一个盒体部件，返回节点便于调用方追加旋转/位置调整。
+func _add_tip_part(box_size: Vector3, base: Color, pos: Vector3, mat: StandardMaterial3D = null) -> MeshInstance3D:
+	var mesh := BoxMesh.new()
+	mesh.size = box_size
+	mesh.material = mat if mat != null else _tip_material(base)
+	var part := MeshInstance3D.new()
+	part.mesh = mesh
+	part.position = pos
+	_tip_mesh.add_child(part)
+	return part
+
+
+## 储物箱预览：木纹栅格贴面 + 中部深色捆带 + 前侧金色锁扣。
+func _build_tip_chest(base: Color) -> void:
+	var grid := _make_grid_texture(base)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = grid
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_add_tip_part(Vector3.ONE, base, Vector3.ZERO, mat)
+	_add_tip_part(Vector3(1.04, 0.16, 1.04), base.darkened(0.35), Vector3(0.0, 0.12, 0.0))
+	_add_tip_part(Vector3(0.16, 0.24, 0.08), Color(0.85, 0.72, 0.30), Vector3(0.0, 0.12, 0.52))
+
+
+## 工具预览：斜握木柄 + 按类型组合头部（镐横梁/斧侧刃/锹铲头）。
+func _build_tip_tool(item_id: int, base: Color) -> void:
+	var wood := Color(0.45, 0.30, 0.15)
+	var handle := _add_tip_part(Vector3(0.12, 1.1, 0.12), wood, Vector3.ZERO)
+	handle.rotation_degrees = Vector3(0.0, 0.0, -35.0)
+	match ItemTypes.tool_type(item_id):
+		"pickaxe":
+			_add_tip_part(Vector3(0.9, 0.14, 0.14), base, Vector3(0.18, 0.48, 0.0))
+		"axe":
+			_add_tip_part(Vector3(0.42, 0.34, 0.14), base, Vector3(0.3, 0.42, 0.0))
+		"shovel":
+			_add_tip_part(Vector3(0.3, 0.4, 0.1), base, Vector3(0.18, 0.52, 0.0))
+
+
+## 程序化栅格纹理：底色 + 每隔 16 像素的深色格线（64×64，最近邻采样）。
+func _make_grid_texture(base: Color) -> ImageTexture:
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	img.fill(base)
+	var line := base.darkened(0.4)
+	for i in range(0, 64, 16):
+		for p in range(64):
+			img.set_pixel(i, p, line)
+			img.set_pixel(p, i, line)
+	return ImageTexture.create_from_image(img)
+
+
+func _hide_item_tip() -> void:
+	if _tip_panel:
+		_tip_panel.visible = false
 
 
 func _on_box_slot_pressed(index: int) -> void:
@@ -946,8 +1401,8 @@ func _build_minimap(root: Control) -> void:
 func _refresh_stats() -> void:
 	if _player == null:
 		return
-	if _hp_bar:
-		_hp_bar.value = _player.health
+	if _hearts:
+		_hearts.queue_redraw()
 	if _hunger_label:
 		_hunger_label.text = "饥饿 %d / %d" % [int(_player.hunger), _player.MAX_HUNGER]
 	_refresh_time()

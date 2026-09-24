@@ -77,6 +77,16 @@ static func _tile_color(tile: int) -> Color:
 			return Color(0.72, 0.72, 0.75)
 		18:
 			return Color(0.32, 0.32, 0.35)
+		19:
+			return Color(0.22, 0.52, 0.30)
+		20:
+			return Color(0.30, 0.48, 0.20)
+		21:
+			return Color(0.44, 0.74, 0.34)
+		22:
+			return Color(0.26, 0.58, 0.26)
+		23:
+			return Color(0.95, 0.62, 0.78)
 		_:
 			return Color(1.0, 0.0, 1.0)
 

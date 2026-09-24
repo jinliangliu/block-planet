@@ -1,7 +1,8 @@
 extends Node
 ## 无头生存扩展探针：验证动物驻足节奏、按住左键连击、猪/狼生物、
-## 夜晚天黑（环境光调制）、储物箱存取/破坏散落、村庄农田与面包链路，
-## 以及堆叠 100、背包分类整理、铜锡矿生成、冶炼链路、生物名牌与 HUD 新增面板。
+## 夜晚天黑（环境光调制）、储物箱存取/破坏散落、村庄农田与面包链路、
+## 堆叠 100、背包分类整理、铜锡矿生成、冶炼链路、生物名牌与 HUD 新增面板，
+## 以及水体生态（大河/池塘分类、水生植物、鱼虾蟹蜻蜓青蛙与各自行为）。
 ## 运行：Godot_v4.6.3-stable_win64_console.exe --headless --path . res://tests/life_probe.tscn
 
 var _failed := 0
@@ -143,11 +144,11 @@ func _run() -> void:
 	_check(world.get_block(chest_cell) == BlockTypes.Block.CHEST, "储物箱方块可放置读回")
 
 	var box := world.get_box(chest_cell)
-	_check(box.slots.size() == 27, "储物箱背包为 27 格（实际 %d）" % box.slots.size())
+	_check(box.slots.size() == 36, "储物箱背包为 36 格（实际 %d）" % box.slots.size())
 	box.add_item(BlockTypes.Block.WOOD, 10)
 	_check(world.get_box(chest_cell) == box, "同一箱体重复访问返回同一背包实例")
 	_check(box.count_item(BlockTypes.Block.WOOD) == 10, "箱内存入木头×10")
-	_check(player.inventory.slots.size() == Inventory.SLOT_COUNT, "玩家背包保持 9 格")
+	_check(player.inventory.slots.size() == Inventory.SLOT_COUNT and Inventory.SLOT_COUNT == 18, "玩家背包扩至 18 格")
 
 	# 玩家面向储物箱右键 → 事件开面板。
 	player.global_position = Vector3(30.5, base_y + 1.1, 26.5)
@@ -330,11 +331,177 @@ func _run() -> void:
 	hud.set_smelt_open(false)
 	_check(not hud._smelt_overlay.visible, "冶炼面板可关闭")
 	_check(hud._name_label != null and hud._name_label.text == "小方块", "状态面板显示姓名「小方块」")
-	_check(hud._hp_bar != null and int(hud._hp_bar.max_value) == Player.MAX_HEALTH,
-		"状态面板生命条范围 0-20")
+	_check(hud._hearts != null and hud._hearts.custom_minimum_size.x >= 100.0,
+		"状态面板生命爱心条已挂载（5 颗心宽度）")
+	_check(HUD.HEART_COUNT == 5 and HUD.HEARTS_PER_POINT * HUD.HEART_COUNT >= Player.MAX_HEALTH,
+		"生命爱心换算（5 颗 × 4 点 ≥ 满血 20）")
 	_check(hud._minimap != null, "右上角小地图已挂载")
 	_check(hud._minimap._samples.size() > 0,
 		"小地图已采样到顶面颜色（%d 格）" % hud._minimap._samples.size())
+
+	# ── 阶段 J：水体生态（大河/池塘分类、水生植物、水生物与各自行为） ──
+	_check(BlockTypes.is_water_plant(BlockTypes.Block.LILY_PAD), "荷叶判定为水生植物")
+	_check(
+		not BlockTypes.is_solid(BlockTypes.Block.DUCKWEED)
+		and BlockTypes.is_transparent(BlockTypes.Block.DUCKWEED)
+		and BlockTypes.is_water_plant(BlockTypes.Block.LOTUS),
+		"浮萍/莲花为非固体、透明的水生植物",
+	)
+	_check(ItemTypes.is_placeable(BlockTypes.Block.LOTUS), "水生植物可作为方块再放置")
+	_check(BlockTypes.HARDNESS[BlockTypes.Block.WATERWEED] <= 0.2, "水草徒手可快速采集")
+	_check(World.WATER_FLOOD_CAP > World.LARGE_WATER_MIN_TILES, "洪泛上限大于大水体阈值")
+
+	# 出生点列是陆地；勘察确认的池塘/大河中心附近应分类正确（种子固定）。
+	_check(world.water_kind(8, 8) == World.WATER_NONE and world.water_depth(8, 8) == 0,
+		"出生点列为陆地（非水体、水深 0）")
+	var pond_cell := _find_kind_cell(world, Vector2i(-8, -9), World.WATER_POND, 8)
+	_check(pond_cell != Vector2i.ZERO, "小池塘分类命中（%s）" % str(pond_cell))
+	var large_cell := _find_kind_cell(world, Vector2i(-26, -55), World.WATER_LARGE, 8)
+	_check(large_cell != Vector2i.ZERO, "大河分类命中（%s）" % str(large_cell))
+
+	# 水生植物：大河底部为水下植物，池塘水面为浮叶植物。
+	var weeds := _find_blocks_near(
+		world, large_cell, 18, [BlockTypes.Block.WATERWEED, BlockTypes.Block.ALGAE]
+	)
+	var underwater := 0
+	for cell: Vector3i in weeds:
+		if cell.y < World.SEA_LEVEL:
+			underwater += 1
+	_check(weeds.size() >= 1 and underwater == weeds.size(),
+		"大河底部生成水草/藻类（命中 %d 处，全部位于水面以下）" % weeds.size())
+
+	var pads := _find_blocks_near(
+		world, pond_cell, 18,
+		[BlockTypes.Block.DUCKWEED, BlockTypes.Block.LILY_PAD, BlockTypes.Block.LOTUS]
+	)
+	var at_surface := 0
+	for cell: Vector3i in pads:
+		if cell.y == World.SEA_LEVEL:
+			at_surface += 1
+	_check(pads.size() >= 1 and at_surface == pads.size(),
+		"池塘水面生成浮萍/荷叶/莲花（命中 %d 处，全部位于水面）" % pads.size())
+
+	# 水生物属性：名称、生命、掉落与可食用性。
+	var probe_fish := Mob.new()
+	probe_fish.setup(Mob.MobType.FISH, player, day_night)
+	_check(probe_fish.display_name() == "鱼" and probe_fish.health == 3
+		and probe_fish.drop_item == ItemTypes.RAW_FISH and probe_fish.drop_count == 2,
+		"鱼属性：显示名「鱼」/ 生命 3 / 掉落生鱼×2")
+	var probe_crab := Mob.new()
+	probe_crab.setup(Mob.MobType.CRAB, player, day_night)
+	_check(probe_crab.display_name() == "蟹" and probe_crab.max_health == 4
+		and probe_crab.drop_item == ItemTypes.CRAB_MEAT,
+		"蟹属性：显示名「蟹」/ 生命 4 / 掉落蟹肉")
+	var probe_shrimp := Mob.new()
+	probe_shrimp.setup(Mob.MobType.SHRIMP, player, day_night)
+	_check(probe_shrimp.drop_item == ItemTypes.RAW_SHRIMP, "虾掉落生虾")
+	var probe_dragonfly := Mob.new()
+	probe_dragonfly.setup(Mob.MobType.DRAGONFLY, player, day_night)
+	_check(probe_dragonfly.display_name() == "蜻蜓" and probe_dragonfly.drop_item == BlockTypes.Block.AIR,
+		"蜻蜓为环境生物（显示名「蜻蜓」/ 无掉落）")
+	var probe_frog := Mob.new()
+	probe_frog.setup(Mob.MobType.FROG, player, day_night)
+	_check(probe_frog.display_name() == "青蛙" and probe_frog.drop_item == BlockTypes.Block.AIR,
+		"青蛙为环境生物（显示名「青蛙」/ 无掉落）")
+
+	_check(
+		Mob.habitat_of(Mob.MobType.FISH) == Mob.Habitat.WATER
+		and Mob.habitat_of(Mob.MobType.DRAGONFLY) == Mob.Habitat.AIR
+		and Mob.habitat_of(Mob.MobType.FROG) == Mob.Habitat.LAND,
+		"栖息地：鱼在水中 / 蜻蜓在空中 / 青蛙在陆地",
+	)
+	_check(Mob.is_aquatic(Mob.MobType.CRAB) and Mob.is_aquatic(Mob.MobType.FROG)
+		and not Mob.is_aquatic(Mob.MobType.COW), "水生物判定（蟹、青蛙为正，牛为否）")
+	_check(Mob.is_passive(Mob.MobType.FISH) and Mob.is_passive(Mob.MobType.FROG)
+		and Mob.is_passive(Mob.MobType.CRAB), "水生物判定为被动（受击逃跑、不攻击）")
+	_check(ItemTypes.is_food(ItemTypes.RAW_FISH) and ItemTypes.is_food(ItemTypes.CRAB_MEAT)
+		and ItemTypes.food_value(ItemTypes.RAW_FISH) == 6, "水产可食用（生鱼恢复 6 点饥饿）")
+
+	# 鱼在大河游动且不跃出水面。
+	# 玩家需在水体旁：世界按玩家位置装卸区块，远离时鱼的行为与断言都会读到空气。
+	var swim_pos := _water_spawn_position(world, large_cell, false)
+	_check(swim_pos.y > 0.0, "大河中找到可用的水体格")
+	player.global_position = swim_pos + Vector3(0.0, 2.5, 0.0)
+	player.velocity = Vector3.ZERO
+	for i in range(4):
+		await get_tree().physics_frame
+	var live_fish := _spawn_mob(main_scene, Mob.MobType.FISH, player, day_night, swim_pos)
+	var fish_start := live_fish.global_position
+	for i in range(70):
+		await get_tree().physics_frame
+	_check(live_fish.global_position.distance_to(fish_start) > 0.05,
+		"鱼在水中游动（位移 %.2f m）" % live_fish.global_position.distance_to(fish_start))
+	_check(world.get_block(Vector3i(live_fish.global_position.floor())) != BlockTypes.Block.AIR,
+		"鱼未跃出水面（身体所在格仍为水）")
+	live_fish.queue_free()
+
+	# 蟹贴水底爬行（重力生效）；蜻蜓悬停不落水；青蛙在岸边起跳。
+	player.global_position = Vector3(float(pond_cell.x) + 0.5, float(World.SEA_LEVEL) + 3.0, float(pond_cell.y) + 0.5)
+	player.velocity = Vector3.ZERO
+	for i in range(4):
+		await get_tree().physics_frame
+	var bed_pos := _water_spawn_position(world, pond_cell, true)
+	var live_crab := _spawn_mob(main_scene, Mob.MobType.CRAB, player, day_night, bed_pos)
+	for i in range(70):
+		await get_tree().physics_frame
+	_check(live_crab.is_on_floor(), "蟹贴在水底（is_on_floor 为真）")
+	_check(live_crab.global_position.y < float(World.SEA_LEVEL) + 1.0,
+		"蟹未浮出水面（y=%.2f）" % live_crab.global_position.y)
+	live_crab.queue_free()
+
+	var hover_pos := Vector3(pond_cell.x + 0.5, float(World.SEA_LEVEL) + 1.2, pond_cell.y + 0.5)
+	var live_dragonfly := _spawn_mob(main_scene, Mob.MobType.DRAGONFLY, player, day_night, hover_pos)
+	var bob_peak := 0.0
+	for i in range(70):
+		await get_tree().physics_frame
+		bob_peak = maxf(bob_peak, absf(live_dragonfly.velocity.y))
+	_check(live_dragonfly.global_position.y > float(World.SEA_LEVEL),
+		"蜻蜓悬停在水面上方未坠落（y=%.2f）" % live_dragonfly.global_position.y)
+	_check(bob_peak > 0.05, "蜻蜓上下浮动（竖直速度峰值 %.2f）" % bob_peak)
+	live_dragonfly.queue_free()
+
+	var shore_pos: Vector3 = spawner._find_pond_shore(pond_cell.x, pond_cell.y)
+	_check(shore_pos != MobSpawner.INVALID_POSITION, "池塘岸边可找到可站立落点")
+	var live_frog := _spawn_mob(main_scene, Mob.MobType.FROG, player, day_night, shore_pos)
+	var frog_y := live_frog.global_position.y
+	var frog_peak := frog_y
+	for i in range(180):
+		await get_tree().physics_frame
+		frog_peak = maxf(frog_peak, live_frog.global_position.y)
+	_check(frog_peak > frog_y + 0.15, "青蛙间歇起跳离地（峰值 +%.2f m）" % (frog_peak - frog_y))
+	live_frog.queue_free()
+
+	# 水生物生成轨道：确定性落点 + 随机搜索路径 + 清空。
+	spawner._despawn_all()
+	_ensure_water_chunks(world, large_cell, 8)
+	_check(spawner._spawn_in_large_water(Mob.MobType.FISH, large_cell.x, large_cell.y),
+		"大河水体格可放置鱼")
+	_ensure_water_chunks(world, pond_cell, 8)
+	_check(spawner._spawn_by_pond(Mob.MobType.FROG, pond_cell.x, pond_cell.y),
+		"池塘岸边可放置青蛙")
+	_check(spawner._water_mobs.size() == 2, "水生物轨道已登记 2 只（实际 %d）" % spawner._water_mobs.size())
+	var track_aquatic := spawner._water_mobs.size() > 0
+	for mob in spawner._water_mobs:
+		if not Mob.is_aquatic(mob.type):
+			track_aquatic = false
+	_check(track_aquatic, "轨道登记的均为水生物")
+	spawner._despawn_all()
+	_check(spawner._water_mobs.is_empty() and spawner._mobs.is_empty(), "清空后陆地与水生物列表均为空")
+
+	player.global_position = shore_pos
+	player.velocity = Vector3.ZERO
+	var pond_spawned := false
+	var pond_tries := 0
+	while pond_tries < 60 and not pond_spawned:
+		pond_tries += 1
+		pond_spawned = spawner._spawn_water_life()
+	_check(pond_spawned, "池塘边随机搜索可生成水生物（%d 次尝试内）" % pond_tries)
+	spawner._despawn_all()
+	player.global_position = Vector3(24.5, base_y + 1.1, 26.5)
+	player.velocity = Vector3.ZERO
+	player.health = Player.MAX_HEALTH
+	for i in range(20):
+		await get_tree().physics_frame
 
 	if _failed == 0:
 		print("LIFE_TEST_OK")
@@ -351,6 +518,57 @@ func _probe_base_y(world: World) -> int:
 		for z in range(VillageBuilder.REGION_MIN.z, VillageBuilder.REGION_MAX.z + 1):
 			top = maxi(top, world.get_surface_height(x, z) - 1)
 	return top
+
+
+## 在中心附近找一处指定水体类型的格子；找不到返回 Vector2i.ZERO。
+func _find_kind_cell(world: World, center: Vector2i, kind: int, radius: int) -> Vector2i:
+	for dx in range(-radius, radius + 1):
+		for dz in range(-radius, radius + 1):
+			var cell := Vector2i(center.x + dx, center.y + dz)
+			if world.water_kind(cell.x, cell.y) == kind:
+				return cell
+	return Vector2i.ZERO
+
+
+## 扫描半径内指定方块 ID 的坐标（y 覆盖水面上下四格）；先行强制加载区块。
+func _find_blocks_near(world: World, center: Vector2i, radius: int, ids: Array) -> Array[Vector3i]:
+	var span := radius + 2
+	world.ensure_chunks_in_region(
+		Vector3i(center.x - span, 0, center.y - span),
+		Vector3i(center.x + span, World.SEA_LEVEL + 2, center.y + span),
+	)
+	var found: Array[Vector3i] = []
+	for wx in range(center.x - radius, center.x + radius + 1):
+		for wz in range(center.y - radius, center.y + radius + 1):
+			for wy in range(World.SEA_LEVEL - 4, World.SEA_LEVEL + 1):
+				if ids.has(world.get_block(Vector3i(wx, wy, wz))):
+					found.append(Vector3i(wx, wy, wz))
+	return found
+
+
+## 强制加载以 center 为中心、半径 radius 的区块（水面上下两格覆盖）。
+## 探针远离出生点时区块会被流式卸载，get_block 将一律返回空气，须先补载。
+func _ensure_water_chunks(world: World, center: Vector2i, radius: int) -> void:
+	world.ensure_chunks_in_region(
+		Vector3i(center.x - radius, 0, center.y - radius),
+		Vector3i(center.x + radius, World.SEA_LEVEL + 2, center.y + radius),
+	)
+
+
+## 在指定水列附近取一格可用水体作为落点；prefer_bottom 为真时取水底。
+## 失败返回 Vector3(0, -1, 0)。
+func _water_spawn_position(world: World, center: Vector2i, prefer_bottom: bool) -> Vector3:
+	for wx in range(center.x - 2, center.x + 3):
+		for wz in range(center.y - 2, center.y + 3):
+			var depth := world.water_depth(wx, wz)
+			if depth <= 0:
+				continue
+			var y := (World.SEA_LEVEL - depth + 1) if prefer_bottom else (World.SEA_LEVEL - depth / 2)
+			for offset in [0, 1, -1, 2, -2]:
+				var cell := Vector3i(wx, y + offset, wz)
+				if world.get_block(cell) == BlockTypes.Block.WATER:
+					return Vector3(wx + 0.5, float(cell.y) + 0.1, wz + 0.5)
+	return Vector3(0.0, -1.0, 0.0)
 
 
 func _spawn_mob(parent: Node, mob_type: Mob.MobType, player: Player, dn: DayNightCycle, pos: Vector3) -> Mob:
