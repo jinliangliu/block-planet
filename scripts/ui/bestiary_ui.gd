@@ -362,6 +362,16 @@ func _build_preview_popup() -> void:
 	var close_btn := Button.new()
 	close_btn.text = "✕"
 	close_btn.focus_mode = Control.FOCUS_NONE
+	# 背景透明：与预览卡米色底融为一体，只留红色 ✕ 字形。
+	var close_style := StyleBoxEmpty.new()
+	close_style.content_margin_left = 8.0
+	close_style.content_margin_right = 8.0
+	close_style.content_margin_top = 2.0
+	close_style.content_margin_bottom = 2.0
+	close_btn.add_theme_stylebox_override("normal", close_style)
+	close_btn.add_theme_stylebox_override("hover", close_style)
+	close_btn.add_theme_stylebox_override("pressed", close_style)
+	close_btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	close_btn.add_theme_color_override("font_color", CLOSE_COLOR)
 	close_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
 	close_btn.add_theme_font_size_override("font_size", 20)
@@ -798,6 +808,9 @@ func _draw_question() -> void:
 		btn.text = option
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(0.0, 40.0)
+		# 文字左对齐、按钮宽度只占本行内容：窄选项不再拉满整行。
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		btn.add_theme_font_size_override("font_size", 17)
 		btn.add_theme_color_override("font_color", TITLE_COLOR)
 		btn.pressed.connect(_on_option_pressed.bind(option))
