@@ -1402,6 +1402,199 @@ func _run() -> void:
 	GameState.set_mode(GameState.Mode.SURVIVAL)
 	_check(hud._mode_label.text == "生存", "回到生存模式后徽章复位为「生存」")
 
+	# ── 阶段 R：资产完整性守门（新增物种/方块/物品/图鉴时先看这一节） ──
+	# 这一节不测玩法，只测「代码里的表与实现是否还对得上」。
+	# 新增内容若漏改某张表，这里会直接红出来——比在游戏里慢慢发现便宜得多。
+
+	# R-1 生物名录
+	var unnamed := PackedStringArray()
+	for mob_id: int in Mob.MobType.values():
+		var mob_title := String(Mob.MOB_NAMES.get(mob_id, ""))
+		if mob_title.is_empty() or mob_title == "生物":
+			unnamed.append(str(mob_id))
+	_check(
+		unnamed.is_empty() and Mob.MOB_NAMES.size() == Mob.MobType.size(),
+		"MOB_NAMES 覆盖全部 %d 个物种（缺：%s）" % [
+			Mob.MobType.size(), _join_or_none(unnamed)
+		],
+	)
+
+	# R-2 敌对名单：与保护名录不得重叠，且区域敌对表必须是它的子集。
+	# 新增物种默认被动；要当敌对必须在 Mob.HOSTILE_MOBS 显式登记。
+	var conflict := PackedStringArray()
+	for mob_id: int in Mob.HOSTILE_MOBS:
+		if Mob.PROTECTED_MOBS.has(mob_id):
+			conflict.append("保护动物被登记为敌对：%s" % Mob.MOB_NAMES.get(mob_id, str(mob_id)))
+	for entry: Dictionary in RegionAtlas.REGIONS:
+		for key: String in (entry["hostile"] as Dictionary):
+			if not Mob.HOSTILE_MOBS.has(int(Mob.MobType[key])):
+				conflict.append("%s/hostile 未登记为敌对：%s" % [entry["title"], key])
+	_check(
+		Mob.HOSTILE_MOBS.size() == 5 and conflict.is_empty(),
+		"敌对名单 %d 种（僵尸/骷髅/蜘蛛/狼/掠夺者）、与保护名录无交集、区域敌对表无越界（错项：%s）" % [
+			Mob.HOSTILE_MOBS.size(), _join_or_none(conflict)
+		],
+	)
+
+	# R-3 凡是栖息在水里的物种，都必须归水生物轨道（青蛙是例外：栖息草地、由池塘轨道生成）
+	var habitat_wrong := PackedStringArray()
+	for mob_id: int in Mob.MobType.values():
+		if Mob.habitat_of(mob_id) == Mob.Habitat.WATER and not Mob.is_aquatic(mob_id):
+			habitat_wrong.append(String(Mob.MOB_NAMES.get(mob_id, str(mob_id))))
+	_check(
+		habitat_wrong.is_empty(),
+		"在水里的物种都归水生物轨道（错项：%s）" % _join_or_none(habitat_wrong),
+	)
+
+	# R-4 成长阶段链：末段必须是成体（days=0、scale=1），多段的首段必须是幼体
+	var stage_wrong := PackedStringArray()
+	for mob_id: int in Mob.MobType.values():
+		var chain := Mob.stages_of(mob_id)
+		var stage_label := String(Mob.MOB_NAMES.get(mob_id, str(mob_id)))
+		if chain.is_empty():
+			stage_wrong.append("%s 无阶段" % stage_label)
+			continue
+		var last: Dictionary = chain[chain.size() - 1]
+		if int(last.get("days", -1)) != 0 or not is_equal_approx(float(last.get("scale", 0.0)), 1.0):
+			stage_wrong.append("%s 末段不是成体" % stage_label)
+		if chain.size() > 1:
+			var first: Dictionary = chain[0]
+			if float(first.get("scale", 1.0)) >= 1.0 or int(first.get("days", 0)) <= 0:
+				stage_wrong.append("%s 首段不是幼体" % stage_label)
+	_check(
+		stage_wrong.is_empty(),
+		"阶段链自洽（%d 个物种有成长链；错项：%s）" % [
+			_grown_species_count(), _join_or_none(stage_wrong)
+		],
+	)
+
+	# R-5 区域生成表：物种名必须能解析成枚举，且分类与被动表一致
+	var region_wrong := PackedStringArray()
+	for entry: Dictionary in RegionAtlas.REGIONS:
+		var region_name := String(entry["title"])
+		for key: String in (entry["passive"] as Dictionary):
+			if not Mob.MobType.has(key):
+				region_wrong.append("%s/passive 写了不存在的物种「%s」" % [region_name, key])
+			elif not Mob.is_passive(int(Mob.MobType[key])):
+				region_wrong.append("%s/passive 混进敌对「%s」" % [region_name, key])
+		for key: String in (entry["hostile"] as Dictionary):
+			if not Mob.MobType.has(key):
+				region_wrong.append("%s/hostile 写了不存在的物种「%s」" % [region_name, key])
+			elif Mob.is_passive(int(Mob.MobType[key])):
+				region_wrong.append("%s/hostile 混进被动「%s」" % [region_name, key])
+	_check(
+		region_wrong.is_empty(),
+		"%d 个区域生成表的物种名与分类自洽（错项：%s）" % [
+			RegionAtlas.COUNT, _join_or_none(region_wrong)
+		],
+	)
+	# 水轨物种与村庄常驻角色（村民/掠夺者由 VillageBuilder 放在村里）不登区域表，
+	# 其余物种都必须能被某个区域生成——新增陆地物种忘了登表就靠这条拦。
+	var region_keys := _region_species_keys()
+	var off_table := PackedStringArray()
+	for mob_id: int in Mob.MobType.values():
+		if Mob.is_aquatic(mob_id):
+			continue
+		if mob_id == Mob.MobType.VILLAGER or mob_id == Mob.MobType.PILLAGER:
+			continue
+		var enum_name := String(Mob.MobType.find_key(mob_id))
+		if not region_keys.has(enum_name):
+			off_table.append(String(Mob.MOB_NAMES.get(mob_id, enum_name)))
+	_check(
+		off_table.is_empty(),
+		"区域表收录了 %d 个物种，陆地与空中物种无遗漏（未收录：%s）" % [
+			region_keys.size(), _join_or_none(off_table)
+		],
+	)
+
+	# R-6 造型登记表：覆盖全枚举，且方法名真实存在
+	var art_wrong := PackedStringArray()
+	var probe_mob := Mob.new()
+	for mob_id: int in Mob.MobType.values():
+		var method_name := String(Mob.ART_BUILDERS.get(mob_id, ""))
+		if method_name.is_empty() or not probe_mob.has_method(method_name):
+			art_wrong.append("%s → 「%s」" % [Mob.MOB_NAMES.get(mob_id, str(mob_id)), method_name])
+	probe_mob.free()
+	_check(
+		Mob.ART_BUILDERS.size() == Mob.MobType.size() and art_wrong.is_empty(),
+		"造型登记表覆盖全部物种且方法存在（%d 条；错项：%s）" % [
+			Mob.ART_BUILDERS.size(), _join_or_none(art_wrong)
+		],
+	)
+
+	# R-7 保护动物名录与交互提示
+	var protect_wrong := PackedStringArray()
+	for mob_id: int in Mob.PROTECTED_MOBS:
+		if Mob.protected_note(mob_id).is_empty():
+			protect_wrong.append(String(Mob.MOB_NAMES.get(mob_id, str(mob_id))))
+	_check(
+		Mob.PROTECTED_MOBS.size() == Mob.PROTECTED_NOTES.size() and protect_wrong.is_empty(),
+		"%d 种保护动物都有中文名录（缺：%s）" % [
+			Mob.PROTECTED_MOBS.size(), _join_or_none(protect_wrong)
+		],
+	)
+
+	# R-8 方块表：名称/实心/透明全覆盖；非空气要有瓦片与简称；非空气与水要有硬度
+	var block_wrong := PackedStringArray()
+	for block_id: int in BlockTypes.Block.values():
+		var block_name := String(BlockTypes.NAMES.get(block_id, ""))
+		if block_name.is_empty():
+			block_wrong.append("方块 %d 无名称" % block_id)
+		if not BlockTypes.SOLID.has(block_id) or not BlockTypes.TRANSPARENT.has(block_id):
+			block_wrong.append("%s 缺实心/透明登记" % block_name)
+		if block_id != BlockTypes.Block.AIR:
+			if not BlockTypes.TILES.has(block_id) or not BlockTypes.SHORT_NAMES.has(block_id):
+				block_wrong.append("%s 缺瓦片或简称" % block_name)
+			if block_id != BlockTypes.Block.WATER and not BlockTypes.HARDNESS.has(block_id):
+				block_wrong.append("%s 缺硬度" % block_name)
+	_check(
+		block_wrong.is_empty(),
+		"%d 种方块的名称/实心/透明/瓦片/硬度登记完整（错项：%s）" % [
+			BlockTypes.Block.size(), _join_or_none(block_wrong)
+		],
+	)
+
+	# R-9 物品表：工具四张表、材料三张表都要齐
+	var item_wrong := PackedStringArray()
+	for tool_id: int in ItemTypes.TOOL_TYPE:
+		for table: Dictionary in [
+			ItemTypes.TOOL_TYPE, ItemTypes.TOOL_TIER,
+			ItemTypes.TOOL_DURABILITY, ItemTypes.TOOL_NAMES,
+		]:
+			if not table.has(tool_id):
+				item_wrong.append("工具 %d" % tool_id)
+				break
+	for item_id: int in ItemTypes.ITEM_NAMES:
+		for table: Dictionary in [ItemTypes.ITEM_SHORT_NAMES, ItemTypes.ITEM_COLORS]:
+			if not table.has(item_id):
+				item_wrong.append("材料 %d" % item_id)
+				break
+	_check(
+		ItemTypes.TOOL_TYPE.size() == 26 and ItemTypes.ITEM_NAMES.size() == 25 and item_wrong.is_empty(),
+		"工具 26 件四表齐、材料 %d 种三表齐（错项：%s）" % [
+			ItemTypes.ITEM_NAMES.size(), _join_or_none(item_wrong)
+		],
+	)
+
+	# R-10 区域图鉴卡片：字段齐、插画种类有画法
+	var card_wrong := PackedStringArray()
+	_check(
+		RegionAtlas.REGION_CARDS.size() == RegionAtlas.COUNT,
+		"%d 个区域各有一组图鉴卡片" % RegionAtlas.REGION_CARDS.size(),
+	)
+	for group: Array in RegionAtlas.REGION_CARDS:
+		for card: Dictionary in group:
+			var card_title := String(card.get("title", ""))
+			if card_title.is_empty() or String(card.get("text", "")).is_empty():
+				card_wrong.append("有卡片缺标题或正文")
+			var kind := String(card.get("art", ""))
+			if not MapSelector.ART_KINDS.has(kind):
+				card_wrong.append("%s 用了没有画法的插画「%s」" % [card_title, kind])
+	_check(
+		card_wrong.is_empty(),
+		"图鉴卡片的字段与插画种类都有对应（错项：%s）" % _join_or_none(card_wrong),
+	)
+
 	if _failed == 0:
 		print("LIFE_TEST_OK")
 		get_tree().quit(0)
@@ -1531,3 +1724,28 @@ func _check(cond: bool, label: String) -> void:
 	else:
 		_failed += 1
 		print("FAIL: " + label)
+
+
+## 阶段 R 用：把异常清单拼成一句话（空则「无」）。
+func _join_or_none(items: PackedStringArray) -> String:
+	return "无" if items.is_empty() else ", ".join(items)
+
+
+## 阶段 R 用：有成长链的物种数量。
+func _grown_species_count() -> int:
+	var grown := 0
+	for mob_id: int in Mob.MobType.values():
+		if Mob.has_growth(mob_id):
+			grown += 1
+	return grown
+
+
+## 阶段 R 用：区域生成表里出现过的物种名字集合（键即枚举名）。
+func _region_species_keys() -> Dictionary:
+	var seen: Dictionary = {}
+	for entry: Dictionary in RegionAtlas.REGIONS:
+		for key: String in (entry["passive"] as Dictionary):
+			seen[key] = true
+		for key: String in (entry["hostile"] as Dictionary):
+			seen[key] = true
+	return seen

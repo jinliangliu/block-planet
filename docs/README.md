@@ -7,7 +7,8 @@
 | 文件 | 内容 | 什么时候改 |
 |------|------|-----------|
 | [`game-design.md`](game-design.md) | **游戏设计**：模式、玩法、任务、探索目标、键位、路线图 | 玩法/内容/UI 发生变化时 |
-| [`decisions.md`](decisions.md) | **技术决策记录（ADR）**：为什么用 Godot 4.6、为什么用 J 键等 18 条 | 做了一个「以后可能会被质疑」的技术选择时 |
+| [`assets.md`](assets.md) | **数字资产管理与新增流程**：资产总账、四条原则、新增物种/图鉴/方块物品的九步清单、守门探针 | **新增物种、图鉴资料、方块或物品时**（先看它） |
+| [`decisions.md`](decisions.md) | **技术决策记录（ADR）**：为什么用 Godot 4.6、为什么用 J 键等 19 条 | 做了一个「以后可能会被质疑」的技术选择时 |
 | [`ai-prompts.md`](ai-prompts.md) | **AI 协作记录**：好用的提示词、生成结果、反模式、能力边界 | 发现一条特别好用（或特别不好用）的提示词时 |
 | [`devlog/`](devlog/) | **开发日志**：按日期归档当日开发成果 | **每日收尾时**（见下方流程） |
 
@@ -85,6 +86,8 @@
 | `tests/manual_shot` | `tmp/manual_panel_shot.png`、`tmp/manual_panel_shot_p6.png` |
 | `tests/backpack_shot` | `tmp/backpack_panel_shot.png` |
 | `tests/chest_shot` | `tmp/chest_panel_shot.png` |
+| `tests/map_mode_shot` | `tmp/map_mode_shot.png`、`tmp/map_mode_shot_explore.png` |
+| `tests/hud_mode_shot` | `tmp/hud_mode_survival.png`、`tmp/hud_mode_creative.png`、`tmp/hud_mode_explore.png` |
 | `tests/render_probe` | `tmp/render_probe.png`、`tmp/render_probe_third.png` |
 
 约定：探针通过 `_shot_path(file_name)` 取路径（`res://tmp/` 全局化后按需建目录），**不写机器相关的绝对路径**；新增截图探针照此办理。

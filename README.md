@@ -15,6 +15,7 @@
 ## 文档
 
 - `docs/game-design.md` —— 游戏设计（模式、玩法、任务、探索目标、键位）
+- `docs/assets.md` —— 数字资产管理与新增流程（资产总账、新增物种/图鉴/方块物品的清单、守门探针）
 - `docs/decisions.md` —— 技术决策记录（为什么用 Godot 4.6、为什么用 J 键等）
 - `docs/ai-prompts.md` —— AI 协作记录（有效的提示词范式与生成结果）
 - `docs/devlog/` —— 按日期的开发日志

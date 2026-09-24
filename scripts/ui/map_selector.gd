@@ -18,6 +18,15 @@ enum Page {
 
 ## 视口（地球）尺寸与拖动判定阈值（像素）。
 const VIEW_SIZE := 520.0
+## 卡片插画种类（对应 RegionAtlas.REGION_CARDS 的 art 字段）。
+## 单列一张清单，是为了让「卡片写了 art 却没有画法」当场报警，
+## 而不是静默画成一块空白——life_probe 阶段 R 会对照 RegionAtlas 逐张校验。
+const ART_KINDS := [
+	"mountain", "wave", "storm", "rift", "reef", "ice", "forest", "aurora",
+	"waterfall", "trench", "sun", "rock", "polar_bear", "penguin", "panda",
+	"lion", "kangaroo", "dune",
+]
+
 ## 模式竖排栏：按钮宽与距屏幕右缘、上下留白（地球居中，右侧这片空白正好容纳）。
 const MODE_COLUMN_WIDTH := 188.0
 const MODE_COLUMN_MARGIN := 40.0
@@ -617,6 +626,8 @@ func _close_card_detail() -> void:
 ## 程序化剪影插图：按 kind 分派，背景铺 tint 亮色，剪影用 tint 暗色；
 ## 动物类使用固有色，不随 tint 变化。
 func _draw_art(art: Control, kind: String, tint: Color) -> void:
+	if not ART_KINDS.has(kind):
+		push_warning("区域卡片插画缺少画法：%s" % kind)
 	var w := art.size.x
 	var h := art.size.y
 	if w <= 0.0 or h <= 0.0:

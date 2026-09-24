@@ -260,28 +260,22 @@ func display_name() -> String:
 	return MOB_NAMES.get(type, "生物")
 
 
+## 敌对生物名单：会主动追逐并攻击玩家。夜里由 MobSpawner 生成、白天清空。
+## 单列一张表，而不是散在 is_passive 的一长串 or 里，为的是两件事：
+##   ① 一眼看清「谁有害」；② 新增物种默认被动（安全的默认值），
+##      想让某物种变敌对，必须在这里显式登记，不会因为漏写一项而悄悄变敌人。
+const HOSTILE_MOBS := {
+	MobType.ZOMBIE: true,
+	MobType.SKELETON: true,
+	MobType.SPIDER: true,
+	MobType.WOLF: true,
+	MobType.PILLAGER: true,
+}
+
 ## 被动生物：不攻击、受击逃跑（反击名录中的会先反击）。水生物同为被动，
-## 但不参与陆地生成轨道。
+## 但不参与陆地生成轨道。判据由 HOSTILE_MOBS 派生，两张表因此不会互相矛盾。
 static func is_passive(t: MobType) -> bool:
-	return (
-		t == MobType.COW
-		or t == MobType.SHEEP
-		or t == MobType.CHICKEN
-		or t == MobType.PIG
-		or t == MobType.VILLAGER
-		or t == MobType.FISH
-		or t == MobType.SHRIMP
-		or t == MobType.CRAB
-		or t == MobType.DRAGONFLY
-		or t == MobType.FROG
-		or t == MobType.BUTTERFLY
-		or t == MobType.PANDA
-		or t == MobType.GOLDEN_MONKEY
-		or t == MobType.CRESTED_IBIS
-		or t == MobType.BALD_EAGLE
-		or t == MobType.POLAR_BEAR
-		or t == MobType.KANGAROO
-	)
+	return not HOSTILE_MOBS.has(t)
 
 
 ## 栖息地：鱼/虾/蟹在水中，蜻蜓/蝴蝶/白头海雕在空中，其余在陆地。
@@ -1026,89 +1020,115 @@ func _rebuild_visual() -> void:
 
 ## 组装盒体外观：身体 + 头 + 眼睛，动物额外加腿，水生生物各有造型。
 ## 卵/蝌蚪/毛毛虫/茧这几个阶段走专用小模型，其余按类型模型整体缩放。
+## 造型构造表：物种 → 构造方法名。新增物种必须在这里登记一行。
+## 用表而不是内联 match，是为了让「漏登记造型」能被机器发现——
+## life_probe 阶段 R 会断言本表覆盖 MobType 全枚举。
+const ART_BUILDERS := {
+	MobType.ZOMBIE: "_build_hostile",
+	MobType.SKELETON: "_build_hostile",
+	MobType.SPIDER: "_build_hostile",
+	MobType.COW: "_build_cow",
+	MobType.SHEEP: "_build_sheep",
+	MobType.CHICKEN: "_build_chicken",
+	MobType.PIG: "_build_pig",
+	MobType.VILLAGER: "_build_villager",
+	MobType.PILLAGER: "_build_pillager",
+	MobType.WOLF: "_build_wolf",
+	MobType.FISH: "_build_fish",
+	MobType.SHRIMP: "_build_shrimp",
+	MobType.CRAB: "_build_crab",
+	MobType.DRAGONFLY: "_build_dragonfly",
+	MobType.FROG: "_build_frog",
+	MobType.BUTTERFLY: "_build_butterfly",
+	MobType.PANDA: "_build_panda",
+	MobType.GOLDEN_MONKEY: "_build_monkey",
+	MobType.CRESTED_IBIS: "_build_ibis",
+	MobType.BALD_EAGLE: "_build_eagle",
+	MobType.POLAR_BEAR: "_build_polar_bear",
+	MobType.KANGAROO: "_build_kangaroo",
+}
+
+
+## 造型兜底：未登记的物种画成品红方块并打警告。
+## 宁可丑得刺眼，也不要静默地长成别的东西——那会让漏项一路藏到上线。
+func _build_unregistered() -> void:
+	push_warning("Mob: 物种 %d 未在 ART_BUILDERS 登记造型" % type)
+	_add_box(Vector3(0.6, 0.6, 0.6), Color(1.0, 0.0, 1.0), Vector3(0.0, 0.5, 0.0))
+
+
 func _build_visual() -> void:
 	_visual_root.scale = Vector3.ONE * stage_scale()
 	var art := String(stage_data().get("art", ""))
 	if not art.is_empty():
 		_build_stage_art(art)
 		return
-	match type:
-		MobType.COW:
-			_build_animal(
-				Color(0.45, 0.30, 0.20),
-				Vector3(0.8, 0.7, 0.5),
-				Color(0.82, 0.80, 0.76),
-				Vector3(0.34, 0.32, 0.30),
-				0.92,
-				4
-			)
-		MobType.SHEEP:
-			_build_animal(
-				Color(0.93, 0.93, 0.90),
-				Vector3(0.75, 0.65, 0.55),
-				Color(0.72, 0.68, 0.64),
-				Vector3(0.30, 0.30, 0.28),
-				0.88,
-				4
-			)
-		MobType.CHICKEN:
-			_build_chicken()
-		MobType.PIG:
-			_build_animal(
-				Color(0.96, 0.72, 0.75),
-				Vector3(0.72, 0.62, 0.52),
-				Color(0.98, 0.78, 0.80),
-				Vector3(0.32, 0.30, 0.28),
-				0.82,
-				4
-			)
-		MobType.WOLF:
-			_build_animal(
-				Color(0.62, 0.62, 0.64),
-				Vector3(0.70, 0.55, 0.62),
-				Color(0.50, 0.50, 0.54),
-				Vector3(0.30, 0.28, 0.30),
-				0.80,
-				4
-			)
-		MobType.VILLAGER:
-			_build_villager_like(
-				Color(0.52, 0.38, 0.27),
-				Color(0.90, 0.76, 0.62),
-				Color(0.05, 0.05, 0.05)
-			)
-		MobType.PILLAGER:
-			_build_villager_like(
-				Color(0.38, 0.40, 0.47),
-				Color(0.70, 0.66, 0.60),
-				Color(0.12, 0.08, 0.24)
-			)
-		MobType.FISH:
-			_build_fish()
-		MobType.SHRIMP:
-			_build_shrimp()
-		MobType.CRAB:
-			_build_crab()
-		MobType.DRAGONFLY:
-			_build_dragonfly()
-		MobType.FROG:
-			_build_frog()
-		MobType.BUTTERFLY:
-			_build_butterfly()
-		MobType.PANDA:
-			_build_panda()
-		MobType.GOLDEN_MONKEY:
-			_build_monkey()
-		MobType.CRESTED_IBIS:
-			_build_ibis()
-		MobType.BALD_EAGLE:
-			_build_eagle()
-		MobType.POLAR_BEAR:
-			_build_polar_bear()
-		MobType.KANGAROO:
-			_build_kangaroo()
-		_:
-			_build_hostile()
+	var method := String(ART_BUILDERS.get(type, ""))
+	if method.is_empty() or not has_method(method):
+		_build_unregistered()
+		return
+	@warning_ignore("return_value_discarded")
+	call(method)
+
+
+## 四足家畜与狼：共用 _build_animal，只是配色与体型不同。
+func _build_cow() -> void:
+	_build_animal(
+		Color(0.45, 0.30, 0.20),
+		Vector3(0.8, 0.7, 0.5),
+		Color(0.82, 0.80, 0.76),
+		Vector3(0.34, 0.32, 0.30),
+		0.92,
+		4
+	)
+
+
+func _build_sheep() -> void:
+	_build_animal(
+		Color(0.93, 0.93, 0.90),
+		Vector3(0.75, 0.65, 0.55),
+		Color(0.72, 0.68, 0.64),
+		Vector3(0.30, 0.30, 0.28),
+		0.88,
+		4
+	)
+
+
+func _build_pig() -> void:
+	_build_animal(
+		Color(0.96, 0.72, 0.75),
+		Vector3(0.72, 0.62, 0.52),
+		Color(0.98, 0.78, 0.80),
+		Vector3(0.32, 0.30, 0.28),
+		0.82,
+		4
+	)
+
+
+func _build_wolf() -> void:
+	_build_animal(
+		Color(0.62, 0.62, 0.64),
+		Vector3(0.70, 0.55, 0.62),
+		Color(0.50, 0.50, 0.54),
+		Vector3(0.30, 0.28, 0.30),
+		0.80,
+		4
+	)
+
+
+func _build_villager() -> void:
+	_build_villager_like(
+		Color(0.52, 0.38, 0.27),
+		Color(0.90, 0.76, 0.62),
+		Color(0.05, 0.05, 0.05)
+	)
+
+
+func _build_pillager() -> void:
+	_build_villager_like(
+		Color(0.38, 0.40, 0.47),
+		Color(0.70, 0.66, 0.60),
+		Color(0.12, 0.08, 0.24)
+	)
 
 
 ## 阶段专用小模型：卵、蝌蚪/孑孓/鱼苗、毛毛虫、茧。
