@@ -147,12 +147,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		)
 
 
-## 双击跳跃键在创造模式下切换飞行。
+## 双击跳跃键在允许飞行的模式（创造 / 探索）下切换飞行。
 func _handle_jump_tap() -> void:
 	var now := Time.get_ticks_msec()
 	if now - _last_jump_ms <= DOUBLE_TAP_FLY_MS:
 		_last_jump_ms = 0
-		if GameState.is_creative():
+		if GameState.can_fly():
 			set_flying(not flying)
 	else:
 		_last_jump_ms = now
@@ -342,9 +342,9 @@ func active_inventory_slot() -> int:
 	return inventory.hotbar_slot(selected_slot)
 
 
-## 切换飞行状态；仅创造模式允许飞行，切换时经事件总线广播。
+## 切换飞行状态；创造与探索模式允许飞行，切换时经事件总线广播。
 func set_flying(value: bool) -> void:
-	if value and not GameState.is_creative():
+	if value and not GameState.can_fly():
 		return
 	if flying == value:
 		return
@@ -355,7 +355,7 @@ func set_flying(value: bool) -> void:
 
 
 func _on_game_mode_changed(_mode: int) -> void:
-	if not GameState.is_creative():
+	if not GameState.can_fly():
 		set_flying(false)
 
 
@@ -737,7 +737,7 @@ func is_charging_bow() -> bool:
 	return _bow_charge > 0.0
 
 
-## 松手射箭：生存模式消耗一支箭，伤害与初速随蓄力提升。
+## 松手射箭：生存与探索模式消耗一支箭，伤害与初速随蓄力提升。
 func _release_bow() -> void:
 	var charge := bow_charge_ratio()
 	_bow_charge = 0.0

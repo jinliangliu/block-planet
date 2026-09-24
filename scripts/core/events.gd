@@ -9,7 +9,7 @@ signal block_broken(block_id: int, cell: Vector3i)
 ## 玩家放置方块后广播。
 signal block_placed(block_id: int, cell: Vector3i)
 
-## 玩家飞行状态切换后广播（当前创造模式专属能力）。
+## 玩家飞行状态切换后广播（创造与探索模式都具备的能力）。
 signal player_mode_changed(flying: bool)
 
 ## 右键命中村民或酿灶台时发出，HUD 监听后打开交易面板。

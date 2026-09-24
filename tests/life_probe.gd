@@ -1230,6 +1230,128 @@ func _run() -> void:
 	_check(player.fishing_state() == Player.FISH_IDLE, "提前收竿（未咬钩）也能安全回到待机")
 	player.set_physics_process(true)
 
+	# ── 阶段 Q：探索模式（M7.1 模式本体：枚举、行为分支、地图页三选一） ──
+	player.set_flying(false)
+	GameState.set_mode(GameState.Mode.EXPLORE)
+	_check(GameState.is_explore(), "GameState.Mode 新增探索模式")
+	_check(not GameState.is_creative() and GameState.is_survival(),
+		"探索模式不被判为创造，且仍受生存规则约束")
+	_check(GameState.can_fly(), "探索模式开放飞行")
+	_check(GameState.mode_name() == "探索", "模式显示名为「探索」")
+	_check(GameState.mode_hint().contains("敌对"), "模式说明点明不生成敌对生物")
+
+	# Q-1 飞行：生存不允许、探索允许、切回生存自动落地
+	GameState.set_mode(GameState.Mode.SURVIVAL)
+	player.set_flying(true)
+	_check(not player.flying, "生存模式不允许起飞")
+	GameState.set_mode(GameState.Mode.EXPLORE)
+	player.set_flying(true)
+	_check(player.flying, "探索模式可以起飞（双击空格）")
+	GameState.set_mode(GameState.Mode.SURVIVAL)
+	_check(not player.flying, "切回生存模式后自动落地")
+
+	# Q-2 不无敌：探索模式照样受伤、照样饿、采掘照常掉落
+	GameState.set_mode(GameState.Mode.EXPLORE)
+	player.health = player.MAX_HEALTH
+	player._damage(3)
+	_check(player.health == player.MAX_HEALTH - 3,
+		"探索模式不无敌（20 → %d）" % player.health)
+	player.health = player.MAX_HEALTH
+	player.hunger = float(player.MAX_HUNGER)
+	player._tick_survival(1.0, false)
+	_check(player.hunger < float(player.MAX_HUNGER),
+		"探索模式饥饿照常消耗（满 20 → %.1f）" % player.hunger)
+	player.hunger = float(player.MAX_HUNGER)
+
+	player.inventory.slots[5] = {
+		"item": ItemTypes.WOOD_PICKAXE, "count": 1,
+		"durability": ItemTypes.tool_durability(ItemTypes.WOOD_PICKAXE),
+	}
+	player.inventory.hotbar_map[0] = 5
+	player.select_slot(0)
+	var q_cell := Vector3i(24, World.SEA_LEVEL + 9, 24)
+	world.ensure_chunks_in_region(q_cell, q_cell)
+	world.set_block(q_cell, BlockTypes.Block.STONE)
+	var q_bag := _inventory_total(player.inventory)
+	player._finish_break(q_cell, BlockTypes.Block.STONE)
+	_check(world.get_block(q_cell) == BlockTypes.Block.AIR, "探索模式可正常采掘方块")
+	_check(_inventory_total(player.inventory) > q_bag,
+		"探索模式采掘照常掉落（背包 %d → %d）" % [q_bag, _inventory_total(player.inventory)])
+
+	# Q-3 敌对生物：探索模式任何时刻都不生成，并立即清空既有敌对
+	day_night._time = DayNightCycle.DAY_LENGTH + 10.0
+	_check(not day_night.is_day(), "先把时钟拨到夜晚")
+	spawner._despawn_all()
+	GameState.set_mode(GameState.Mode.EXPLORE)
+	var q_wolf := _spawn_mob(
+		spawner, Mob.MobType.WOLF, player, day_night, player.global_position + Vector3(4.0, 1.0, 0.0)
+	)
+	# _spawn_mob 只把生物挂到节点树下，生成器的名册要手工登记才参与计数。
+	spawner._mobs.append(q_wolf)
+	_check(spawner._hostile_count() > 0, "先手动放入一只敌对生物")
+	spawner._spawn_timer = 0.0
+	spawner._process(1.0)
+	_check(spawner._hostile_count() == 0, "探索模式夜晚不生成敌对生物")
+	_check(not is_instance_valid(q_wolf) or q_wolf.is_queued_for_deletion(),
+		"探索模式会清空切模式前已存在的敌对生物")
+
+	# 对照：生存模式夜晚照常生成敌对
+	GameState.set_mode(GameState.Mode.SURVIVAL)
+	var q_spawned := false
+	for i in range(40):
+		spawner._spawn_timer = 0.0
+		spawner._process(1.0)
+		if spawner._hostile_count() > 0:
+			q_spawned = true
+			break
+	_check(q_spawned, "对照：生存模式夜晚仍会生成敌对生物")
+
+	# Q-4 探索模式夜晚照常补充温顺动物（观察生态不受时钟限制）
+	spawner._despawn_all()
+	GameState.set_mode(GameState.Mode.EXPLORE)
+	var q_passive := false
+	for i in range(40):
+		spawner._passive_timer = 0.0
+		spawner._process(1.0)
+		if spawner._passive_count() > 0:
+			q_passive = true
+			break
+	_check(q_passive, "探索模式夜晚照常生成温顺动物")
+	_check(spawner._hostile_count() == 0, "探索模式反复刷新也不会冒出敌对生物")
+	spawner._despawn_all()
+	day_night._time = 0.0
+
+	# Q-5 切模式限制：G 键在探索模式下不跳创造
+	GameState.set_mode(GameState.Mode.SURVIVAL)
+	hud._toggle_game_mode()
+	_check(GameState.is_creative(), "生存模式下按 G 照常切到创造")
+	hud._toggle_game_mode()
+	_check(not GameState.is_creative(), "再按一次 G 切回生存")
+	GameState.set_mode(GameState.Mode.EXPLORE)
+	hud._toggle_game_mode()
+	_check(GameState.is_explore(), "探索模式下按 G 不会跳到创造模式")
+
+	# Q-6 地图页模式三选一
+	var selector: MapSelector = hud._map_selector
+	_check(selector != null and selector._mode_buttons.size() == 3, "地图页提供模式三选一（三个按钮）")
+	selector._select_mode(GameState.Mode.EXPLORE)
+	_check(GameState.is_explore() and selector.selected_mode() == int(GameState.Mode.EXPLORE),
+		"在地图页选探索即写入 GameState")
+	_check(selector._mode_buttons[2].button_pressed and not selector._mode_buttons[0].button_pressed,
+		"探索按钮呈选中态、生存按钮取消选中")
+	selector._select_mode(GameState.Mode.SURVIVAL)
+	_check(selector._mode_buttons[0].button_pressed and not selector._mode_buttons[2].button_pressed,
+		"改选生存后选中态跟随切换")
+	selector._select_mode(GameState.Mode.CREATIVE)
+	_check(GameState.is_creative(), "地图页也能选到创造模式")
+
+	# Q-7 HUD 状态标签
+	GameState.set_mode(GameState.Mode.EXPLORE)
+	_check(hud._mode_label.text.begins_with("模式：探索"),
+		"HUD 左下角状态标签显示「%s」" % hud._mode_label.text)
+	GameState.set_mode(GameState.Mode.SURVIVAL)
+	_check(hud._mode_label.text == "模式：生存", "回到生存模式后状态标签复位")
+
 	if _failed == 0:
 		print("LIFE_TEST_OK")
 		get_tree().quit(0)

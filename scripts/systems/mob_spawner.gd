@@ -2,7 +2,8 @@ extends Node3D
 class_name MobSpawner
 ## 生物生成器（昼夜双轨）：
 ## 白天在玩家周围草地上维持被动动物（牛/羊/鸡），夜晚生成敌对（僵尸/蜘蛛/骷髅）。
-## 白天清空敌对但保留动物；创造模式全部不生成。
+## 白天清空敌对但保留动物；创造模式全部不生成；
+## 探索模式清空敌对但任何时刻都照常补充动物（无夜间威胁，专供观察生态）。
 
 const MAX_MOBS := 8
 const MAX_PASSIVE := 6
@@ -63,12 +64,12 @@ func _process(delta: float) -> void:
 
 	_maintain_water_life(delta)
 
-	if _day_night.is_day():
+	# 白天、以及探索模式的任何时刻：清空敌对，只补充动物。
+	# 探索模式夜里也不例外——该模式的设计意图就是「没有夜间威胁」，
+	# 且切模式前已生成的敌对会在这里被立刻清掉，不需要额外监听 mode_changed。
+	if _day_night.is_day() or GameState.is_explore():
 		_despawn_hostiles()
-		_passive_timer -= delta
-		if _passive_timer <= 0.0 and _passive_count() < MAX_PASSIVE:
-			_passive_timer = PASSIVE_INTERVAL
-			_spawn_one(_pick_passive_type())
+		_maintain_passive(delta)
 		return
 
 	# 夜晚：敌对生成；动物不再补充（白天已就位的动物继续存在）。
@@ -76,6 +77,15 @@ func _process(delta: float) -> void:
 	if _spawn_timer <= 0.0 and _hostile_count() < MAX_MOBS:
 		_spawn_timer = SPAWN_INTERVAL
 		_spawn_one(_pick_type())
+
+
+## 被动动物维护：按节奏补充到上限。
+func _maintain_passive(delta: float) -> void:
+	_passive_timer -= delta
+	if _passive_timer > 0.0 or _passive_count() >= MAX_PASSIVE:
+		return
+	_passive_timer = PASSIVE_INTERVAL
+	_spawn_one(_pick_passive_type())
 
 
 func _passive_count() -> int:

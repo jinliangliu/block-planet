@@ -233,6 +233,11 @@ func _build_crosshair(root: Control) -> void:
 
 
 func _toggle_game_mode() -> void:
+	if GameState.is_explore():
+		# 探索模式不允许一键跳进创造：要换模式请走地图选择器，
+		# 那里能明确选到三种模式之一，而不是靠反复按键撞出来。
+		_show_toast("探索模式请按 M 打开地图选择器切换模式")
+		return
 	if GameState.is_survival():
 		GameState.set_mode(GameState.Mode.CREATIVE)
 	else:
@@ -280,7 +285,7 @@ func _build_action_buttons(root: Control) -> void:
 	_fly_button.custom_minimum_size = Vector2(76, 76)
 	_fly_button.focus_mode = Control.FOCUS_NONE
 	_fly_button.button_down.connect(_on_fly_down)
-	_fly_button.visible = GameState.is_creative()
+	_fly_button.visible = GameState.can_fly()
 	_anchor_bottom_right(root, _fly_button, 34.0, 138.0)
 
 	var descend := Button.new()
@@ -289,7 +294,7 @@ func _build_action_buttons(root: Control) -> void:
 	descend.focus_mode = Control.FOCUS_NONE
 	descend.button_down.connect(_on_descend_down)
 	descend.button_up.connect(_on_descend_up)
-	descend.visible = GameState.is_creative()
+	descend.visible = GameState.can_fly()
 	_anchor_bottom_right(root, descend, 120.0, 138.0)
 	_descend_button = descend
 
@@ -1780,10 +1785,15 @@ func _on_time_changed(_percent: float, _is_day: bool) -> void:
 
 func _on_mode_changed(_mode: int) -> void:
 	if _mode_label:
-		_mode_label.text = "模式：创造（无敌 · 飞行）" if GameState.is_creative() else "模式：生存"
+		if GameState.is_creative():
+			_mode_label.text = "模式：创造（无敌 · 飞行）"
+		elif GameState.is_explore():
+			_mode_label.text = "模式：探索（飞行 · 无敌对生物）"
+		else:
+			_mode_label.text = "模式：生存"
 	if _fly_button:
-		_fly_button.visible = GameState.is_creative()
+		_fly_button.visible = GameState.can_fly()
 	if _descend_button:
-		_descend_button.visible = GameState.is_creative()
+		_descend_button.visible = GameState.can_fly()
 	_refresh_hotbar()
 	_refresh_stats()

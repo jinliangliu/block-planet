@@ -2,6 +2,7 @@ class_name MapSelector
 extends Control
 ## 地图选择器（全屏覆盖，三页流程）：
 ##   地球页：拖动旋转地球、悬停显示区域名、点击进入该区域介绍；
+##          底部同一屏内提供「生存 / 创造 / 探索」模式三选一；
 ##   介绍页：区域名 + 地理介绍 + 「进入」；
 ##   加载页：逐条揭示该区域的植被/生物/气候/风貌，进度满后可开始探索。
 ## 完成后发出 region_entered(region_id)，由 Main 记录并重载主场景生效。
@@ -55,6 +56,8 @@ var _loading_enter: Button
 var _step_labels: Array[Label] = []
 var _steps: Array[Dictionary] = []
 var _selected := -1
+var _mode_buttons: Array[Button] = []
+var _mode_caption: Label
 var _dragging := false
 var _drag_distance := 0.0
 var _loading_time := 0.0
@@ -92,6 +95,7 @@ func open() -> void:
 	visible = true
 	_dragging = false
 	_drag_distance = 0.0
+	_refresh_mode_row()
 	_show_page(Page.GLOBE)
 	if _globe != null:
 		_globe.set_view_angles(-30.0, 12.0)
@@ -288,6 +292,7 @@ func _build_globe_page() -> void:
 	_globe_page.add_child(_hover_label)
 
 	_build_legend(_globe_page)
+	_build_mode_row(_globe_page)
 
 
 ## 区域图例：11 个色块 + 名称，界面左侧竖列排布。
@@ -322,6 +327,80 @@ func _build_legend(parent: Control) -> void:
 		name_label.add_theme_color_override("font_color", Color(0.80, 0.87, 0.96))
 		name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		cell.add_child(name_label)
+
+
+## 模式三选一：与地球同屏，选完地图顺手定模式，不给流程多添一步。
+## 点选即写入 GameState——与 HUD 的模式按钮一样即时生效。
+## 按钮在上、说明在下：说明行落在地球下缘的深色区，浅色文字才压得住底。
+func _build_mode_row(parent: Control) -> void:
+	var box := VBoxContainer.new()
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override("separation", 8)
+	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	box.offset_left = -250.0
+	box.offset_right = 250.0
+	box.offset_top = -166.0
+	box.offset_bottom = -64.0
+	parent.add_child(box)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 10)
+	# 只让按钮接收鼠标：容器本身穿透，免得在地球下方形成一块"拖不动"的死区。
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(row)
+
+	_mode_buttons.clear()
+	for choice: Dictionary in _mode_choices():
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(150, 42)
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.toggle_mode = true
+		btn.add_theme_font_size_override("font_size", 16)
+		btn.pressed.connect(_select_mode.bind(int(choice["mode"])))
+		row.add_child(btn)
+		_mode_buttons.append(btn)
+
+	_mode_caption = Label.new()
+	_mode_caption.add_theme_font_size_override("font_size", 14)
+	_mode_caption.add_theme_color_override("font_color", Color(0.72, 0.80, 0.92))
+	_mode_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mode_caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(_mode_caption)
+
+	_refresh_mode_row()
+
+
+## 三选一的选项表：枚举值 + 标题。说明文案复用 GameState.mode_hint()，
+## 保证地图页、HUD、说明书三处措辞不会各写一套而漂移。
+func _mode_choices() -> Array:
+	return [
+		{"mode": GameState.Mode.SURVIVAL, "title": "生存"},
+		{"mode": GameState.Mode.CREATIVE, "title": "创造"},
+		{"mode": GameState.Mode.EXPLORE, "title": "探索"},
+	]
+
+
+## 选定模式。真正的行为差异要等进入世界后才体现（Main 会按需重载场景），
+## 但这里立即写入 GameState，HUD 状态标签也会同步。
+func _select_mode(mode: int) -> void:
+	GameState.set_mode(mode)
+	_refresh_mode_row()
+
+
+func _refresh_mode_row() -> void:
+	var choices := _mode_choices()
+	if _mode_caption != null:
+		_mode_caption.text = "模式：%s —— %s" % [GameState.mode_name(), GameState.mode_hint()]
+	for i in range(_mode_buttons.size()):
+		var active: bool = int(choices[i]["mode"]) == int(GameState.mode)
+		_mode_buttons[i].button_pressed = active
+		_mode_buttons[i].text = ("✓ " if active else "") + String(choices[i]["title"])
+
+
+## 当前选中的模式（探针据此断言三选一已写入 GameState）。
+func selected_mode() -> int:
+	return int(GameState.mode)
 
 
 func _build_intro_panel() -> void:
