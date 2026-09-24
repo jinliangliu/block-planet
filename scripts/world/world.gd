@@ -1,0 +1,334 @@
+extends Node3D
+class_name World
+## 世界管理器：噪声地形生成、树木生成、以玩家为中心的区块流式加载/卸载。
+
+const CHUNK_SIZE := Vector3i(16, 64, 16)
+const LOAD_RADIUS := 2
+# 每帧加载 2 个并按距玩家距离优先：缩短玩家到达未生成区域的窗口，
+# 配合玩家防卡死检测（嵌入实心方块自动重生脱困）形成双保险。
+const CHUNKS_PER_FRAME := 2
+const SEA_LEVEL := 22
+
+@export var seed_value := 12345
+
+var _chunks: Dictionary[Vector3i, Chunk] = {}
+var _pending_load: Dictionary[Vector3i, bool] = {}
+# 玩家修改过的区块坐标；卸载时留存数据，重载时恢复，避免建筑凭空消失。
+var _edited_coords: Dictionary[Vector3i, bool] = {}
+var _modified_data: Dictionary[Vector3i, PackedByteArray] = {}
+# 卸载区块后需要补面的邻居重建队列，每帧限量处理以平滑卡顿。
+var _pending_rebuilds: Array[Vector3i] = []
+var _atlas_material: StandardMaterial3D
+var _noise := FastNoiseLite.new()
+var _player: Player
+var _neighbor_lookup: Callable
+# 储物箱内容物：按方块坐标记录独立 27 格背包，破坏时散落至地面。
+var box_contents: Dictionary[Vector3i, Inventory] = {}
+
+
+func _ready() -> void:
+	_neighbor_lookup = Callable(self, "get_block")
+	_build_atlas_material()
+	_configure_noise()
+
+
+func set_player(player: Player) -> void:
+	_player = player
+	# 先同步加载玩家所在区块，避免出生时脚下没有地形。
+	_load_chunk(world_to_chunk(player.global_position))
+
+
+func _process(_delta: float) -> void:
+	if _player == null:
+		return
+	_update_chunks()
+
+
+func get_surface_height(wx: int, wz: int) -> int:
+	return _terrain_height(wx, wz) + 1
+
+
+## 结构生成支持：强制同步加载区域内全部区块。
+## 村庄等固定建筑生成前调用，确保 set_block 落到已加载区块。
+func ensure_chunks_in_region(min_cell: Vector3i, max_cell: Vector3i) -> void:
+	var cmin := world_to_chunk(Vector3(min_cell))
+	var cmax := world_to_chunk(Vector3(max_cell))
+	for cx in range(cmin.x, cmax.x + 1):
+		for cz in range(cmin.z, cmax.z + 1):
+			_load_chunk(Vector3i(cx, 0, cz))
+
+
+## 结构生成支持：批量写方块但不触发网格重建（配合 rebuild_chunks_in_region 一次重建）。
+## 避免逐方块重建导致结构生成时数秒级卡顿；写入仍计入修改留存。
+func set_block_deferred(world_pos: Vector3i, id: int) -> void:
+	var coord := world_to_chunk(Vector3(world_pos))
+	var chunk: Chunk = _chunks.get(coord)
+	if chunk == null:
+		return
+	chunk.set_block_local(world_pos - chunk_to_world(coord), id)
+	_edited_coords[coord] = true
+
+
+## 结构生成支持：重建区域内全部已加载区块（批量写入完成后调用一次）。
+func rebuild_chunks_in_region(min_cell: Vector3i, max_cell: Vector3i) -> void:
+	var cmin := world_to_chunk(Vector3(min_cell))
+	var cmax := world_to_chunk(Vector3(max_cell))
+	for cx in range(cmin.x, cmax.x + 1):
+		for cz in range(cmin.z, cmax.z + 1):
+			_rebuild_chunk(Vector3i(cx, 0, cz))
+
+
+func world_to_chunk(pos: Vector3) -> Vector3i:
+	return Vector3i(floori(pos.x / CHUNK_SIZE.x), 0, floori(pos.z / CHUNK_SIZE.z))
+
+
+func chunk_to_world(coord: Vector3i) -> Vector3i:
+	return Vector3i(coord.x * CHUNK_SIZE.x, 0, coord.z * CHUNK_SIZE.z)
+
+
+func get_block(world_pos: Vector3i) -> int:
+	var coord := world_to_chunk(Vector3(world_pos))
+	var chunk: Chunk = _chunks.get(coord)
+	if chunk == null:
+		return BlockTypes.Block.AIR
+	return chunk.get_block_local(world_pos - chunk_to_world(coord))
+
+
+func set_block(world_pos: Vector3i, id: int) -> void:
+	var coord := world_to_chunk(Vector3(world_pos))
+	var chunk: Chunk = _chunks.get(coord)
+	if chunk == null:
+		return
+
+	var local := world_pos - chunk_to_world(coord)
+	chunk.set_block_local(local, id)
+	_edited_coords[coord] = true
+	_rebuild_chunk(coord)
+
+	# 修改位于区块边界时，重建相邻区块以更新交界处的可见面。
+	if local.x == 0:
+		_rebuild_chunk(coord + Vector3i(-1, 0, 0))
+	elif local.x == CHUNK_SIZE.x - 1:
+		_rebuild_chunk(coord + Vector3i(1, 0, 0))
+	if local.z == 0:
+		_rebuild_chunk(coord + Vector3i(0, 0, -1))
+	elif local.z == CHUNK_SIZE.z - 1:
+		_rebuild_chunk(coord + Vector3i(0, 0, 1))
+
+
+## 获取指定储物箱的背包；首次访问时创建 27 格空背包。
+func get_box(cell: Vector3i) -> Inventory:
+	if not box_contents.has(cell):
+		box_contents[cell] = Inventory.new(27)
+	return box_contents[cell]
+
+
+## 破坏储物箱：箱内所有物品在方块位置生成掉落物，随后移除记录。
+func spill_box(cell: Vector3i, player: Player) -> void:
+	if not box_contents.has(cell):
+		return
+	var inv := box_contents[cell]
+	var center := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
+	for slot_index in range(inv.slots.size()):
+		var item: int = inv.slots[slot_index]["item"]
+		var count: int = inv.slots[slot_index]["count"]
+		if item == BlockTypes.Block.AIR or count <= 0:
+			continue
+		var drop := DroppedItem.new()
+		drop.setup(player, item, count)
+		player.add_child(drop)
+		drop.global_position = center
+	box_contents.erase(cell)
+
+
+func _rebuild_chunk(coord: Vector3i) -> void:
+	var chunk: Chunk = _chunks.get(coord)
+	if chunk:
+		chunk.rebuild(_atlas_material, _neighbor_lookup)
+
+
+func _configure_noise() -> void:
+	_noise.seed = seed_value
+	_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_noise.frequency = 0.012
+	_noise.fractal_octaves = 3
+
+
+func _build_atlas_material() -> void:
+	var texture := TextureAtlas.build_atlas_texture()
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = texture
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# 面绕向已保证法线朝外，使用默认背面剔除，减半片元开销并避免看到内壁。
+	_atlas_material = material
+
+
+func _update_chunks() -> void:
+	var center := world_to_chunk(_player.global_position)
+	var wanted := {}
+	for x in range(-LOAD_RADIUS, LOAD_RADIUS + 1):
+		for z in range(-LOAD_RADIUS, LOAD_RADIUS + 1):
+			wanted[center + Vector3i(x, 0, z)] = true
+
+	var to_unload := []
+	for key in _chunks:
+		if not wanted.has(key):
+			to_unload.append(key)
+	for key in to_unload:
+		_unload_chunk(key)
+
+	for key in _pending_load.keys():
+		if not wanted.has(key):
+			_pending_load.erase(key)
+
+	for key in wanted:
+		if not _chunks.has(key) and not _pending_load.has(key):
+			_pending_load[key] = true
+
+	var loaded := 0
+	# 按曼哈顿距离升序加载：玩家脚下与前进方向区块优先，减少高速移动时
+	# 前方地形尚未生成的窗口期。
+	var keys := _pending_load.keys()
+	keys.sort_custom(func(a: Vector3i, b: Vector3i) -> bool:
+		var da := absi(a.x - center.x) + absi(a.z - center.z)
+		var db := absi(b.x - center.x) + absi(b.z - center.z)
+		return da < db
+	)
+	for key in keys:
+		if loaded >= CHUNKS_PER_FRAME:
+			break
+		if _chunks.has(key):
+			continue
+		_pending_load.erase(key)
+		_load_chunk(key)
+		loaded += 1
+
+	var rebuilt := 0
+	while rebuilt < 2 and not _pending_rebuilds.is_empty():
+		_rebuild_chunk(_pending_rebuilds.pop_front())
+		rebuilt += 1
+
+
+func _load_chunk(coord: Vector3i) -> void:
+	if _chunks.has(coord):
+		return
+
+	var chunk := Chunk.new()
+	chunk.name = "Chunk_%d_%d" % [coord.x, coord.z]
+	chunk.position = Vector3(chunk_to_world(coord))
+	add_child(chunk)
+
+	if _modified_data.has(coord):
+		chunk.data = _modified_data[coord]
+	else:
+		_generate_chunk(chunk, coord)
+	chunk.rebuild(_atlas_material, _neighbor_lookup)
+	_chunks[coord] = chunk
+
+
+func _unload_chunk(coord: Vector3i) -> void:
+	var chunk: Chunk = _chunks.get(coord)
+	if chunk == null:
+		return
+	if _edited_coords.has(coord):
+		_modified_data[coord] = chunk.data
+	_chunks.erase(coord)
+	chunk.queue_free()
+	# 卸载后邻居外侧边界重新暴露，入队补面重建。
+	for offset: Vector3i in [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1)]:
+		_pending_rebuilds.append(coord + offset)
+
+
+func _generate_chunk(chunk: Chunk, coord: Vector3i) -> void:
+	var origin := chunk_to_world(coord)
+	for x in CHUNK_SIZE.x:
+		for z in CHUNK_SIZE.z:
+			var wx := origin.x + x
+			var wz := origin.z + z
+			var height := _terrain_height(wx, wz)
+			for y in CHUNK_SIZE.y:
+				chunk.set_block_local(Vector3i(x, y, z), _block_at(wx, y, wz, height))
+
+	_generate_trees(chunk, origin)
+
+
+func _terrain_height(wx: int, wz: int) -> int:
+	var n := _noise.get_noise_2d(float(wx), float(wz))
+	return int(round(28.0 + n * 10.0))
+
+
+func _block_at(wx: int, wy: int, wz: int, height: int) -> int:
+	if wy > height:
+		return BlockTypes.Block.WATER if wy <= SEA_LEVEL else BlockTypes.Block.AIR
+	if wy == height:
+		return BlockTypes.Block.SAND if height <= SEA_LEVEL else BlockTypes.Block.GRASS
+	if wy >= height - 3:
+		return BlockTypes.Block.SAND if height <= SEA_LEVEL else BlockTypes.Block.DIRT
+	return _ore_or_stone(wx, wy, wz)
+
+
+## 石层矿物：确定性哈希散布有色金属矿石（铜约 2.5% 见于全部石层，
+## 锡约 1% 仅见于更深岩层），其余为石头。种子固定，矿点可复现。
+func _ore_or_stone(wx: int, wy: int, wz: int) -> int:
+	var r := _ore_rng(wx, wy, wz)
+	if r < 0.025:
+		return BlockTypes.Block.COPPER_ORE
+	if r < 0.035 and wy <= SEA_LEVEL + 2:
+		return BlockTypes.Block.TIN_ORE
+	return BlockTypes.Block.STONE
+
+
+func _ore_rng(x: int, y: int, z: int) -> float:
+	var h := hash(Vector3i(x, y * 8191 + seed_value, z))
+	return float(h & 0xFFFF) / 65535.0
+
+
+func _generate_trees(chunk: Chunk, origin: Vector3i) -> void:
+	for x in CHUNK_SIZE.x:
+		for z in CHUNK_SIZE.z:
+			if x < 2 or x > CHUNK_SIZE.x - 3 or z < 2 or z > CHUNK_SIZE.z - 3:
+				continue
+
+			var wx := origin.x + x
+			var wz := origin.z + z
+			if _tree_rng(wx, wz) > 0.02:
+				continue
+
+			var height := _terrain_height(wx, wz)
+			if height <= SEA_LEVEL + 1:
+				continue
+			_place_tree(chunk, Vector3i(x, height + 1, z))
+
+
+func _place_tree(chunk: Chunk, base: Vector3i) -> void:
+	var trunk_height := 4
+	for i in range(trunk_height):
+		var p := base + Vector3i(0, i, 0)
+		if _in_chunk(p):
+			chunk.set_block_local(p, BlockTypes.Block.WOOD)
+
+	var top := base + Vector3i(0, trunk_height, 0)
+	for dx in range(-2, 3):
+		for dz in range(-2, 3):
+			for dy in range(-1, 3):
+				if abs(dx) == 2 and abs(dz) == 2 and dy != -1:
+					continue
+				var p := top + Vector3i(dx, dy, dz)
+				if _in_chunk(p) and chunk.get_block_local(p) == BlockTypes.Block.AIR:
+					chunk.set_block_local(p, BlockTypes.Block.LEAVES)
+
+
+func _tree_rng(x: int, z: int) -> float:
+	var h := hash(Vector3i(x, seed_value, z))
+	return float(h & 0xFFFF) / 65535.0
+
+
+func _in_chunk(p: Vector3i) -> bool:
+	return (
+		p.x >= 0
+		and p.x < CHUNK_SIZE.x
+		and p.y >= 0
+		and p.y < CHUNK_SIZE.y
+		and p.z >= 0
+		and p.z < CHUNK_SIZE.z
+	)

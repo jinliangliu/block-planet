@@ -1,0 +1,12 @@
+# Godot
+.godot/
+*.import
+export_presets.cfg
+
+# Local save/test artifacts
+*.tmp
+*.log
+
+# WorkBuddy session data
+.workbuddy/
+
