@@ -1331,9 +1331,30 @@ func _run() -> void:
 	hud._toggle_game_mode()
 	_check(GameState.is_explore(), "探索模式下按 G 不会跳到创造模式")
 
-	# Q-6 地图页模式三选一
+	# Q-6 地图页模式三选一：三个按钮竖排在界面右侧
 	var selector: MapSelector = hud._map_selector
 	_check(selector != null and selector._mode_buttons.size() == 3, "地图页提供模式三选一（三个按钮）")
+	selector.open()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var mb0: Button = selector._mode_buttons[0]
+	var mb1: Button = selector._mode_buttons[1]
+	var mb2: Button = selector._mode_buttons[2]
+	_check(
+		is_equal_approx(mb0.global_position.x, mb1.global_position.x)
+		and is_equal_approx(mb1.global_position.x, mb2.global_position.x)
+		and mb1.global_position.y > mb0.global_position.y
+		and mb2.global_position.y > mb1.global_position.y,
+		"三个模式按钮竖向排列（x=%.0f，y=%.0f → %.0f → %.0f）" % [
+			mb0.global_position.x, mb0.global_position.y, mb1.global_position.y, mb2.global_position.y
+		],
+	)
+	_check(
+		mb1.global_position.x + mb1.size.x > selector.size.x * 0.75,
+		"模式按钮位于界面右侧（按钮右缘 %.0f / 界面宽 %.0f）" % [
+			mb1.global_position.x + mb1.size.x, selector.size.x
+		],
+	)
 	selector._select_mode(GameState.Mode.EXPLORE)
 	_check(GameState.is_explore() and selector.selected_mode() == int(GameState.Mode.EXPLORE),
 		"在地图页选探索即写入 GameState")
@@ -1345,12 +1366,41 @@ func _run() -> void:
 	selector._select_mode(GameState.Mode.CREATIVE)
 	_check(GameState.is_creative(), "地图页也能选到创造模式")
 
-	# Q-7 HUD 状态标签
+	# Q-7 HUD 模式徽章：贴在小地图外框正下方，只两个字，带描边
 	GameState.set_mode(GameState.Mode.EXPLORE)
-	_check(hud._mode_label.text.begins_with("模式：探索"),
-		"HUD 左下角状态标签显示「%s」" % hud._mode_label.text)
+	_check(hud._mode_label.text == "探索", "HUD 模式徽章只显示两个字「%s」" % hud._mode_label.text)
+	var map_bottom := hud._minimap.global_position.y + MiniMap.SIZE
+	var badge_top := hud._mode_label.global_position.y
+	_check(
+		badge_top >= map_bottom - 6.0 and badge_top <= map_bottom + 24.0,
+		"模式徽章紧贴小地图外框下缘（地图底 %.0f / 徽章顶 %.0f）" % [map_bottom, badge_top],
+	)
+	_check(
+		is_equal_approx(
+			hud._mode_label.global_position.x + hud._mode_label.size.x * 0.5,
+			hud._minimap.global_position.x + hud._minimap.size.x * 0.5,
+		),
+		"模式徽章与小地图同一竖列居中",
+	)
+	_check(
+		hud._mode_label.get_theme_constant("outline_size") >= 3
+		and hud._mode_label.get_theme_font_size("font_size") >= 20,
+		"模式徽章字号 %d、描边 %d 像素（着重显示）" % [
+			hud._mode_label.get_theme_font_size("font_size"),
+			hud._mode_label.get_theme_constant("outline_size"),
+		],
+	)
+	var badge_color := hud._mode_label.get_theme_color("font_color")
+	GameState.set_mode(GameState.Mode.CREATIVE)
+	_check(
+		hud._mode_label.text == "创造"
+		and hud._mode_label.get_theme_color("font_color") != badge_color,
+		"切到创造后徽章换字并换色（%s → %s）" % [
+			badge_color, hud._mode_label.get_theme_color("font_color")
+		],
+	)
 	GameState.set_mode(GameState.Mode.SURVIVAL)
-	_check(hud._mode_label.text == "模式：生存", "回到生存模式后状态标签复位")
+	_check(hud._mode_label.text == "生存", "回到生存模式后徽章复位为「生存」")
 
 	if _failed == 0:
 		print("LIFE_TEST_OK")

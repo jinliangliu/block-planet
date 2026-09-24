@@ -2,7 +2,7 @@ class_name MapSelector
 extends Control
 ## 地图选择器（全屏覆盖，三页流程）：
 ##   地球页：拖动旋转地球、悬停显示区域名、点击进入该区域介绍；
-##          底部同一屏内提供「生存 / 创造 / 探索」模式三选一；
+##          右侧竖排提供「生存 / 创造 / 探索」模式三选一；
 ##   介绍页：区域名 + 地理介绍 + 「进入」；
 ##   加载页：逐条揭示该区域的植被/生物/气候/风貌，进度满后可开始探索。
 ## 完成后发出 region_entered(region_id)，由 Main 记录并重载主场景生效。
@@ -18,6 +18,10 @@ enum Page {
 
 ## 视口（地球）尺寸与拖动判定阈值（像素）。
 const VIEW_SIZE := 520.0
+## 模式竖排栏：按钮宽与距屏幕右缘、上下留白（地球居中，右侧这片空白正好容纳）。
+const MODE_COLUMN_WIDTH := 188.0
+const MODE_COLUMN_MARGIN := 40.0
+const MODE_COLUMN_HEIGHT := 140.0
 ## 小于该位移视为点击而非拖动。
 const CLICK_SLOP := 6.0
 ## 加载页时长（秒）与各段落揭示进度。
@@ -329,42 +333,39 @@ func _build_legend(parent: Control) -> void:
 		cell.add_child(name_label)
 
 
-## 模式三选一：与地球同屏，选完地图顺手定模式，不给流程多添一步。
+## 模式三选一：贴地球页右侧竖排，选完地图顺手定模式，不给流程多添一步。
 ## 点选即写入 GameState——与 HUD 的模式按钮一样即时生效。
-## 按钮在上、说明在下：说明行落在地球下缘的深色区，浅色文字才压得住底。
+## 竖排的理由：按钮文字只有两个字，横排会拉成一条细长条，还容易和地球下方的
+## 悬停提示抢位置；地球居中、左栏已被图例占住，右侧这片留白正好容一列开关。
 func _build_mode_row(parent: Control) -> void:
 	var box := VBoxContainer.new()
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_theme_constant_override("separation", 8)
-	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	box.offset_left = -250.0
-	box.offset_right = 250.0
-	box.offset_top = -166.0
-	box.offset_bottom = -64.0
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 10)
+	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+	box.offset_left = -(MODE_COLUMN_WIDTH + MODE_COLUMN_MARGIN)
+	box.offset_right = -MODE_COLUMN_MARGIN
+	box.offset_top = -MODE_COLUMN_HEIGHT
+	box.offset_bottom = MODE_COLUMN_HEIGHT
 	parent.add_child(box)
-
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 10)
-	# 只让按钮接收鼠标：容器本身穿透，免得在地球下方形成一块"拖不动"的死区。
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(row)
 
 	_mode_buttons.clear()
 	for choice: Dictionary in _mode_choices():
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(150, 42)
+		btn.custom_minimum_size = Vector2(MODE_COLUMN_WIDTH, 44)
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.toggle_mode = true
-		btn.add_theme_font_size_override("font_size", 16)
+		btn.add_theme_font_size_override("font_size", 17)
 		btn.pressed.connect(_select_mode.bind(int(choice["mode"])))
-		row.add_child(btn)
+		box.add_child(btn)
 		_mode_buttons.append(btn)
 
 	_mode_caption = Label.new()
 	_mode_caption.add_theme_font_size_override("font_size", 14)
 	_mode_caption.add_theme_color_override("font_color", Color(0.72, 0.80, 0.92))
 	_mode_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# 竖栏只有 188px 宽，一句说明必然折行，交给自动换行而不是手写断句。
+	_mode_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_mode_caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(_mode_caption)
 

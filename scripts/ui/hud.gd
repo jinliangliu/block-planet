@@ -6,6 +6,15 @@ class_name HUD
 ## 生命爱心条：5 颗心换算 20 点生命，每颗 4 点。
 const HEART_COUNT := 5
 const HEARTS_PER_POINT := 4
+## 右上角信息列：小地图距屏幕顶部/右缘的留白，模式徽章与时间行与它对齐同宽。
+const MINIMAP_MARGIN := 20.0
+## 模式徽章：贴在小地图外框正下方，只显示两个字（生存/创造/探索）。
+## 字号比正文大、加深色描边——它是玩家一眼确认「当前在哪种模式」的锚点。
+const MODE_BADGE_FONT_SIZE := 22
+const MODE_BADGE_OUTLINE_SIZE := 5
+const MODE_BADGE_OUTLINE := Color(0.06, 0.08, 0.12, 0.96)
+const MODE_BADGE_HEIGHT := 32.0
+const MODE_BADGE_GAP := 4.0
 
 var _player: Player
 var _root: Control
@@ -378,7 +387,7 @@ func _build_hotbar(root: Control) -> void:
 
 
 ## 左上角状态面板：姓名 + 红色爱心生命（5 颗心，每颗 4 点）+ 饥饿文本。
-## 时间显示在右上角小地图正下方，模式显示在左下角。
+## 右上角小地图外框正下方依次是模式徽章与时间行，同宽居中成一条竖列。
 func _build_stats(root: Control) -> void:
 	var box := VBoxContainer.new()
 	box.position = Vector2(16, 16)
@@ -409,22 +418,28 @@ func _build_stats(root: Control) -> void:
 	root.add_child(_time_label)
 	_time_label.anchor_left = 1.0
 	_time_label.anchor_right = 1.0
-	_time_label.offset_left = -(MiniMap.SIZE + 20.0)
-	_time_label.offset_right = -20.0
-	_time_label.offset_top = MiniMap.SIZE + 28.0
+	_time_label.offset_left = -(MiniMap.SIZE + MINIMAP_MARGIN)
+	_time_label.offset_right = -MINIMAP_MARGIN
+	_time_label.offset_top = MINIMAP_MARGIN + MiniMap.SIZE + MODE_BADGE_GAP + MODE_BADGE_HEIGHT + 8.0
 
+	# 模式徽章：紧贴小地图指南针框下缘，只放两个字。描边而非加底板——
+	# 压在任何画面上都读得清，又不必额外糊住一块视野。
 	_mode_label = Label.new()
-	_mode_label.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0, 0.95))
-	_mode_label.add_theme_font_size_override("font_size", 18)
+	_mode_label.add_theme_font_size_override("font_size", MODE_BADGE_FONT_SIZE)
+	_mode_label.add_theme_color_override("font_outline_color", MODE_BADGE_OUTLINE)
+	_mode_label.add_theme_constant_override("outline_size", MODE_BADGE_OUTLINE_SIZE)
+	_mode_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mode_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(_mode_label)
-	_mode_label.anchor_top = 1.0
-	_mode_label.anchor_bottom = 1.0
-	_mode_label.offset_left = 16.0
-	_mode_label.offset_top = -36.0
-	_mode_label.offset_bottom = -12.0
-	_mode_label.offset_right = 236.0
+	_mode_label.anchor_left = 1.0
+	_mode_label.anchor_right = 1.0
+	_mode_label.offset_left = -(MiniMap.SIZE + MINIMAP_MARGIN)
+	_mode_label.offset_right = -MINIMAP_MARGIN
+	_mode_label.offset_top = MINIMAP_MARGIN + MiniMap.SIZE + MODE_BADGE_GAP
+	_mode_label.offset_bottom = _mode_label.offset_top + MODE_BADGE_HEIGHT
 
 	_refresh_stats()
+	_refresh_mode_badge()
 
 
 ## 生命爱心条：共 5 颗心，每颗代表 4 点生命（满 20），余量 2 点时绘制半心。
@@ -1491,10 +1506,10 @@ func _build_minimap(root: Control) -> void:
 	_minimap.anchor_top = 0.0
 	_minimap.anchor_right = 1.0
 	_minimap.anchor_bottom = 0.0
-	_minimap.offset_left = -(MiniMap.SIZE + 20.0)
-	_minimap.offset_top = 20.0
-	_minimap.offset_right = -20.0
-	_minimap.offset_bottom = 20.0 + MiniMap.SIZE
+	_minimap.offset_left = -(MiniMap.SIZE + MINIMAP_MARGIN)
+	_minimap.offset_top = MINIMAP_MARGIN
+	_minimap.offset_right = -MINIMAP_MARGIN
+	_minimap.offset_bottom = MINIMAP_MARGIN + MiniMap.SIZE
 	_minimap.setup(_player, _player.get_world())
 
 
@@ -1784,16 +1799,25 @@ func _on_time_changed(_percent: float, _is_day: bool) -> void:
 
 
 func _on_mode_changed(_mode: int) -> void:
-	if _mode_label:
-		if GameState.is_creative():
-			_mode_label.text = "模式：创造（无敌 · 飞行）"
-		elif GameState.is_explore():
-			_mode_label.text = "模式：探索（飞行 · 无敌对生物）"
-		else:
-			_mode_label.text = "模式：生存"
+	_refresh_mode_badge()
 	if _fly_button:
 		_fly_button.visible = GameState.can_fly()
 	if _descend_button:
 		_descend_button.visible = GameState.can_fly()
 	_refresh_hotbar()
 	_refresh_stats()
+
+
+## 刷新模式徽章：只取两个字（生存/创造/探索），颜色按模式区分——
+## 草绿=生存、金黄=创造、天青=探索。文字与判据都取自 GameState，
+## HUD 只负责呈现，免得这里再长出第二套说法。
+func _refresh_mode_badge() -> void:
+	if _mode_label == null:
+		return
+	var color := Color(0.72, 0.94, 0.60)
+	if GameState.is_creative():
+		color = Color(1.0, 0.86, 0.42)
+	elif GameState.is_explore():
+		color = Color(0.62, 0.92, 1.0)
+	_mode_label.text = GameState.mode_name()
+	_mode_label.add_theme_color_override("font_color", color)
