@@ -589,6 +589,14 @@ func _run() -> void:
 	)
 	hud.open_map_selector()
 	_check(hud._map_selector.is_open(), "可打开地图选择器（M 键路径）")
+	_check(hud._map_selector._stage.get_global_rect().size == Vector2(MapSelector.VIEW_SIZE, MapSelector.VIEW_SIZE),
+		"地球视口舞台尺寸为 %d×%d" % [int(MapSelector.VIEW_SIZE), int(MapSelector.VIEW_SIZE)])
+	_check(
+		hud._map_selector._viewport_pos_from_global(
+			hud._map_selector._stage.get_global_rect().position + Vector2(260.0, 260.0)
+		) == Vector2(260.0, 260.0),
+		"拾取坐标换算：全局坐标减舞台原点得视口内坐标",
+	)
 	hud._map_selector._show_intro(RegionAtlas.ASIA)
 	_check(hud._map_selector._intro_title.text == "亚洲", "介绍页显示所选区域名称与地理介绍")
 	_check(not String(hud._map_selector._intro_body.text).is_empty(), "该区域地理介绍文本非空")

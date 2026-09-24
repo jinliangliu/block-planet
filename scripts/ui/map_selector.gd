@@ -31,6 +31,7 @@ const TEXT_BODY := Color(0.35, 0.27, 0.16)
 
 var _page: Page = Page.GLOBE
 var _globe: MapGlobe
+var _stage: SubViewportContainer
 var _viewport: SubViewport
 var _camera: Camera3D
 var _hover_label: Label
@@ -122,17 +123,24 @@ func _gui_input(event: InputEvent) -> void:
 
 
 ## 鼠标位置 → 球面区域 ID（-1 为未命中）。
+## 鼠标事件只到达本控件（stage 为 IGNORE 不转发 SubViewport），
+## 故用全局鼠标坐标减去 stage 原点换算出视口内像素坐标，
+## 再交给相机投影 API（该 API 接收像素坐标而非 NDC）。
 func _pick_region() -> int:
-	if _globe == null or _viewport == null or _camera == null:
+	if _globe == null or _viewport == null or _camera == null or _stage == null:
 		return -1
-	var mouse := _viewport.get_mouse_position()
+	var vp_pos := _viewport_pos_from_global(get_global_mouse_position())
 	var view := Vector2(_viewport.size)
-	if mouse.x < 0.0 or mouse.y < 0.0 or mouse.x > view.x or mouse.y > view.y:
+	if vp_pos.x < 0.0 or vp_pos.y < 0.0 or vp_pos.x > view.x or vp_pos.y > view.y:
 		return -1
-	var ndc := Vector2(mouse.x / view.x, mouse.y / view.y) * 2.0 - Vector2.ONE
-	var origin := _camera.project_ray_origin(ndc)
-	var dir := _camera.project_ray_normal(ndc)
+	var origin := _camera.project_ray_origin(vp_pos)
+	var dir := _camera.project_ray_normal(vp_pos)
 	return _globe.region_at_world_ray(origin, dir)
+
+
+## 全局（canvas）坐标 → SubViewport 内像素坐标。纯换算，供探针断言。
+func _viewport_pos_from_global(global_pos: Vector2) -> Vector2:
+	return global_pos - _stage.get_global_rect().position
 
 
 func _refresh_hover() -> void:
@@ -237,6 +245,7 @@ func _build_globe_page() -> void:
 	stage.offset_right = VIEW_SIZE * 0.5
 	stage.offset_bottom = VIEW_SIZE * 0.5 + 14.0
 	_globe_page.add_child(stage)
+	_stage = stage
 
 	_viewport = SubViewport.new()
 	_viewport.own_world_3d = true
