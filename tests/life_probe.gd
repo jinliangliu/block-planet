@@ -643,6 +643,21 @@ func _run() -> void:
 	_check(not hud._map_selector.is_open() and player.is_physics_processing(),
 		"关闭选择器后玩家恢复物理处理")
 
+	# 游戏说明书：F1 唤出，分页展示，关闭后状态复位。
+	var manual: ManualPanel = hud._manual
+	_check(manual != null and not manual.is_open(), "HUD 持有说明书且初始关闭")
+	hud.open_manual()
+	_check(manual.is_open(), "可打开游戏说明书（F1 键路径）")
+	_check(manual.get_page() == 0, "说明书初始停在第 1 页")
+	manual.select_page(3)
+	_check(manual.get_page() == 3, "可切换到指定页签")
+	manual.select_page(-2)
+	_check(manual.get_page() == 0, "越界页码被钳制到第 1 页")
+	manual.select_page(99)
+	_check(manual.get_page() == ManualPanel.PAGES.size() - 1, "越界页码被钳制到末页")
+	hud.close_manual()
+	_check(not manual.is_open(), "关闭说明书后状态复位")
+
 	# 区域化世界生成：独立 World 实例按区域配置产出地表材质与树木密度。
 	var polar := World.new()
 	polar.set_region(RegionAtlas.ANTARCTICA)

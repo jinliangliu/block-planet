@@ -14,6 +14,7 @@ const ACTIONS := {
 	"toggle_mode": [KEY_G],
 	"toggle_trade": [KEY_B],
 	"toggle_map": [KEY_M],
+	"toggle_manual": [KEY_F1],
 }
 
 const SLOT_ACTION_COUNT := 9

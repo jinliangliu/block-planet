@@ -21,6 +21,7 @@ var _time_label: Label
 var _mode_label: Label
 var _map_name_label: Label
 var _map_selector: MapSelector
+var _manual: ManualPanel
 var _day_night: DayNightCycle
 var _craft_overlay: Control
 var _craft_result_grid: GridContainer
@@ -96,6 +97,7 @@ func _build() -> void:
 	_build_box_panel(root)
 	_build_smelt_panel(root)
 	_build_minimap(root)
+	_build_manual(root)
 	_build_map_name(root)
 	_build_map_selector(root)
 
@@ -107,6 +109,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			close_map_selector()
 			get_viewport().set_input_as_handled()
 		return
+	# 说明书同为模态窗口：ESC / F1 关闭，其余热键让位。
+	if _manual != null and _manual.is_open():
+		if event is InputEventKey and event.pressed and not event.echo \
+				and (event.keycode == KEY_ESCAPE or event.keycode == KEY_F1):
+			close_manual()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.is_action_pressed("toggle_craft"):
 			_toggle_craft_panel()
@@ -116,13 +125,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_trade_panel()
 		elif event.is_action_pressed("toggle_map"):
 			open_map_selector()
+		elif event.is_action_pressed("toggle_manual"):
+			open_manual()
 		elif event.keycode == KEY_ESCAPE and _box_overlay != null and _box_overlay.visible:
 			set_box_open(false)
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_ESCAPE and _craft_overlay != null and _craft_overlay.visible:
 			set_craft_open(false)
 			get_viewport().set_input_as_handled()
-		elif event.keycode == KEY_F1 and _hint_label:
+		elif event.keycode == KEY_F2 and _hint_label:
 			_hint_label.visible = not _hint_label.visible
 
 
@@ -422,7 +433,7 @@ func _anchor_bottom_right(root: Control, control: Control, right_margin: float, 
 
 func _build_desktop_hint(root: Control) -> void:
 	_hint_label = Label.new()
-	_hint_label.text = "WASD 移动 · 鼠标视角 · 滚轮拉近/拉远(拉远看角色) · 左键按住破坏/左键攻击 · 右键放置/吃食物/开箱/冶炼 · 1-9 选方块 · E 合成 · B 交易 · M 地图 · G 切换模式 · 空格跳跃 · 双击空格飞行(创造) · Ctrl 下降 · Shift冲刺 · Esc释放鼠标 · F1 显示/隐藏本提示"
+	_hint_label.text = "WASD 移动 · 鼠标视角 · 滚轮拉近/拉远(拉远看角色) · 左键按住破坏/左键攻击 · 右键放置/吃食物/开箱/冶炼 · 1-9 选方块 · E 合成 · B 交易 · M 地图 · G 切换模式 · 空格跳跃 · 双击空格飞行(创造) · Ctrl 下降 · Shift冲刺 · Esc释放鼠标 · F1 说明书 · F2 显示/隐藏本提示"
 	_hint_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.9))
 	_hint_label.add_theme_font_size_override("font_size", 18)
 	_hint_label.position = Vector2(16, 120)
@@ -1468,6 +1479,37 @@ func _on_region_closed() -> void:
 func _on_region_entered(region_id: int) -> void:
 	_set_player_frozen(false)
 	Events.region_entered.emit(region_id)
+
+
+## 游戏说明书：阅读型窗口，不冻结玩家（与储物箱面板同模式）。
+func _build_manual(root: Control) -> void:
+	_manual = ManualPanel.new()
+	_manual.closed.connect(_on_manual_closed)
+	root.add_child(_manual)
+
+
+func open_manual() -> void:
+	if _manual == null:
+		return
+	_manual.open()
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_manual() -> void:
+	if _manual == null:
+		return
+	_manual.close()
+
+
+func _on_manual_closed() -> void:
+	# 仅当没有其他面板仍处于打开状态时，才把鼠标收回捕获模式。
+	var overlay_open: bool = (_box_overlay != null and _box_overlay.visible) \
+		or (_craft_overlay != null and _craft_overlay.visible) \
+		or (_trade_overlay != null and _trade_overlay.visible) \
+		or (_smelt_overlay != null and _smelt_overlay.visible)
+	if not overlay_open and not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 ## 全屏模态期间冻结玩家：关闭物理与输入处理，避免镜头与移动在背后漂移。
