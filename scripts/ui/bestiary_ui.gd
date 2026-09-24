@@ -25,7 +25,6 @@ const BODY_COLOR := Color(0.42, 0.32, 0.18)
 const CHIP_BG := Color(0.89, 0.85, 0.74)
 const CHIP_ACTIVE := Color(0.80, 0.72, 0.55)
 const DETAIL_BG := Color(0.91, 0.87, 0.77)
-const CLOSE_COLOR := Color(0.85, 0.22, 0.20)
 const GOOD_COLOR := Color(0.30, 0.55, 0.15)
 const BAD_COLOR := Color(0.70, 0.25, 0.18)
 
@@ -193,12 +192,8 @@ func _build_header() -> Control:
 		header.add_child(btn)
 		_tab_buttons.append(btn)
 
-	var close_btn := Button.new()
-	close_btn.text = "✕"
-	close_btn.focus_mode = Control.FOCUS_NONE
-	close_btn.add_theme_color_override("font_color", CLOSE_COLOR)
-	close_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
-	close_btn.add_theme_font_size_override("font_size", 22)
+	# 关闭按钮：底图透明（UiKit），只留红色 ✕ 字形，与窗面同色。
+	var close_btn := UiKit.make_close()
 	close_btn.pressed.connect(close)
 	header.add_child(close_btn)
 	return header
@@ -359,22 +354,8 @@ func _build_preview_popup() -> void:
 	_detail_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(_detail_name)
 
-	var close_btn := Button.new()
-	close_btn.text = "✕"
-	close_btn.focus_mode = Control.FOCUS_NONE
-	# 背景透明：与预览卡米色底融为一体，只留红色 ✕ 字形。
-	var close_style := StyleBoxEmpty.new()
-	close_style.content_margin_left = 8.0
-	close_style.content_margin_right = 8.0
-	close_style.content_margin_top = 2.0
-	close_style.content_margin_bottom = 2.0
-	close_btn.add_theme_stylebox_override("normal", close_style)
-	close_btn.add_theme_stylebox_override("hover", close_style)
-	close_btn.add_theme_stylebox_override("pressed", close_style)
-	close_btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	close_btn.add_theme_color_override("font_color", CLOSE_COLOR)
-	close_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
-	close_btn.add_theme_font_size_override("font_size", 20)
+	# 关闭按钮同 UiKit：背景透明，与预览卡米色底融为一体，只留红色 ✕ 字形。
+	var close_btn := UiKit.make_close(20)
 	close_btn.pressed.connect(_close_preview)
 	head.add_child(close_btn)
 

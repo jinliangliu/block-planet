@@ -247,10 +247,8 @@ func _build_header() -> HBoxContainer:
 	_emerald_label.add_theme_color_override("font_color", ACCENT)
 	row.add_child(_emerald_label)
 
-	var close_btn := Button.new()
-	close_btn.text = "✕"
-	close_btn.focus_mode = Control.FOCUS_NONE
-	close_btn.add_theme_font_size_override("font_size", 22)
+	# 关闭按钮：UiKit 统一透明底；字形跟随正文色而非红色（背包不与危险操作绑定）。
+	var close_btn := UiKit.make_close()
 	close_btn.add_theme_color_override("font_color", TEXT_BODY)
 	close_btn.pressed.connect(close)
 	row.add_child(close_btn)

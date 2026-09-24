@@ -617,23 +617,10 @@ func _refresh_hotbar() -> void:
 
 ## 合成台面板：储物箱同款淡色设计。左栏成品栏（6 格一行），右栏自上而下
 ## 合成路径图：顶端成品、下层材料格（不足红框），悬停弹出预览简介，
-## 「开始合成」按钮固定在窗口右下角，
-## 面板红叉按钮：背景与面板同色（无色差），悬停轻微加深提示可点。
-func _style_panel_close(button: Button, panel_bg: Color) -> void:
-	var normal := StyleBoxFlat.new()
-	normal.bg_color = panel_bg
-	normal.set_corner_radius_all(8)
-	var hover := normal.duplicate()
-	hover.bg_color = panel_bg.darkened(0.08)
-	var pressed := normal.duplicate()
-	pressed.bg_color = panel_bg.darkened(0.16)
-	button.add_theme_stylebox_override("normal", normal)
-	button.add_theme_stylebox_override("hover", hover)
-	button.add_theme_stylebox_override("pressed", pressed)
-	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+## 「合成」按钮固定在窗口右下角，右上角的 ✕ 走 UiKit.make_close()（透明底）。
 
 
-## 点「开始合成」执行，成品飞入背包动画 + 系统日志播报。
+## 点「合成」执行，成品飞入背包动画 + 系统日志播报。
 func _build_craft_panel(root: Control) -> void:
 	_craft_overlay = Control.new()
 	_craft_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -798,14 +785,8 @@ func _build_craft_panel(root: Control) -> void:
 	_craft_craft_button.offset_top = -62.0
 	_craft_craft_button.offset_bottom = -16.0
 
-	var close := Button.new()
-	close.text = "✕"
-	close.focus_mode = Control.FOCUS_NONE
-	close.add_theme_color_override("font_color", Color(0.85, 0.22, 0.20))
-	close.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
-	close.add_theme_color_override("font_pressed_color", Color(0.70, 0.15, 0.14))
-	close.add_theme_font_size_override("font_size", 22)
-	_style_panel_close(close, Color(0.95, 0.92, 0.84))
+	# 面板 ✕：UiKit 统一透明底，只剩红字形，看着像直接画在窗面上。
+	var close := UiKit.make_close()
 	close.pressed.connect(func(): set_craft_open(false))
 	wrapper.add_child(close)
 	close.anchor_left = 1.0
@@ -1173,14 +1154,8 @@ func _build_box_panel(root: Control) -> void:
 	_box_player_grid.add_theme_constant_override("v_separation", 6)
 	vbox.add_child(_box_player_grid)
 
-	var close := Button.new()
-	close.text = "✕"
-	close.focus_mode = Control.FOCUS_NONE
-	close.add_theme_color_override("font_color", Color(0.85, 0.22, 0.20))
-	close.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
-	close.add_theme_color_override("font_pressed_color", Color(0.70, 0.15, 0.14))
-	close.add_theme_font_size_override("font_size", 22)
-	_style_panel_close(close, Color(0.95, 0.92, 0.84))
+	# 面板 ✕：UiKit 统一透明底（与合成台一致），红字形直接压在窗面上。
+	var close := UiKit.make_close()
 	close.pressed.connect(func(): set_box_open(false))
 	wrapper.add_child(close)
 	close.anchor_left = 1.0

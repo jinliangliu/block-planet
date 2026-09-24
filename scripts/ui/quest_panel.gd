@@ -63,11 +63,8 @@ func _ready() -> void:
 	title.add_theme_color_override("font_color", TITLE_COLOR)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
-	var close_btn := Button.new()
-	close_btn.text = "✕"
-	close_btn.focus_mode = Control.FOCUS_NONE
-	close_btn.add_theme_color_override("font_color", Color(0.85, 0.22, 0.20))
-	close_btn.add_theme_font_size_override("font_size", 22)
+	# 关闭按钮：UiKit 统一透明底 + 红色 ✕，避免 Godot 默认按钮底盖住面板色。
+	var close_btn := UiKit.make_close()
 	close_btn.pressed.connect(close)
 	header.add_child(close_btn)
 

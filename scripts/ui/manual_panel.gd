@@ -13,7 +13,6 @@ const TITLE_COLOR := Color(0.36, 0.26, 0.13)
 const BODY_COLOR := Color(0.42, 0.32, 0.18)
 const PAGE_BTN_BG := Color(0.89, 0.85, 0.74)
 const PAGE_BTN_ACTIVE := Color(0.80, 0.72, 0.55)
-const CLOSE_COLOR := Color(0.85, 0.22, 0.20)
 
 const PAGES: Array[Dictionary] = [
 	{
@@ -244,13 +243,8 @@ func _ready() -> void:
 	keys_hint.add_theme_color_override("font_color", Color(BODY_COLOR, 0.7))
 	status_row.add_child(keys_hint)
 
-	var close_btn := Button.new()
-	close_btn.text = "✕"
-	close_btn.focus_mode = Control.FOCUS_NONE
-	close_btn.add_theme_color_override("font_color", CLOSE_COLOR)
-	close_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
-	close_btn.add_theme_color_override("font_pressed_color", Color(0.70, 0.15, 0.14))
-	close_btn.add_theme_font_size_override("font_size", 22)
+	# 关闭按钮：UiKit 统一透明底，只留红色 ✕ 字形压在说明书右肩上。
+	var close_btn := UiKit.make_close()
 	close_btn.pressed.connect(close)
 	wrapper.add_child(close_btn)
 	close_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
