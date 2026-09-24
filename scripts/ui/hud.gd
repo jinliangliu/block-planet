@@ -825,11 +825,14 @@ func _refresh_craft_panel() -> void:
 	if _craft_result_grid == null:
 		return
 	_hide_item_tip()
-	# 成品卡角标显示当前持有量（至少 ×1，保证图标可见）。
+	# 成品卡角标 = 按当前持有材料实时推算的可合成成品数（不足为 ×0）。
+	# 背包任何变化都会经 changed 信号走到这里，数量始终跟着材料走。
 	for i in range(ItemTypes.RECIPES.size()):
 		var b := _craft_result_grid.get_child(i) as ItemSlot
-		var owned := _player.inventory.count_item(ItemTypes.RECIPES[i]["result"]) if _player != null else 0
-		b.set_slot({"item": ItemTypes.RECIPES[i]["result"], "count": maxi(1, owned)})
+		var craftable := 0
+		if _player != null:
+			craftable = _player.inventory.craftable_count(ItemTypes.RECIPES[i])
+		b.set_craftable(ItemTypes.RECIPES[i]["result"], craftable)
 	_apply_craft_cat()
 
 

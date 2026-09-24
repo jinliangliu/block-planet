@@ -262,6 +262,21 @@ func count_item(item: int) -> int:
 	return total
 
 
+## 按当前持有材料推算「还能合成出多少个成品」（合成台成品格角标用）。
+## 各材料取 可合成次数 的最小值，再乘配方单次产出数。
+## 口径与 craft() 完全一致：count_item/consume_item 覆盖全部格位
+## （常用区 + 待售区），所以这里算出的就是真去点合成能得到的数量。
+func craftable_count(recipe: Dictionary) -> int:
+	var times := -1
+	for ingredient in recipe["ingredients"]:
+		var need := int(recipe["ingredients"][ingredient])
+		if need <= 0:
+			continue
+		var t := count_item(ingredient) / need
+		times = t if times < 0 else mini(times, t)
+	return maxi(0, times) * ItemTypes.recipe_count(recipe)
+
+
 func consume_item(item: int, count: int) -> bool:
 	if count_item(item) < count:
 		return false

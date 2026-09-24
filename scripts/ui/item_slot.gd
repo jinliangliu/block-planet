@@ -13,6 +13,8 @@ var _item_id := 0
 var _count := 0
 var _durability := 0
 var _deficit := false
+## 成品格模式：count=0 时仍显示图标与 ×0 角标（普通格 count≤0 画空点）。
+var _craft_mode := false
 
 var _cell_style: StyleBoxFlat
 var _hover_style: StyleBoxFlat
@@ -71,6 +73,18 @@ func set_slot(slot: Dictionary) -> void:
 	# 缺省 -1（无耐久信息）：合成路径里的工具预览格没有耐久概念，
 	# 若缺省 0 会在角标显示误导性的「0」。
 	_durability = int(slot.get("durability", -1))
+	_craft_mode = false
+	queue_redraw()
+
+
+## 合成台成品格专用：显示「按当前材料还能合成几个」，材料不足为 ×0。
+## 0 也必须照常画出图标——整格变空点的话玩家就不知道这格是哪种成品了。
+func set_craftable(item: int, craftable: int) -> void:
+	_item_id = item
+	_count = maxi(0, craftable)
+	_durability = -1
+	_deficit = false
+	_craft_mode = true
 	queue_redraw()
 
 
@@ -89,7 +103,7 @@ func item_id() -> int:
 
 func _draw() -> void:
 	draw_style_box(_cell_style, Rect2(Vector2.ZERO, size))
-	if _item_id == 0 or _count <= 0:
+	if _item_id == 0 or (_count <= 0 and not _craft_mode):
 		draw_string(get_theme_default_font(), Vector2(0.0, size.y * 0.5 + 6.0), "·",
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, 18, _empty_color)
 		return

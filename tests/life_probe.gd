@@ -2126,6 +2126,30 @@ func _run() -> void:
 		"切到食物页显示 %d 格、无串页、选中项在本页" % food_visible,
 	)
 	_check(hud._craft_craft_button.text == "合成", "按钮文案是「合成」")
+
+	# S-9.1 成品格角标 = 按持有材料实时推算的可合成数：清空背包后全部 ×0，
+	# 补足一份木镐材料（5 木头）后该格恢复 ×recipe_count，与 craft() 口径一致。
+	var s_inv_slots: Array = hud._player.inventory.slots.duplicate(true)
+	for slot_i in range(hud._player.inventory.slots.size()):
+		hud._player.inventory.slots[slot_i] = {"item": 0, "count": 0, "durability": -1}
+	hud._refresh_craft_panel()
+	await get_tree().process_frame
+	var pickaxe_recipe: Dictionary = ItemTypes.RECIPES[0]
+	var slot0 := hud._craft_result_grid.get_child(0) as ItemSlot
+	_check(
+		int(slot0._count) == 0 and slot0.item_id() == int(pickaxe_recipe["result"]),
+		"空手时成品格显示 ×0 且图标仍在（%s）" % "木镐",
+	)
+	hud._player.inventory.add_item(int(pickaxe_recipe["ingredients"].keys()[0]),
+		int(pickaxe_recipe["ingredients"].values()[0]))
+	hud._refresh_craft_panel()
+	await get_tree().process_frame
+	_check(
+		int(slot0._count) == ItemTypes.recipe_count(pickaxe_recipe),
+		"补足一份材料后成品格推算为 ×%d" % ItemTypes.recipe_count(pickaxe_recipe),
+	)
+	hud._player.inventory.slots = s_inv_slots
+	hud._player.inventory.changed.emit()
 	hud.set_craft_open(false)
 
 	# S-10 说明书里写明了入口：文档与实现不同步时（加了键没说）这里会红
