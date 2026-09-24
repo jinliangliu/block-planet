@@ -169,12 +169,43 @@ func _draw_tool_icon(center: Vector2, half: float, base: Color) -> void:
 				center + Vector2(half * 0.2, -half * 0.35),
 			])
 			draw_colored_polygon(head, base)
+		"sickle":
+			# 镰刀：弯月刀身（两段折线近似弧度）+ 尖端收细。
+			var moon := PackedVector2Array([
+				center + Vector2(-half * 0.6, -half * 0.2),
+				center + Vector2(-half * 0.2, -half * 0.95),
+				center + Vector2(half * 0.55, -half * 1.0),
+				center + Vector2(half * 0.95, -half * 0.3),
+			])
+			draw_polyline(moon, base, grip * 1.3)
+			draw_line(center + Vector2(half * 0.95, -half * 0.3),
+				center + Vector2(half * 1.15, -half * 0.05), base, grip * 0.7)
+		"rod":
+			# 鱼竿：细竿 + 绕线轮 + 垂下的钓线。
+			var rod := PackedVector2Array([
+				center + Vector2(-half * 0.85, half * 0.85),
+				center + Vector2(half * 0.7, -half * 1.0),
+			])
+			draw_polyline(rod, Color(0.52, 0.38, 0.20), grip * 0.6)
+			draw_circle(center + Vector2(-half * 0.25, half * 0.15), grip * 0.45, base)
+			draw_line(center + Vector2(half * 0.7, -half * 1.0),
+				center + Vector2(half * 0.62, half * 0.1), Color(0.86, 0.86, 0.82), grip * 0.22)
+		"bow":
+			# 弓：竖立的弓臂弧线 + 弓弦。
+			var arm := PackedVector2Array([
+				center + Vector2(-half * 0.25, half * 1.05),
+				center + Vector2(half * 0.35, half * 0.1),
+				center + Vector2(-half * 0.25, -half * 1.05),
+			])
+			draw_polyline(arm, base, grip * 0.85)
+			draw_line(center + Vector2(-half * 0.25, half * 1.05),
+				center + Vector2(-half * 0.25, -half * 1.05), Color(0.90, 0.90, 0.86), grip * 0.22)
 
 
 ## 非方块物品微缩图：按物品 ID 分派造型剪影，未识别的退化为锭形。
 func _draw_item_icon(center: Vector2, half: float, base: Color) -> void:
 	match _item_id:
-		ItemTypes.COPPER_INGOT, ItemTypes.TIN_INGOT, ItemTypes.BRONZE_INGOT, ItemTypes.TOTEM:
+		ItemTypes.COPPER_INGOT, ItemTypes.TIN_INGOT, ItemTypes.BRONZE_INGOT, ItemTypes.IRON_INGOT, ItemTypes.SILVER_INGOT, ItemTypes.GOLD_INGOT, ItemTypes.ALLOY_INGOT, ItemTypes.CARBON_ROD, ItemTypes.TOTEM:
 			_draw_ingot(center, half, base)
 		ItemTypes.RAW_BEEF, ItemTypes.RAW_PORK, ItemTypes.CRAB_MEAT, ItemTypes.BREAD:
 			_draw_loaf(center, half, base)
@@ -190,8 +221,16 @@ func _draw_item_icon(center: Vector2, half: float, base: Color) -> void:
 			_draw_bone(center, half, base)
 		ItemTypes.STRING:
 			_draw_string(center, half, base)
-		ItemTypes.EMERALD:
+		ItemTypes.EMERALD, ItemTypes.CRYSTAL:
 			_draw_gem(center, half, base)
+		ItemTypes.HIDE:
+			_draw_loaf(center, half, base)
+		ItemTypes.FEATHER:
+			_draw_feather(center, half, base)
+		ItemTypes.FANG:
+			_draw_fang(center, half, base)
+		ItemTypes.ARROW:
+			_draw_arrow(center, half, base)
 		_:
 			_draw_ingot(center, half, base)
 
@@ -301,3 +340,49 @@ func _draw_gem(center: Vector2, half: float, base: Color) -> void:
 		center + Vector2(0.0, -half * 0.05),
 		center + Vector2(-half * 0.4, -half * 0.05),
 	]), base.lightened(0.4))
+
+
+## 羽毛：细羽轴 + 两侧羽片。
+func _draw_feather(center: Vector2, half: float, base: Color) -> void:
+	draw_line(center + Vector2(-half * 0.7, half * 0.9), center + Vector2(half * 0.5, -half * 0.95),
+		base.darkened(0.25), half * 0.16)
+	draw_colored_polygon(PackedVector2Array([
+		center + Vector2(-half * 0.55, half * 0.35),
+		center + Vector2(half * 0.1, -half * 0.95),
+		center + Vector2(half * 0.55, -half * 0.75),
+		center + Vector2(-half * 0.05, half * 0.15),
+	]), base)
+	draw_colored_polygon(PackedVector2Array([
+		center + Vector2(-half * 0.62, half * 0.62),
+		center + Vector2(-half * 0.05, -half * 0.5),
+		center + Vector2(half * 0.2, -half * 0.3),
+		center + Vector2(-half * 0.3, half * 0.8),
+	]), base.lightened(0.10))
+
+
+## 獠牙：弯曲的尖牙。
+func _draw_fang(center: Vector2, half: float, base: Color) -> void:
+	draw_colored_polygon(PackedVector2Array([
+		center + Vector2(-half * 0.7, -half * 0.9),
+		center + Vector2(half * 0.25, -half * 0.6),
+		center + Vector2(-half * 0.1, half * 0.95),
+		center + Vector2(-half * 0.75, half * 0.1),
+	]), base)
+	draw_line(center + Vector2(-half * 0.55, -half * 0.5), center + Vector2(-half * 0.2, half * 0.4),
+		base.darkened(0.25), half * 0.12)
+
+
+## 箭：细杆 + 三角箭头 + 尾羽。
+func _draw_arrow(center: Vector2, half: float, base: Color) -> void:
+	draw_line(center + Vector2(-half * 0.95, half * 0.95), center + Vector2(half * 0.6, -half * 0.6),
+		base.darkened(0.15), half * 0.18)
+	draw_colored_polygon(PackedVector2Array([
+		center + Vector2(half * 0.35, -half * 0.85),
+		center + Vector2(half * 1.05, -half * 1.05),
+		center + Vector2(half * 0.75, -half * 0.35),
+	]), base.lightened(0.35))
+	draw_colored_polygon(PackedVector2Array([
+		center + Vector2(-half * 0.95, half * 0.95),
+		center + Vector2(-half * 0.35, half * 0.35),
+		center + Vector2(-half * 0.45, half * 0.95),
+	]), Color(0.94, 0.94, 0.90))

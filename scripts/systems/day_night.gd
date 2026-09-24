@@ -25,11 +25,16 @@ const NIGHT_AMBIENT_COLOR := Color(0.18, 0.20, 0.36)
 const NIGHT_BACKGROUND_COLOR := Color(0.02, 0.03, 0.08)
 
 signal time_changed(day_percent: float, is_day: bool)
+## 跨过一整个昼夜循环时发射（第 2 天为 2）。生物生长以「游戏天数」为节拍。
+signal day_changed(day: int)
 
 var _light: DirectionalLight3D
 var _env: Environment
 var _time := 0.0
 var _last_emitted_second := -1
+## 累计经过的真实秒数，用于换算游戏天数（1 天 = FULL_CYCLE）。
+var _elapsed := 0.0
+var _day := 1
 ## 区域天空色调：默认中性白（不改变原配色）。
 var _sky_tint := Color(1.0, 1.0, 1.0)
 
@@ -54,11 +59,38 @@ func get_sky_tint() -> Color:
 
 func _process(delta: float) -> void:
 	_time = fmod(_time + delta, FULL_CYCLE)
+	_elapsed += delta
+	_track_day()
 	_apply_lighting()
 	var second := int(_time)
 	if second != _last_emitted_second:
 		_last_emitted_second = second
 		time_changed.emit(_time / FULL_CYCLE, is_day())
+
+
+## 当前游戏天数（开局为第 1 天，每过一整个昼夜循环 +1）。
+func day_count() -> int:
+	return _day
+
+
+## 累计经过的秒数（探针可用它把天数推进到指定值）。
+func elapsed_seconds() -> float:
+	return _elapsed
+
+
+## 直接推进天数（生物生长以天为节拍，探针据此跨过等待）。
+func advance_days(amount: int) -> void:
+	if amount <= 0:
+		return
+	_elapsed += float(amount) * FULL_CYCLE
+	_track_day()
+
+
+func _track_day() -> void:
+	var day := int(_elapsed / FULL_CYCLE) + 1
+	if day != _day:
+		_day = day
+		day_changed.emit(_day)
 
 
 func is_day() -> bool:

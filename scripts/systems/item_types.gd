@@ -1,7 +1,12 @@
 class_name ItemTypes
 ## 物品与工具数据：工具 ID、属性、合成配方。
-## 方块物品 ID 复用 BlockTypes.Block 的 1..10，工具 ID 从 100 开始，
+## 方块物品 ID 复用 BlockTypes.Block 的 1..25，工具 ID 从 100 开始，
 ## 食物与材料（不可放置）从 200 开始。
+##
+## 工具分级（1~4 级）：木 1 / 石 2 / 青铜 3 / 铁 4。等级决定采集速度、
+## 耐久与「能否采集指定矿石」（见 BlockTypes.MIN_TIER）。
+## 银/金工具为 4 级珍稀变体：不打乱等级表，靠个体速度与耐久区分，
+## 材料只能通过交易与任务奖励获得，是长期收集目标。
 
 const WOOD_PICKAXE := 100
 const WOOD_AXE := 101
@@ -13,6 +18,27 @@ const STONE_SHOVEL := 105
 const BRONZE_PICKAXE := 106
 const BRONZE_AXE := 107
 const BRONZE_SHOVEL := 108
+# 收割工具：镰刀对小麦与水草有额外收成（见 BlockTypes.drop_count_for）。
+const WOOD_SICKLE := 109
+const STONE_SICKLE := 110
+const BRONZE_SICKLE := 111
+const IRON_SICKLE := 112
+# 铁工具：4 级采集工具，可开采铁矿石。
+const IRON_PICKAXE := 113
+const IRON_AXE := 114
+const IRON_SHOVEL := 115
+# 珍稀工具：银（耐久最高）与金（速度最快、耐久最低）。
+const SILVER_PICKAXE := 116
+const SILVER_AXE := 117
+const SILVER_SHOVEL := 118
+const GOLD_PICKAXE := 119
+const GOLD_AXE := 120
+const GOLD_SHOVEL := 121
+# 渔具与弓：鱼竿垂钓水生物，弓蓄力远程狩猎。
+const WOOD_FISHING_ROD := 122
+const IRON_FISHING_ROD := 123
+const WOOD_BOW := 124
+const IRON_BOW := 125
 
 # 动物掉落：肉可食用恢复饥饿，骨头/线为收集材料。
 const RAW_BEEF := 200
@@ -34,6 +60,19 @@ const BRONZE_INGOT := 211
 const RAW_FISH := 212
 const RAW_SHRIMP := 213
 const CRAB_MEAT := 214
+# 进阶材料：铁矿与金矿冶炼成锭；银锭/水晶/碳棒来自交易与任务奖励。
+const IRON_INGOT := 215
+const SILVER_INGOT := 216
+const GOLD_INGOT := 217
+const CRYSTAL := 218
+const CARBON_ROD := 219
+const ALLOY_INGOT := 220
+# 狩猎产物：兽皮与獠牙来自中大型猎物，羽毛来自禽类（也是做箭的材料）。
+const HIDE := 221
+const FEATHER := 222
+const FANG := 223
+# 弹药：弓需要消耗箭（创造模式不消耗）。
+const ARROW := 224
 
 const TOOL_TYPE := {
 	WOOD_PICKAXE: "pickaxe",
@@ -45,69 +84,187 @@ const TOOL_TYPE := {
 	BRONZE_PICKAXE: "pickaxe",
 	BRONZE_AXE: "axe",
 	BRONZE_SHOVEL: "shovel",
+	WOOD_SICKLE: "sickle",
+	STONE_SICKLE: "sickle",
+	BRONZE_SICKLE: "sickle",
+	IRON_SICKLE: "sickle",
+	IRON_PICKAXE: "pickaxe",
+	IRON_AXE: "axe",
+	IRON_SHOVEL: "shovel",
+	SILVER_PICKAXE: "pickaxe",
+	SILVER_AXE: "axe",
+	SILVER_SHOVEL: "shovel",
+	GOLD_PICKAXE: "pickaxe",
+	GOLD_AXE: "axe",
+	GOLD_SHOVEL: "shovel",
+	WOOD_FISHING_ROD: "rod",
+	IRON_FISHING_ROD: "rod",
+	WOOD_BOW: "bow",
+	IRON_BOW: "bow",
 }
 
 const TOOL_TIER := {
-	WOOD_PICKAXE: 0,
-	WOOD_AXE: 0,
-	WOOD_SHOVEL: 0,
-	STONE_PICKAXE: 1,
-	STONE_AXE: 1,
-	STONE_SHOVEL: 1,
-	BRONZE_PICKAXE: 2,
-	BRONZE_AXE: 2,
-	BRONZE_SHOVEL: 2,
+	WOOD_PICKAXE: 1,
+	WOOD_AXE: 1,
+	WOOD_SHOVEL: 1,
+	WOOD_SICKLE: 1,
+	STONE_PICKAXE: 2,
+	STONE_AXE: 2,
+	STONE_SHOVEL: 2,
+	STONE_SICKLE: 2,
+	BRONZE_PICKAXE: 3,
+	BRONZE_AXE: 3,
+	BRONZE_SHOVEL: 3,
+	BRONZE_SICKLE: 3,
+	IRON_PICKAXE: 4,
+	IRON_AXE: 4,
+	IRON_SHOVEL: 4,
+	IRON_SICKLE: 4,
+	SILVER_PICKAXE: 4,
+	SILVER_AXE: 4,
+	SILVER_SHOVEL: 4,
+	GOLD_PICKAXE: 4,
+	GOLD_AXE: 4,
+	GOLD_SHOVEL: 4,
+	WOOD_FISHING_ROD: 1,
+	IRON_FISHING_ROD: 4,
+	WOOD_BOW: 1,
+	IRON_BOW: 4,
 }
 
 const TOOL_DURABILITY := {
 	WOOD_PICKAXE: 60,
 	WOOD_AXE: 60,
 	WOOD_SHOVEL: 60,
+	WOOD_SICKLE: 55,
 	STONE_PICKAXE: 132,
 	STONE_AXE: 132,
 	STONE_SHOVEL: 132,
+	STONE_SICKLE: 120,
 	BRONZE_PICKAXE: 220,
 	BRONZE_AXE: 220,
 	BRONZE_SHOVEL: 220,
+	BRONZE_SICKLE: 200,
+	IRON_PICKAXE: 380,
+	IRON_AXE: 380,
+	IRON_SHOVEL: 380,
+	IRON_SICKLE: 340,
+	SILVER_PICKAXE: 520,
+	SILVER_AXE: 520,
+	SILVER_SHOVEL: 520,
+	GOLD_PICKAXE: 180,
+	GOLD_AXE: 180,
+	GOLD_SHOVEL: 180,
+	WOOD_FISHING_ROD: 65,
+	IRON_FISHING_ROD: 210,
+	WOOD_BOW: 120,
+	IRON_BOW: 300,
 }
 
 const TOOL_NAMES := {
 	WOOD_PICKAXE: "木镐",
 	WOOD_AXE: "木斧",
 	WOOD_SHOVEL: "木锹",
+	WOOD_SICKLE: "木镰刀",
 	STONE_PICKAXE: "石镐",
 	STONE_AXE: "石斧",
 	STONE_SHOVEL: "石锹",
+	STONE_SICKLE: "石镰刀",
 	BRONZE_PICKAXE: "青铜镐",
 	BRONZE_AXE: "青铜斧",
 	BRONZE_SHOVEL: "青铜锹",
+	BRONZE_SICKLE: "青铜镰刀",
+	IRON_PICKAXE: "铁镐",
+	IRON_AXE: "铁斧",
+	IRON_SHOVEL: "铁锹",
+	IRON_SICKLE: "铁镰刀",
+	SILVER_PICKAXE: "银镐",
+	SILVER_AXE: "银斧",
+	SILVER_SHOVEL: "银锹",
+	GOLD_PICKAXE: "金镐",
+	GOLD_AXE: "金斧",
+	GOLD_SHOVEL: "金锹",
+	WOOD_FISHING_ROD: "木鱼竿",
+	IRON_FISHING_ROD: "铁鱼竿",
+	WOOD_BOW: "木弓",
+	IRON_BOW: "铁弓",
 }
 
-# 按工具 tier 对应的采集速度倍率（青铜 tier 2 最快）。
-const TOOL_SPEED := [2.0, 4.0, 6.0]
+## 按等级的基础采集速度倍率（等级 1~4）。
+const TIER_SPEED := {
+	1: 2.0,
+	2: 4.0,
+	3: 6.5,
+	4: 9.0,
+}
+
+## 珍稀工具的个体速度覆盖（高于同级普通工具）。
+const TOOL_SPEED_BONUS := {
+	SILVER_PICKAXE: 11.0,
+	SILVER_AXE: 11.0,
+	SILVER_SHOVEL: 11.0,
+	GOLD_PICKAXE: 13.0,
+	GOLD_AXE: 13.0,
+	GOLD_SHOVEL: 13.0,
+}
+
+## 工具等级的中文称法（1~4 级）。
+const TIER_NAMES := {
+	1: "木",
+	2: "石",
+	3: "青铜",
+	4: "铁",
+}
 
 # 合成配方（无形状，按原料数量合成）。
 const RECIPES := [
 	{"result": WOOD_PICKAXE, "ingredients": {BlockTypes.Block.WOOD: 5}},
 	{"result": WOOD_AXE, "ingredients": {BlockTypes.Block.WOOD: 4}},
 	{"result": WOOD_SHOVEL, "ingredients": {BlockTypes.Block.WOOD: 2}},
+	{"result": WOOD_SICKLE, "ingredients": {BlockTypes.Block.WOOD: 3}},
 	{"result": STONE_PICKAXE, "ingredients": {BlockTypes.Block.COBBLESTONE: 3, BlockTypes.Block.WOOD: 2}},
 	{"result": STONE_AXE, "ingredients": {BlockTypes.Block.COBBLESTONE: 3, BlockTypes.Block.WOOD: 2}},
 	{"result": STONE_SHOVEL, "ingredients": {BlockTypes.Block.COBBLESTONE: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": STONE_SICKLE, "ingredients": {BlockTypes.Block.COBBLESTONE: 3, BlockTypes.Block.WOOD: 2}},
+	{"result": BRONZE_PICKAXE, "ingredients": {BRONZE_INGOT: 3, BlockTypes.Block.WOOD: 2}},
+	{"result": BRONZE_AXE, "ingredients": {BRONZE_INGOT: 3, BlockTypes.Block.WOOD: 2}},
+	{"result": BRONZE_SHOVEL, "ingredients": {BRONZE_INGOT: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": BRONZE_SICKLE, "ingredients": {BRONZE_INGOT: 2, BlockTypes.Block.WOOD: 2}},
+	{"result": IRON_PICKAXE, "ingredients": {IRON_INGOT: 3, BlockTypes.Block.WOOD: 2}},
+	{"result": IRON_AXE, "ingredients": {IRON_INGOT: 3, BlockTypes.Block.WOOD: 2}},
+	{"result": IRON_SHOVEL, "ingredients": {IRON_INGOT: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": IRON_SICKLE, "ingredients": {IRON_INGOT: 2, BlockTypes.Block.WOOD: 2}},
+	{"result": SILVER_PICKAXE, "ingredients": {SILVER_INGOT: 2, CRYSTAL: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": SILVER_AXE, "ingredients": {SILVER_INGOT: 2, CRYSTAL: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": SILVER_SHOVEL, "ingredients": {SILVER_INGOT: 1, CRYSTAL: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": GOLD_PICKAXE, "ingredients": {GOLD_INGOT: 2, ALLOY_INGOT: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": GOLD_AXE, "ingredients": {GOLD_INGOT: 2, ALLOY_INGOT: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": GOLD_SHOVEL, "ingredients": {GOLD_INGOT: 1, ALLOY_INGOT: 1, BlockTypes.Block.WOOD: 2}},
+	{"result": WOOD_FISHING_ROD, "ingredients": {BlockTypes.Block.WOOD: 3, STRING: 2}},
+	{"result": IRON_FISHING_ROD, "ingredients": {IRON_INGOT: 1, STRING: 3, BlockTypes.Block.WOOD: 2}},
+	{"result": WOOD_BOW, "ingredients": {BlockTypes.Block.WOOD: 3, STRING: 3}},
+	{"result": IRON_BOW, "ingredients": {IRON_INGOT: 2, STRING: 2, BlockTypes.Block.WOOD: 2}},
+	# 箭按「一束 4 支」产出，配方用 count 字段描述产出数量（默认 1）。
+	{"result": ARROW, "count": 4, "ingredients": {BlockTypes.Block.WOOD: 1, BlockTypes.Block.COBBLESTONE: 1, FEATHER: 1}},
 	{"result": BlockTypes.Block.GLASS, "ingredients": {BlockTypes.Block.SAND: 2}},
 	{"result": BlockTypes.Block.CHEST, "ingredients": {BlockTypes.Block.WOOD: 6}},
 	{"result": BREAD, "ingredients": {WHEAT: 3}},
 	{"result": BlockTypes.Block.SMELTER, "ingredients": {BlockTypes.Block.COBBLESTONE: 8}},
-	{"result": BRONZE_PICKAXE, "ingredients": {BRONZE_INGOT: 3, BlockTypes.Block.WOOD: 2}},
-	{"result": BRONZE_AXE, "ingredients": {BRONZE_INGOT: 3, BlockTypes.Block.WOOD: 2}},
-	{"result": BRONZE_SHOVEL, "ingredients": {BRONZE_INGOT: 1, BlockTypes.Block.WOOD: 2}},
 ]
 
-# 冶炼炉配方（右键冶炼炉打开）：矿石炼锭、铜锡合青铜。
+
+## 配方的产出数量（未写 count 即为 1）。
+static func recipe_count(recipe: Dictionary) -> int:
+	return maxi(1, int(recipe.get("count", 1)))
+
+# 冶炼炉配方（右键冶炼炉打开）：矿石炼锭、铜锡合青铜、铁+碳+银炼合金。
 const SMELT_RECIPES := [
 	{"result": COPPER_INGOT, "ingredients": {BlockTypes.Block.COPPER_ORE: 2}},
 	{"result": TIN_INGOT, "ingredients": {BlockTypes.Block.TIN_ORE: 2}},
 	{"result": BRONZE_INGOT, "ingredients": {COPPER_INGOT: 1, TIN_INGOT: 1}},
+	{"result": IRON_INGOT, "ingredients": {BlockTypes.Block.IRON_ORE: 2}},
+	{"result": GOLD_INGOT, "ingredients": {BlockTypes.Block.GOLD_ORE: 2}},
+	{"result": ALLOY_INGOT, "ingredients": {IRON_INGOT: 1, CARBON_ROD: 1, SILVER_INGOT: 1}},
 ]
 
 # 食物 → 食用后恢复的饥饿值（半点制：8 = 4 格鸡腿图标）。
@@ -138,6 +295,16 @@ const ITEM_NAMES := {
 	RAW_FISH: "生鱼",
 	RAW_SHRIMP: "生虾",
 	CRAB_MEAT: "蟹肉",
+	IRON_INGOT: "铁锭",
+	SILVER_INGOT: "银锭",
+	GOLD_INGOT: "金锭",
+	CRYSTAL: "水晶",
+	CARBON_ROD: "碳棒",
+	ALLOY_INGOT: "合金锭",
+	HIDE: "兽皮",
+	FEATHER: "羽毛",
+	FANG: "獠牙",
+	ARROW: "箭",
 }
 
 const ITEM_SHORT_NAMES := {
@@ -156,6 +323,16 @@ const ITEM_SHORT_NAMES := {
 	RAW_FISH: "鱼",
 	RAW_SHRIMP: "虾",
 	CRAB_MEAT: "蟹肉",
+	IRON_INGOT: "铁",
+	SILVER_INGOT: "银",
+	GOLD_INGOT: "金",
+	CRYSTAL: "水晶",
+	CARBON_ROD: "碳",
+	ALLOY_INGOT: "合金",
+	HIDE: "皮",
+	FEATHER: "羽",
+	FANG: "牙",
+	ARROW: "箭",
 }
 
 # 非方块物品在掉落物/手持模型上使用的平涂颜色。
@@ -175,19 +352,46 @@ const ITEM_COLORS := {
 	RAW_FISH: Color(0.58, 0.72, 0.82),
 	RAW_SHRIMP: Color(0.94, 0.62, 0.52),
 	CRAB_MEAT: Color(0.90, 0.45, 0.38),
+	IRON_INGOT: Color(0.72, 0.73, 0.76),
+	SILVER_INGOT: Color(0.88, 0.90, 0.93),
+	GOLD_INGOT: Color(0.93, 0.78, 0.28),
+	CRYSTAL: Color(0.60, 0.90, 0.96),
+	CARBON_ROD: Color(0.26, 0.26, 0.29),
+	ALLOY_INGOT: Color(0.56, 0.62, 0.72),
+	HIDE: Color(0.62, 0.42, 0.26),
+	FEATHER: Color(0.94, 0.94, 0.90),
+	FANG: Color(0.92, 0.90, 0.82),
+	ARROW: Color(0.66, 0.50, 0.30),
 }
 
-# 工具微缩图/3D 预览用的按材质着色（木/石/青铜）。
+# 工具微缩图/3D 预览用的按材质着色（木/石/青铜/铁/银/金）。
 const TOOL_COLORS := {
 	WOOD_PICKAXE: Color(0.62, 0.45, 0.25),
 	WOOD_AXE: Color(0.62, 0.45, 0.25),
 	WOOD_SHOVEL: Color(0.62, 0.45, 0.25),
+	WOOD_SICKLE: Color(0.62, 0.45, 0.25),
 	STONE_PICKAXE: Color(0.58, 0.58, 0.61),
 	STONE_AXE: Color(0.58, 0.58, 0.61),
 	STONE_SHOVEL: Color(0.58, 0.58, 0.61),
+	STONE_SICKLE: Color(0.58, 0.58, 0.61),
 	BRONZE_PICKAXE: Color(0.72, 0.52, 0.30),
 	BRONZE_AXE: Color(0.72, 0.52, 0.30),
 	BRONZE_SHOVEL: Color(0.72, 0.52, 0.30),
+	BRONZE_SICKLE: Color(0.72, 0.52, 0.30),
+	IRON_PICKAXE: Color(0.62, 0.64, 0.68),
+	IRON_AXE: Color(0.62, 0.64, 0.68),
+	IRON_SHOVEL: Color(0.62, 0.64, 0.68),
+	IRON_SICKLE: Color(0.62, 0.64, 0.68),
+	SILVER_PICKAXE: Color(0.88, 0.90, 0.94),
+	SILVER_AXE: Color(0.88, 0.90, 0.94),
+	SILVER_SHOVEL: Color(0.88, 0.90, 0.94),
+	GOLD_PICKAXE: Color(0.93, 0.78, 0.28),
+	GOLD_AXE: Color(0.93, 0.78, 0.28),
+	GOLD_SHOVEL: Color(0.93, 0.78, 0.28),
+	WOOD_FISHING_ROD: Color(0.70, 0.55, 0.32),
+	IRON_FISHING_ROD: Color(0.72, 0.73, 0.76),
+	WOOD_BOW: Color(0.66, 0.48, 0.26),
+	IRON_BOW: Color(0.70, 0.72, 0.76),
 }
 
 # 悬停简介：特殊条目查表，未列出的按分类生成通用说明。
@@ -198,11 +402,13 @@ const ITEM_DESCRIPTIONS := {
 	BlockTypes.Block.BREWING: "村庄里的酿灶台。",
 	BlockTypes.Block.CHEST: "可存放 36 组物品，右键打开。",
 	BlockTypes.Block.FARMLAND: "村庄耕地，种着小麦。",
-	BlockTypes.Block.WHEAT_CROP: "成熟后可收获小麦，三份小麦能合成面包。",
-	BlockTypes.Block.COPPER_ORE: "石层中的有色金属矿，两份矿石可炼成铜锭。",
-	BlockTypes.Block.TIN_ORE: "更深岩层里的有色金属矿，两份矿石可炼成锡锭。",
+	BlockTypes.Block.WHEAT_CROP: "成熟后用镰刀收割，一份能收三束小麦。",
+	BlockTypes.Block.COPPER_ORE: "石层中的有色金属矿，任意镐即可开采，炼成铜锭。",
+	BlockTypes.Block.TIN_ORE: "更深岩层里的有色金属矿，需要石镐以上才能采下。",
+	BlockTypes.Block.IRON_ORE: "地层深处的铁矿，青铜镐以上才能采下，炼成铁锭。",
+	BlockTypes.Block.GOLD_ORE: "最深处偶见的金矿，铁镐才能采下，炼成金锭。",
 	BlockTypes.Block.SMELTER: "右键打开冶炼炉，把矿石炼成金属锭。",
-	BlockTypes.Block.WATERWEED: "大河底部的水草，水下小鱼的藏身处。",
+	BlockTypes.Block.WATERWEED: "大河底部的水草，用镰刀割得更多。",
 	BlockTypes.Block.ALGAE: "深水里成片的藻类，可徒手采集。",
 	BlockTypes.Block.DUCKWEED: "池塘水面上的细小浮萍。",
 	BlockTypes.Block.LILY_PAD: "池塘水面的荷叶，青蛙喜欢蹲在上面。",
@@ -212,6 +418,20 @@ const ITEM_DESCRIPTIONS := {
 	CRAB_MEAT: "河底的蟹肉，鲜美的一餐。",
 	EMERALD: "村民交易的货币。",
 	TOTEM: "稀有材料，可向村民兑换。",
+	IRON_INGOT: "铁矿石冶炼而成，4 级工具的主要材料。",
+	SILVER_INGOT: "只能向村民换取的贵金属，做耐久最高的银工具。",
+	GOLD_INGOT: "金矿石冶炼而成，金工具最快但最容易用坏。",
+	CRYSTAL: "交易得来的晶体，银工具的必需材料。",
+	CARBON_ROD: "交易得来的碳棒，与铁、银一起炼成合金锭。",
+	ALLOY_INGOT: "铁 + 碳 + 银炼成的合金，金工具的关键材料。",
+	HIDE: "中大型猎物身上剥下的兽皮，可售出好价钱。",
+	FEATHER: "禽类掉落的羽毛，是制作箭的必备材料。",
+	FANG: "凶猛猎物的獠牙，是勇敢者的收藏。",
+	ARROW: "弓的弹药，四支一束，狩猎时会被消耗。",
+	WOOD_FISHING_ROD: "手持后右键抛竿，等浮标下沉时再按右键收竿。",
+	IRON_FISHING_ROD: "更耐用的鱼竿，咬钩时机的容错更宽松。",
+	WOOD_BOW: "按住右键蓄力，松手射出箭，蓄得越满伤害越高。",
+	IRON_BOW: "射得更快也更耐用的弓，狩猎大型猎物更从容。",
 }
 
 # 村民交易配方：cost 为绿宝石数量，result/count 为产出。
@@ -225,6 +445,32 @@ const TRADES := [
 	{"cost": 2, "result": RAW_PORK, "count": 2},
 	{"cost": 3, "result": BREAD, "count": 2},
 	{"cost": 2, "result": WHEAT, "count": 4},
+	{"cost": 2, "result": FEATHER, "count": 5},
+	{"cost": 3, "result": ARROW, "count": 8},
+	{"cost": 3, "result": CARBON_ROD, "count": 2},
+	{"cost": 6, "result": CRYSTAL, "count": 1},
+	{"cost": 10, "result": SILVER_INGOT, "count": 1},
+]
+
+## 珍稀材料的售价覆盖（按件计价，未列出的走分类默认价）。
+const PRICE_OVERRIDE := {
+	GOLD_INGOT: 12,
+	SILVER_INGOT: 8,
+	ALLOY_INGOT: 14,
+	CRYSTAL: 10,
+	EMERALD: 0,
+	TOTEM: 9,
+	HIDE: 5,
+	FANG: 6,
+}
+
+## 垂钓可获得的战利品（权重抽取）：几乎都是鱼虾，偶尔混进水草。
+const FISHING_LOOT := [
+	{"item": RAW_FISH, "count": 2, "weight": 46},
+	{"item": RAW_SHRIMP, "count": 2, "weight": 26},
+	{"item": CRAB_MEAT, "count": 1, "weight": 16},
+	{"item": BlockTypes.Block.WATERWEED, "count": 1, "weight": 8},
+	{"item": CRYSTAL, "count": 1, "weight": 4},
 ]
 
 
@@ -236,6 +482,7 @@ static func tool_type(id: int) -> String:
 	return TOOL_TYPE.get(id, "")
 
 
+## 工具等级（1 木 / 2 石 / 3 青铜 / 4 铁）；非工具返回 -1。
 static func tool_tier(id: int) -> int:
 	return TOOL_TIER.get(id, -1)
 
@@ -245,10 +492,44 @@ static func tool_durability(id: int) -> int:
 
 
 static func tool_speed(id: int) -> float:
+	if TOOL_SPEED_BONUS.has(id):
+		return float(TOOL_SPEED_BONUS[id])
 	var tier := tool_tier(id)
-	if tier < 0 or tier >= TOOL_SPEED.size():
+	if tier <= 0:
 		return 1.0
-	return TOOL_SPEED[tier]
+	return float(TIER_SPEED.get(tier, 1.0))
+
+
+## 等级的中文称法（1~4 级）；越界返回空串。
+static func tier_name(tier: int) -> String:
+	return String(TIER_NAMES.get(tier, ""))
+
+
+## 狩猎/采集工具的分类名（镐/斧/锹/镰刀/鱼竿/弓）。
+static func tool_type_name(id: int) -> String:
+	match tool_type(id):
+		"pickaxe":
+			return "镐"
+		"axe":
+			return "斧头"
+		"shovel":
+			return "铁锹"
+		"sickle":
+			return "镰刀"
+		"rod":
+			return "鱼竿"
+		"bow":
+			return "弓"
+		_:
+			return "工具"
+
+
+static func is_bow(id: int) -> bool:
+	return tool_type(id) == "bow"
+
+
+static func is_rod(id: int) -> bool:
+	return tool_type(id) == "rod"
 
 
 static func item_name(id: int) -> String:
@@ -276,7 +557,7 @@ static func food_value(id: int) -> int:
 	return FOOD.get(id, 0)
 
 
-## 非方块、非工具的普通物品（肉/骨/线），用于掉落物与手持模型着色。
+## 非方块、非工具的普通物品（肉/骨/线/锭/材料），用于掉落物与手持模型着色。
 static func is_plain_item(id: int) -> bool:
 	return ITEM_COLORS.has(id)
 
@@ -299,8 +580,11 @@ static func is_sellable(id: int) -> bool:
 	return id > 0
 
 
-## 单件售价（绿宝石）：按分类定价——材料 3、工具 4、食物 2、方块 1。
+## 单件售价（绿宝石）：珍稀材料查覆盖表，其余按分类定价
+## ——材料 3、工具 4、食物 2、方块 1。
 static func sell_price(id: int) -> int:
+	if PRICE_OVERRIDE.has(id):
+		return int(PRICE_OVERRIDE[id])
 	match category(id):
 		1:
 			return 4
@@ -328,7 +612,15 @@ static func item_description(id: int) -> String:
 	if ITEM_DESCRIPTIONS.has(id):
 		return ITEM_DESCRIPTIONS.get(id, "")
 	if is_tool_item(id):
-		return "采集工具：速度 ×%d，耐久 %d。" % [int(tool_speed(id)), tool_durability(id)]
+		if is_bow(id):
+			return "%s：按住右键蓄力后松手射箭，伤害随蓄力提升，耐久 %d。" % [
+				item_name(id), tool_durability(id)
+			]
+		if is_rod(id):
+			return "%s：右键抛竿垂钓，耐久 %d。" % [item_name(id), tool_durability(id)]
+		return "%d 级采集工具：速度 ×%d，耐久 %d。" % [
+			tool_tier(id), int(tool_speed(id)), tool_durability(id)
+		]
 	if is_food(id):
 		return "食用可恢复 %d 点饥饿。" % food_value(id)
 	if is_plain_item(id):
@@ -337,5 +629,17 @@ static func item_description(id: int) -> String:
 
 
 static func is_placeable(id: int) -> bool:
-	return id >= BlockTypes.Block.GRASS and id <= BlockTypes.Block.SNOW
+	return BlockTypes.TILES.has(id) and id != BlockTypes.Block.AIR
 
+
+## 垂钓战利品：按权重抽一件（返回 {item, count}）。
+static func roll_fishing_loot() -> Dictionary:
+	var total := 0
+	for entry: Dictionary in FISHING_LOOT:
+		total += int(entry["weight"])
+	var r := randi() % maxi(total, 1)
+	for entry: Dictionary in FISHING_LOOT:
+		r -= int(entry["weight"])
+		if r < 0:
+			return {"item": int(entry["item"]), "count": int(entry["count"])}
+	return {"item": RAW_FISH, "count": 1}

@@ -29,6 +29,7 @@ func _ready() -> void:
 	Events.smelt_done.connect(_on_smelt_done)
 	Events.player_died.connect(_on_player_died)
 	Events.region_entered.connect(_on_region_entered)
+	Events.mob_grown.connect(_on_mob_grown)
 	_reevaluate()
 
 
@@ -149,6 +150,7 @@ func _on_block_placed(block_id: int, _cell: Vector3i) -> void:
 
 func _on_mob_killed(mob_type: int) -> void:
 	notify("killed_%d" % mob_type)
+	notify("killed_any")
 	if not Mob.is_passive(mob_type):
 		notify("killed_hostile")
 
@@ -168,6 +170,14 @@ func _on_player_died() -> void:
 
 func _on_region_entered(region_id: int) -> void:
 	notify("regions_%d" % region_id)
+
+
+## 亲眼看到生物长大一个阶段（「小小饲养员」类成就）。
+func _on_mob_grown(mob_type: int, stage: int) -> void:
+	notify("grown_%d" % mob_type)
+	notify("grown_any")
+	if stage >= 1:
+		notify("grown_stage_%d" % stage)
 
 
 func _save() -> void:

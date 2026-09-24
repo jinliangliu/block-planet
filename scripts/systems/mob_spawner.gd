@@ -107,8 +107,11 @@ func _spawn_one(mob_type: int) -> void:
 	var pos := _find_spawn_position(Mob.is_passive(mob_type))
 	if pos == INVALID_POSITION:
 		return
+	# 空中生物（蜻蜓、蝴蝶、海雕）出生时抬高一截，免得贴着地面飘。
+	if Mob.habitat_of(mob_type) == Mob.Habitat.AIR and mob_type != Mob.MobType.DRAGONFLY:
+		pos.y += 1.4
 	var mob := Mob.new()
-	mob.setup(mob_type, _player, _day_night)
+	mob.setup(mob_type, _player, _day_night, Mob.pick_spawn_stage(mob_type))
 	add_child(mob)
 	mob.global_position = pos
 	_mobs.append(mob)
@@ -253,7 +256,7 @@ func _find_pond_shore(wx: int, wz: int) -> Vector3:
 
 func _place_water_mob(mob_type: Mob.MobType, pos: Vector3) -> void:
 	var mob := Mob.new()
-	mob.setup(mob_type, _player, _day_night)
+	mob.setup(mob_type, _player, _day_night, Mob.pick_spawn_stage(mob_type))
 	add_child(mob)
 	mob.global_position = pos
 	_water_mobs.append(mob)

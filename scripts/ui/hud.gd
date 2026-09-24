@@ -52,6 +52,7 @@ var _smelt_list: VBoxContainer
 var _fly_button: Button
 var _descend_button: Button
 var _break_bar: ProgressBar
+var _charge_bar: ProgressBar
 var _look_touch := -1
 
 
@@ -65,6 +66,8 @@ func setup(player: Player) -> void:
 	GameState.mode_changed.connect(_on_mode_changed)
 	Events.player_mode_changed.connect(_on_player_flying_changed)
 	Events.request_trade.connect(set_trade_open.bind(true))
+	# 通用提示通道：狩猎拦截、矿石等级不足、垂钓结果等都以 Toast 呈现。
+	Events.notice.connect(_on_notice)
 	_build()
 	_on_mode_changed(GameState.mode)
 
@@ -73,6 +76,7 @@ func set_day_night(day_night: DayNightCycle) -> void:
 	_day_night = day_night
 	if day_night:
 		day_night.time_changed.connect(_on_time_changed)
+		day_night.day_changed.connect(_on_day_changed)
 		_refresh_time()
 
 
@@ -164,6 +168,12 @@ func _process(_delta: float) -> void:
 	_break_bar.visible = breaking
 	if breaking:
 		_break_bar.value = _player.break_ratio()
+	# 弓蓄力条：仅在拉弓时出现，与破坏进度条错开一行。
+	if _charge_bar != null:
+		var charging := _player.is_charging_bow()
+		_charge_bar.visible = charging
+		if charging:
+			_charge_bar.value = _player.bow_charge_ratio()
 
 
 ## 屏幕中心准星 + 破坏进度条：破坏需按住左键，准星与进度提供必要反馈。
@@ -206,6 +216,20 @@ func _build_crosshair(root: Control) -> void:
 	_break_bar.offset_top = 18.0
 	_break_bar.offset_bottom = 25.0
 	overlay.add_child(_break_bar)
+
+	_charge_bar = ProgressBar.new()
+	_charge_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_charge_bar.show_percentage = false
+	_charge_bar.max_value = 1.0
+	_charge_bar.custom_minimum_size = Vector2(64.0, 7.0)
+	_charge_bar.visible = false
+	_charge_bar.modulate = Color(0.65, 0.92, 0.60)
+	_charge_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_charge_bar.offset_left = -32.0
+	_charge_bar.offset_right = 32.0
+	_charge_bar.offset_top = -32.0
+	_charge_bar.offset_bottom = -25.0
+	overlay.add_child(_charge_bar)
 
 
 func _toggle_game_mode() -> void:
@@ -539,8 +563,9 @@ func _refresh_hotbar() -> void:
 				b.set_slot({"item": item, "count": _player.inventory.get_count(slot)})
 
 
-## 合成台面板：储物箱同款淡色设计。左栏成品栏（3 格一行），右栏自上而下
+## 合成台面板：储物箱同款淡色设计。左栏成品栏（6 格一行），右栏自上而下
 ## 合成路径图：顶端成品、下层材料格（不足红框），悬停弹出预览简介，
+## 「开始合成」按钮固定在窗口右下角，
 ## 面板红叉按钮：背景与面板同色（无色差），悬停轻微加深提示可点。
 func _style_panel_close(button: Button, panel_bg: Color) -> void:
 	var normal := StyleBoxFlat.new()
@@ -574,7 +599,8 @@ func _build_craft_panel(root: Control) -> void:
 	_craft_overlay.add_child(center)
 
 	var wrapper := Control.new()
-	wrapper.custom_minimum_size = Vector2(660, 440)
+	# 6 列成品栏（6×64 + 5×6 间距 ≈ 414，再加滚动条）+ 右栏路径图 320。
+	wrapper.custom_minimum_size = Vector2(820, 460)
 	center.add_child(wrapper)
 
 	var panel := PanelContainer.new()
@@ -612,11 +638,17 @@ func _build_craft_panel(root: Control) -> void:
 	left_title.add_theme_color_override("font_color", Color(0.42, 0.32, 0.18))
 	left.add_child(left_title)
 
+	# 成品栏用滚动容器：M8 起配方增至 30 条，矮面板放不下全部格子。
+	var recipe_scroll := ScrollContainer.new()
+	recipe_scroll.custom_minimum_size = Vector2(432.0, 336.0)
+	recipe_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left.add_child(recipe_scroll)
+
 	_craft_result_grid = GridContainer.new()
-	_craft_result_grid.columns = 3
+	_craft_result_grid.columns = 6
 	_craft_result_grid.add_theme_constant_override("h_separation", 6)
 	_craft_result_grid.add_theme_constant_override("v_separation", 6)
-	left.add_child(_craft_result_grid)
+	recipe_scroll.add_child(_craft_result_grid)
 
 	_recipe_group = ButtonGroup.new()
 	for i in range(ItemTypes.RECIPES.size()):
@@ -661,8 +693,7 @@ func _build_craft_panel(root: Control) -> void:
 
 	_craft_craft_button = Button.new()
 	_craft_craft_button.text = "开始合成"
-	_craft_craft_button.custom_minimum_size = Vector2(0, 46)
-	_craft_craft_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_craft_craft_button.custom_minimum_size = Vector2(128, 46)
 	_craft_craft_button.focus_mode = Control.FOCUS_NONE
 	_craft_craft_button.pressed.connect(_on_craft_pressed)
 	var btn_style := StyleBoxFlat.new()
@@ -678,7 +709,16 @@ func _build_craft_panel(root: Control) -> void:
 	_craft_craft_button.add_theme_stylebox_override("disabled", btn_disabled)
 	_craft_craft_button.add_theme_color_override("font_color", Color(0.30, 0.20, 0.08))
 	_craft_craft_button.add_theme_color_override("font_disabled_color", Color(0.52, 0.48, 0.42))
-	right.add_child(_craft_craft_button)
+	# 按钮锚定窗口右下角（不随右栏内容排布）。
+	wrapper.add_child(_craft_craft_button)
+	_craft_craft_button.anchor_left = 1.0
+	_craft_craft_button.anchor_right = 1.0
+	_craft_craft_button.anchor_top = 1.0
+	_craft_craft_button.anchor_bottom = 1.0
+	_craft_craft_button.offset_left = -148.0
+	_craft_craft_button.offset_right = -20.0
+	_craft_craft_button.offset_top = -62.0
+	_craft_craft_button.offset_bottom = -16.0
 
 	var close := Button.new()
 	close.text = "✕"
@@ -1212,7 +1252,9 @@ func _apply_tip_mesh(item_id: int) -> void:
 			_add_tip_part(Vector3.ONE, base, Vector3.ZERO)
 	elif ItemTypes.is_tool_item(item_id):
 		_build_tip_tool(item_id, base)
-	elif item_id in [ItemTypes.COPPER_INGOT, ItemTypes.TIN_INGOT, ItemTypes.BRONZE_INGOT]:
+	elif item_id in [ItemTypes.COPPER_INGOT, ItemTypes.TIN_INGOT, ItemTypes.BRONZE_INGOT,
+			ItemTypes.IRON_INGOT, ItemTypes.SILVER_INGOT, ItemTypes.GOLD_INGOT,
+			ItemTypes.ALLOY_INGOT, ItemTypes.CARBON_ROD, ItemTypes.CRYSTAL]:
 		var prism := PrismMesh.new()
 		prism.size = Vector3(1.0, 0.45, 0.55)
 		prism.material = _tip_material(base)
@@ -1266,6 +1308,22 @@ func _build_tip_tool(item_id: int, base: Color) -> void:
 			_add_tip_part(Vector3(0.42, 0.34, 0.14), base, Vector3(0.3, 0.42, 0.0))
 		"shovel":
 			_add_tip_part(Vector3(0.3, 0.4, 0.1), base, Vector3(0.18, 0.52, 0.0))
+		"sickle":
+			# 镰刀：横向弯月刀身 + 短柄。
+			var blade := _add_tip_part(Vector3(0.62, 0.09, 0.09), base, Vector3(0.34, 0.42, 0.0))
+			blade.rotation_degrees = Vector3(0.0, 0.0, -28.0)
+			var tip := _add_tip_part(Vector3(0.26, 0.08, 0.08), base.darkened(0.15), Vector3(0.62, 0.28, 0.0))
+			tip.rotation_degrees = Vector3(0.0, 0.0, -62.0)
+		"rod":
+			# 鱼竿：细长竿身 + 绕线轮 + 垂下的钓线。
+			_add_tip_part(Vector3(0.06, 1.25, 0.06), wood, Vector3(0.02, 0.12, 0.0)).rotation_degrees = Vector3(0.0, 0.0, -14.0)
+			_add_tip_part(Vector3(0.16, 0.16, 0.10), base, Vector3(-0.1, 0.0, 0.0))
+			_add_tip_part(Vector3(0.02, 0.34, 0.02), Color(0.92, 0.92, 0.88), Vector3(0.16, -0.5, 0.0))
+		"bow":
+			# 弓：竖起的弓臂 + 弓弦。
+			var limb := _add_tip_part(Vector3(0.09, 1.15, 0.09), base, Vector3(0.06, 0.06, 0.0))
+			limb.rotation_degrees = Vector3(0.0, 0.0, 6.0)
+			_add_tip_part(Vector3(0.02, 1.12, 0.02), Color(0.92, 0.92, 0.88), Vector3(0.18, 0.06, 0.0))
 
 
 ## 程序化栅格纹理：底色 + 每隔 16 像素的深色格线（64×64，最近邻采样）。
@@ -1685,13 +1743,26 @@ func _refresh_stats() -> void:
 	_refresh_time()
 
 
+## 通用提示：直接转成顶部 Toast。
+func _on_notice(text: String) -> void:
+	_show_toast(text)
+
+
+func _on_day_changed(_day: int) -> void:
+	_refresh_time()
+
+
 func _refresh_time() -> void:
 	if _time_label == null:
 		return
 	if _day_night == null:
 		_time_label.text = "白天 06:00"
 	else:
-		_time_label.text = ("白天 " if _day_night.is_day() else "夜晚 ") + _day_night.get_clock()
+		_time_label.text = "第 %d 天 %s%s" % [
+			_day_night.day_count(),
+			"白天 " if _day_night.is_day() else "夜晚 ",
+			_day_night.get_clock(),
+		]
 
 
 func _on_health_changed(_value: int) -> void:

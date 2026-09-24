@@ -79,6 +79,15 @@ static func quiz_bank() -> Array[Dictionary]:
 		{"q": "哪种工具最适合砍树？", "options": ["斧头", "铲子", "锄头"], "answer": 0},
 		{"q": "沙子放进冶炼炉可以烧成什么？", "options": ["玻璃", "铁锭", "面包"], "answer": 0},
 		{"q": "游戏里按哪个键打开 3D 地球？", "options": ["M 键", "B 键", "G 键"], "answer": 0},
+		{"q": "哪种动物是国家一级保护动物，最爱吃竹子？", "options": ["大熊猫", "绵羊", "奶牛"], "answer": 0},
+		{"q": "朱鹮是哪种珍稀鸟类？", "options": ["中国特有珍禽", "南极企鹅", "沙漠猛禽"], "answer": 0},
+		{"q": "小蝌蚪长大后会变成什么？", "options": ["青蛙", "蜻蜓", "小鱼"], "answer": 0},
+		{"q": "毛毛虫结茧之后会变成什么？", "options": ["蝴蝶", "蜜蜂", "蜘蛛"], "answer": 0},
+		{"q": "采集锡矿石至少需要哪一级的镐？", "options": ["石镐", "木镐", "徒手"], "answer": 0},
+		{"q": "采集铁矿石需要哪一级的镐？", "options": ["青铜镐", "木镐", "石镐"], "answer": 0},
+		{"q": "狩猎奶牛用哪种工具更有效？", "options": ["斧头", "鱼竿", "镰刀"], "answer": 0},
+		{"q": "收割小麦用哪种工具收成更多？", "options": ["镰刀", "镐子", "铁锹"], "answer": 0},
+		{"q": "弓射出的箭要消耗什么？", "options": ["箭", "绿宝石", "面包"], "answer": 0},
 	]
 
 
@@ -223,5 +232,75 @@ static func _build() -> void:
 			"title": "新手毕业", "desc": "完成并领取全部 8 个新手任务。",
 			"goal": {"type": "quests_done", "count": 8},
 			"reward": {"item": 205, "count": 1},
+		},
+		# 工具分级（M8.1）
+		{
+			"id": "a_tool_iron", "category": Category.SURVIVAL, "prerequisite": "",
+			"title": "钢铁时代", "desc": "合成一把铁镐——它连铁矿石都能挖开。",
+			"goal": {"type": "count", "key": "crafted_%d" % ItemTypes.IRON_PICKAXE, "count": 1},
+			"reward": {"item": 216, "count": 1},
+		},
+		{
+			"id": "a_tool_sickle", "category": Category.SURVIVAL, "prerequisite": "",
+			"title": "收割好手", "desc": "合成一把镰刀，收小麦不再费劲。",
+			"goal": {"type": "count", "key": "crafted_%d" % ItemTypes.WOOD_SICKLE, "count": 1},
+			"reward": {"item": 207, "count": 4},
+		},
+		{
+			"id": "a_tool_bow", "category": Category.CHALLENGE, "prerequisite": "",
+			"title": "小小弓箭手", "desc": "合成一把木弓，按住右键蓄力再松手射箭。",
+			"goal": {"type": "count", "key": "crafted_%d" % ItemTypes.WOOD_BOW, "count": 1},
+			"reward": {"item": 224, "count": 8},
+		},
+		{
+			"id": "a_tool_rod", "category": Category.SURVIVAL, "prerequisite": "",
+			"title": "垂钓入门", "desc": "合成一根木鱼竿，去河边钓一条鱼。",
+			"goal": {"type": "count", "key": "crafted_%d" % ItemTypes.WOOD_FISHING_ROD, "count": 1},
+			"reward": {"item": 203, "count": 2},
+		},
+		# 狩猎系统（M8.3）
+		{
+			"id": "a_hunt_cow", "category": Category.SURVIVAL, "prerequisite": "",
+			"title": "牧场主", "desc": "用斧头猎取 3 头牛（记得留几头继续养）。",
+			"goal": {"type": "count", "key": "killed_%d" % Mob.MobType.COW, "count": 3},
+			"reward": {"item": 221, "count": 2},
+		},
+		{
+			"id": "a_hunt_fish", "category": Category.SURVIVAL, "prerequisite": "",
+			"title": "渔夫", "desc": "捕获 5 条河鱼，无论是钓的还是抓的。",
+			"goal": {"type": "count", "key": "killed_%d" % Mob.MobType.FISH, "count": 5},
+			"reward": {"item": 213, "count": 3},
+		},
+		{
+			"id": "a_hunt_fang", "category": Category.CHALLENGE, "prerequisite": "",
+			"title": "勇者无畏", "desc": "击败 1 只狼，取下它的獠牙。",
+			"goal": {"type": "count", "key": "killed_%d" % Mob.MobType.WOLF, "count": 1},
+			"reward": {"item": 223, "count": 1},
+		},
+		# 生物生长（M8.2）
+		{
+			"id": "a_grow_watch", "category": Category.EXPLORE, "prerequisite": "",
+			"title": "小小观察员", "desc": "看着一只小动物长大 3 次（每过一个游戏日成长一阶段）。",
+			"goal": {"type": "count", "key": "grown_any", "count": 3},
+			"reward": {"item": 207, "count": 3},
+		},
+		{
+			"id": "a_grow_chicken", "category": Category.EXPLORE, "prerequisite": "",
+			"title": "孵化见证者", "desc": "亲眼看到鸡蛋孵出小鸡。",
+			"goal": {"type": "count", "key": "grown_%d" % Mob.MobType.CHICKEN, "count": 1},
+			"reward": {"item": 208, "count": 2},
+		},
+		{
+			"id": "a_grow_frog", "category": Category.EXPLORE, "prerequisite": "",
+			"title": "池塘里的秘密", "desc": "观察蝌蚪变成青蛙的过程。",
+			"goal": {"type": "count", "key": "grown_%d" % Mob.MobType.FROG, "count": 1},
+			"reward": {"item": 209, "count": 2},
+		},
+		# 保护动物（M8.2 / M8.3）
+		{
+			"id": "a_protect_1", "category": Category.EXPLORE, "prerequisite": "",
+			"title": "动物守护者", "desc": "了解 3 种受保护的动物，并且没有伤害它们。",
+			"goal": {"type": "count", "key": "protected_blocked", "count": 3},
+			"reward": {"item": 204, "count": 3},
 		},
 	]

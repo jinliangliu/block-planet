@@ -309,7 +309,7 @@ func craft(recipe: Dictionary) -> bool:
 		return false
 	for ingredient in recipe["ingredients"]:
 		consume_item(ingredient, int(recipe["ingredients"][ingredient]))
-	add_item(recipe["result"], 1)
+	add_item(recipe["result"], ItemTypes.recipe_count(recipe))
 	return true
 
 

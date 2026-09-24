@@ -27,6 +27,8 @@ enum Block {
 	LILY_PAD = 21,
 	LOTUS = 22,
 	SNOW = 23,
+	IRON_ORE = 24,
+	GOLD_ORE = 25,
 }
 
 const NAMES := {
@@ -54,6 +56,8 @@ const NAMES := {
 	Block.LILY_PAD: "荷叶",
 	Block.LOTUS: "莲花",
 	Block.SNOW: "雪块",
+	Block.IRON_ORE: "铁矿石",
+	Block.GOLD_ORE: "金矿石",
 }
 
 const SOLID := {
@@ -81,6 +85,8 @@ const SOLID := {
 	Block.LILY_PAD: false,
 	Block.LOTUS: false,
 	Block.SNOW: true,
+	Block.IRON_ORE: true,
+	Block.GOLD_ORE: true,
 }
 
 const TRANSPARENT := {
@@ -108,6 +114,8 @@ const TRANSPARENT := {
 	Block.LILY_PAD: true,
 	Block.LOTUS: true,
 	Block.SNOW: false,
+	Block.IRON_ORE: false,
+	Block.GOLD_ORE: false,
 }
 
 # 每个方块的纹理瓦片：[顶面, 底面, 侧面]
@@ -135,6 +143,8 @@ const TILES := {
 	Block.LILY_PAD: Vector3i(22, 22, 22),
 	Block.LOTUS: Vector3i(23, 23, 23),
 	Block.SNOW: Vector3i(24, 24, 24),
+	Block.IRON_ORE: Vector3i(25, 25, 25),
+	Block.GOLD_ORE: Vector3i(26, 26, 26),
 }
 
 # 水生植物：生长在水中/水面的非固体装饰方块，徒手可采，可再放置。
@@ -183,6 +193,8 @@ const SHORT_NAMES := {
 	Block.LILY_PAD: "荷",
 	Block.LOTUS: "莲",
 	Block.SNOW: "雪",
+	Block.IRON_ORE: "铁",
+	Block.GOLD_ORE: "金",
 }
 
 # 可堆叠物品（方块/材料/食物）的每格上限。
@@ -212,9 +224,12 @@ const HARDNESS := {
 	Block.LILY_PAD: 0.1,
 	Block.LOTUS: 0.1,
 	Block.SNOW: 0.4,
+	Block.IRON_ORE: 4.5,
+	Block.GOLD_ORE: 5.0,
 }
 
 # 有效工具类型；空字符串表示徒手/任意工具即可。
+# 小麦与水草系改用镰刀：装备镰刀时破坏更快且收成更多。
 const EFFECTIVE_TOOL := {
 	Block.GRASS: "shovel",
 	Block.DIRT: "shovel",
@@ -228,16 +243,35 @@ const EFFECTIVE_TOOL := {
 	Block.BREWING: "",
 	Block.CHEST: "axe",
 	Block.FARMLAND: "shovel",
-	Block.WHEAT_CROP: "",
+	Block.WHEAT_CROP: "sickle",
 	Block.COPPER_ORE: "pickaxe",
 	Block.TIN_ORE: "pickaxe",
+	Block.IRON_ORE: "pickaxe",
+	Block.GOLD_ORE: "pickaxe",
 	Block.SMELTER: "pickaxe",
-	Block.WATERWEED: "",
-	Block.ALGAE: "",
-	Block.DUCKWEED: "",
+	Block.WATERWEED: "sickle",
+	Block.ALGAE: "sickle",
+	Block.DUCKWEED: "sickle",
 	Block.LILY_PAD: "",
 	Block.LOTUS: "",
 	Block.SNOW: "shovel",
+}
+
+# 采集该方块所需的最低工具等级（1 木 / 2 石 / 3 青铜 / 4 铁）。
+# 未列出的方块无等级要求：徒手也能挖，只是慢且部分不给掉落。
+const MIN_TIER := {
+	Block.COPPER_ORE: 1,
+	Block.TIN_ORE: 2,
+	Block.IRON_ORE: 3,
+	Block.GOLD_ORE: 4,
+}
+
+# 装备镰刀时收成翻倍的方块（一次收 3 束小麦、2 份水草）。
+const SICKLE_BONUS := {
+	Block.WHEAT_CROP: 2,
+	Block.WATERWEED: 1,
+	Block.ALGAE: 1,
+	Block.DUCKWEED: 1,
 }
 
 
@@ -279,7 +313,29 @@ static func drop_for(id: int, tool_type: String) -> int:
 		_:
 			return id
 
-
 ## 一次破坏的掉落数量（成熟小麦掉 2 个，其余 1 个）。
-static func drop_count_for(id: int) -> int:
-	return 2 if id == Block.WHEAT_CROP else 1
+## 装备镰刀时对 SICKLE_BONUS 列出的作物额外多掉，让镰刀有实用价值。
+static func drop_count_for(id: int, tool: String = "") -> int:
+	var base := 2 if id == Block.WHEAT_CROP else 1
+	if tool == "sickle" and SICKLE_BONUS.has(id):
+		return base + int(SICKLE_BONUS[id])
+	return base
+
+
+## 采集该方块所需的最低工具等级；0 表示无等级要求。
+static func required_tier(id: int) -> int:
+	return int(MIN_TIER.get(id, 0))
+
+
+## 给定工具等级能否采下该方块：无等级要求恒为真，否则等级须达标。
+static func tier_allows(id: int, tool_tier: int) -> bool:
+	var required := required_tier(id)
+	return required <= 0 or tool_tier >= required
+
+
+## 采集该方块所需的工具中文名（用于提示），如「石镐」；无要求返回空串。
+static func tier_hint(id: int) -> String:
+	var required := required_tier(id)
+	if required <= 0:
+		return ""
+	return "%s镐" % ItemTypes.tier_name(required)

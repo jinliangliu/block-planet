@@ -212,7 +212,7 @@ const REGIONS := [
 		"low_line": 25,
 		"tree_density": 0.03,
 		"sky": Color(0.92, 0.97, 1.0),
-		"passive": {"COW": 3, "SHEEP": 2, "CHICKEN": 3},
+		"passive": {"COW": 3, "SHEEP": 2, "CHICKEN": 3, "BUTTERFLY": 3},
 		"hostile": {"ZOMBIE": 4, "SPIDER": 3},
 	},
 	{
@@ -234,7 +234,7 @@ const REGIONS := [
 		"low_line": 24,
 		"tree_density": 0.035,
 		"sky": Color(0.94, 0.98, 1.0),
-		"passive": {"COW": 3, "SHEEP": 3, "CHICKEN": 2, "PIG": 2},
+		"passive": {"COW": 3, "SHEEP": 3, "CHICKEN": 2, "PIG": 2, "BUTTERFLY": 3},
 		"hostile": {"ZOMBIE": 4, "SKELETON": 2, "WOLF": 2},
 	},
 	{
@@ -256,7 +256,7 @@ const REGIONS := [
 		"low_line": 26,
 		"tree_density": 0.04,
 		"sky": Color(1.0, 0.97, 0.92),
-		"passive": {"CHICKEN": 4, "PIG": 3, "COW": 2},
+		"passive": {"CHICKEN": 4, "PIG": 3, "COW": 2, "BUTTERFLY": 3},
 		"hostile": {"SPIDER": 4, "ZOMBIE": 3},
 	},
 	{
@@ -278,7 +278,7 @@ const REGIONS := [
 		"low_line": 100,
 		"tree_density": 0.0,
 		"sky": Color(0.88, 0.94, 1.0),
-		"passive": {},
+		"passive": {"POLAR_BEAR": 3},
 		"hostile": {},
 	},
 	{
@@ -300,7 +300,8 @@ const REGIONS := [
 		"low_line": 22,
 		"tree_density": 0.02,
 		"sky": Color(1.0, 1.0, 1.0),
-		"passive": {"COW": 4, "SHEEP": 3, "CHICKEN": 2, "PIG": 2},
+		"passive": {"COW": 4, "SHEEP": 3, "CHICKEN": 2, "PIG": 2, "BUTTERFLY": 3,
+			"PANDA": 1, "GOLDEN_MONKEY": 1, "CRESTED_IBIS": 1},
 		"hostile": {"ZOMBIE": 4, "SKELETON": 3, "SPIDER": 2, "WOLF": 1},
 	},
 	{
@@ -322,7 +323,7 @@ const REGIONS := [
 		"low_line": 22,
 		"tree_density": 0.035,
 		"sky": Color(0.96, 0.98, 1.0),
-		"passive": {"COW": 4, "SHEEP": 4, "CHICKEN": 2},
+		"passive": {"COW": 4, "SHEEP": 4, "CHICKEN": 2, "BUTTERFLY": 3},
 		"hostile": {"ZOMBIE": 3, "WOLF": 4, "SKELETON": 3},
 	},
 	{
@@ -344,7 +345,7 @@ const REGIONS := [
 		"low_line": 32,
 		"tree_density": 0.012,
 		"sky": Color(1.0, 0.95, 0.86),
-		"passive": {"COW": 3, "SHEEP": 4, "CHICKEN": 2, "PIG": 1},
+		"passive": {"COW": 3, "SHEEP": 4, "CHICKEN": 2, "PIG": 1, "BUTTERFLY": 2},
 		"hostile": {"SPIDER": 4, "ZOMBIE": 3, "SKELETON": 3},
 	},
 	{
@@ -366,7 +367,7 @@ const REGIONS := [
 		"low_line": 22,
 		"tree_density": 0.028,
 		"sky": Color(1.0, 1.0, 1.0),
-		"passive": {"COW": 4, "PIG": 3, "SHEEP": 3, "CHICKEN": 2},
+		"passive": {"COW": 4, "PIG": 3, "SHEEP": 3, "CHICKEN": 2, "BUTTERFLY": 3, "BALD_EAGLE": 2},
 		"hostile": {"ZOMBIE": 4, "SKELETON": 3, "SPIDER": 2, "WOLF": 3},
 	},
 	{
@@ -388,7 +389,7 @@ const REGIONS := [
 		"low_line": 22,
 		"tree_density": 0.05,
 		"sky": Color(0.97, 1.0, 0.96),
-		"passive": {"CHICKEN": 4, "PIG": 4, "COW": 3, "SHEEP": 2},
+		"passive": {"CHICKEN": 4, "PIG": 4, "COW": 3, "SHEEP": 2, "BUTTERFLY": 4},
 		"hostile": {"SPIDER": 4, "ZOMBIE": 2, "SKELETON": 2},
 	},
 	{
@@ -410,7 +411,7 @@ const REGIONS := [
 		"low_line": 30,
 		"tree_density": 0.02,
 		"sky": Color(1.0, 0.97, 0.9),
-		"passive": {"SHEEP": 5, "COW": 3, "CHICKEN": 2},
+		"passive": {"SHEEP": 5, "COW": 3, "CHICKEN": 2, "KANGAROO": 3, "BUTTERFLY": 3},
 		"hostile": {"SPIDER": 3, "ZOMBIE": 3, "SKELETON": 2},
 	},
 	{

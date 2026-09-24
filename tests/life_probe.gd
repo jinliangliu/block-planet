@@ -6,6 +6,8 @@ extends Node
 ## 运行：Godot_v4.6.3-stable_win64_console.exe --headless --path . res://tests/life_probe.tscn
 
 var _failed := 0
+## 成长事件计数（lambda 捕获成员而非局部变量，便于统计）。
+var _grown_events := 0
 
 
 func _ready() -> void:
@@ -100,7 +102,8 @@ func _run() -> void:
 		await get_tree().physics_frame
 	var hp0 := target.health
 	player.start_break_or_attack()
-	_check(target.health == hp0 - 1, "按下左键立即攻击一次（%d→%d）" % [hp0, target.health])
+	# 徒手对狼：规则伤害 4、工具不匹配折半 → 2 点（HuntRules.BARE/wrong-tool 口径）。
+	_check(target.health == hp0 - 2, "按下左键立即攻击一次（%d→%d，折半规则 4/2）" % [hp0, target.health])
 	player.break_held = true
 	for i in range(90):
 		await get_tree().physics_frame
@@ -124,7 +127,7 @@ func _run() -> void:
 	var dist := wolf2.global_position.distance_to(player.global_position)
 	_check(dist < 3.5, "夜晚狼主动逼近玩家（剩余距离 %.2f m）" % dist)
 	var wolf_drops := await _kill_and_collect(main_scene, wolf2)
-	_check(wolf_drops.is_empty(), "击杀狼不掉落物品")
+	_check(wolf_drops.has(ItemTypes.FANG), "击杀狼掉落獠牙")
 	day_night._time = 0.0
 	day_night._apply_lighting()
 	player.health = Player.MAX_HEALTH
@@ -232,7 +235,7 @@ func _run() -> void:
 		_check(eaten and is_equal_approx(player.hunger, 12.0), "食用面包恢复 7 点饥饿（5→12）")
 		_check(player.inventory.count_item(ItemTypes.BREAD) == 0, "食用后面包被消耗")
 
-	_check(ItemTypes.TRADES.size() == 8, "村庄交易共 8 条（新增 3 条食物交易）")
+	_check(ItemTypes.TRADES.size() == 13, "村庄交易共 13 条（新增食物与材料交易，现 %d 条）" % ItemTypes.TRADES.size())
 	var has_food_trade := false
 	for trade: Dictionary in ItemTypes.TRADES:
 		if trade["result"] in [ItemTypes.RAW_PORK, ItemTypes.BREAD, ItemTypes.WHEAT]:
@@ -302,7 +305,7 @@ func _run() -> void:
 	_check(found_copper >= 1, "石层生成铜矿石（扫描区命中 %d）" % found_copper)
 	_check(found_tin >= 1, "深层生成锡矿石（扫描区命中 %d）" % found_tin)
 
-	_check(ItemTypes.SMELT_RECIPES.size() == 3, "冶炼配方共 3 条")
+	_check(ItemTypes.SMELT_RECIPES.size() == 6, "冶炼配方共 6 条（含铁锭/金锭/合金锭）")
 	var smelt_inv := Inventory.new(9)
 	smelt_inv.add_item(BlockTypes.Block.COPPER_ORE, 2)
 	smelt_inv.add_item(BlockTypes.Block.TIN_ORE, 2)
@@ -666,7 +669,7 @@ func _run() -> void:
 	Progress.states.clear()
 
 	_check(QuestData.quests().size() == 8, "新手任务链共 8 环")
-	_check(QuestData.achievements().size() == 14, "成就共 14 枚")
+	_check(QuestData.achievements().size() == 25, "成就共 25 枚（现 %d 枚）" % QuestData.achievements().size())
 	var first_q := QuestData.quests()[0]
 	var second_q := QuestData.quests()[1]
 	_check(Progress.is_visible(first_q) and not Progress.is_visible(second_q),
@@ -838,6 +841,382 @@ func _run() -> void:
 	hud.close_inventory()
 	_check(not hud._inventory_panel.is_open(), "关闭背包窗口后状态复位")
 
+
+	# ── 阶段 P：工具分级、矿石门槛、生物生长、狩猎规则、弓箭与垂钓（M8） ──
+	# P-1 工具分级 1~4 级
+	_check(
+		ItemTypes.tool_tier(ItemTypes.WOOD_PICKAXE) == 1
+		and ItemTypes.tool_tier(ItemTypes.STONE_PICKAXE) == 2
+		and ItemTypes.tool_tier(ItemTypes.BRONZE_PICKAXE) == 3
+		and ItemTypes.tool_tier(ItemTypes.IRON_PICKAXE) == 4,
+		"工具分级为 1 木 / 2 石 / 3 青铜 / 4 铁",
+	)
+	_check(
+		ItemTypes.tool_speed(ItemTypes.WOOD_PICKAXE) < ItemTypes.tool_speed(ItemTypes.STONE_PICKAXE)
+		and ItemTypes.tool_speed(ItemTypes.STONE_PICKAXE) < ItemTypes.tool_speed(ItemTypes.BRONZE_PICKAXE)
+		and ItemTypes.tool_speed(ItemTypes.BRONZE_PICKAXE) < ItemTypes.tool_speed(ItemTypes.IRON_PICKAXE),
+		"采集速度随等级递增（%.0f < %.0f < %.0f < %.0f）" % [
+			ItemTypes.tool_speed(ItemTypes.WOOD_PICKAXE),
+			ItemTypes.tool_speed(ItemTypes.STONE_PICKAXE),
+			ItemTypes.tool_speed(ItemTypes.BRONZE_PICKAXE),
+			ItemTypes.tool_speed(ItemTypes.IRON_PICKAXE),
+		],
+	)
+	_check(
+		ItemTypes.tool_speed(ItemTypes.GOLD_PICKAXE) > ItemTypes.tool_speed(ItemTypes.IRON_PICKAXE)
+		and ItemTypes.tool_durability(ItemTypes.SILVER_PICKAXE) > ItemTypes.tool_durability(ItemTypes.IRON_PICKAXE)
+		and ItemTypes.tool_durability(ItemTypes.GOLD_PICKAXE) < ItemTypes.tool_durability(ItemTypes.IRON_PICKAXE),
+		"银/金为同级珍稀变体：金最快但最脆、银最耐用",
+	)
+	var ladder_ok := true
+	for tier in [1, 2, 3, 4]:
+		var kinds := {}
+		for id: int in ItemTypes.TOOL_TYPE:
+			var kind := ItemTypes.tool_type(id)
+			if ItemTypes.tool_tier(id) == tier and kind != "bow" and kind != "rod":
+				kinds[kind] = true
+		if kinds.size() < 4:
+			ladder_ok = false
+	_check(ladder_ok, "每级都备齐镐/斧/锹/镰刀四类采集工具")
+	_check(
+		ItemTypes.is_bow(ItemTypes.WOOD_BOW) and ItemTypes.is_rod(ItemTypes.WOOD_FISHING_ROD)
+		and ItemTypes.tool_type(ItemTypes.IRON_SICKLE) == "sickle",
+		"镰刀/鱼竿/弓已纳入工具类别",
+	)
+	_check(ItemTypes.TOOL_TYPE.size() == 26, "工具总数 26 件（4 级×4 类 + 银金 6 + 渔具 4）")
+	_check(
+		ItemTypes.tool_type_name(ItemTypes.WOOD_AXE) == "斧头"
+		and ItemTypes.tool_type_name(ItemTypes.WOOD_SICKLE) == "镰刀",
+		"工具类别有中文名（斧头/镰刀），供狩猎提示使用",
+	)
+
+	# P-2 矿石等级门槛与深层生成
+	_check(
+		BlockTypes.required_tier(BlockTypes.Block.TIN_ORE) == 2
+		and BlockTypes.required_tier(BlockTypes.Block.IRON_ORE) == 3
+		and BlockTypes.required_tier(BlockTypes.Block.GOLD_ORE) == 4,
+		"锡/铁/金矿石分别要求 2/3/4 级工具",
+	)
+	_check(
+		not BlockTypes.tier_allows(BlockTypes.Block.TIN_ORE, 1)
+		and BlockTypes.tier_allows(BlockTypes.Block.TIN_ORE, 2)
+		and BlockTypes.tier_allows(BlockTypes.Block.STONE, 0),
+		"木镐采不下锡矿、石镐可以；普通石头无门槛",
+	)
+	_check(BlockTypes.tier_hint(BlockTypes.Block.IRON_ORE) == "青铜镐", "铁矿的提示名为「青铜镐」")
+	_check(
+		BlockTypes.HARDNESS.has(BlockTypes.Block.IRON_ORE)
+		and BlockTypes.EFFECTIVE_TOOL.get(BlockTypes.Block.GOLD_ORE, "") == "pickaxe"
+		and ItemTypes.is_placeable(BlockTypes.Block.IRON_ORE),
+		"铁/金矿石已接入硬度表、有效工具与可放置判定",
+	)
+
+	var scan_min := Vector3i(8, 1, 8)
+	var scan_max := Vector3i(40, World.SEA_LEVEL - 6, 40)
+	world.ensure_chunks_in_region(scan_min, scan_max)
+	var iron_found := 0
+	var gold_found := 0
+	for wx in range(scan_min.x, scan_max.x + 1):
+		for wz in range(scan_min.z, scan_max.z + 1):
+			for wy in range(1, World.SEA_LEVEL - 5):
+				var ore := world.get_block(Vector3i(wx, wy, wz))
+				if ore == BlockTypes.Block.IRON_ORE:
+					iron_found += 1
+				elif ore == BlockTypes.Block.GOLD_ORE:
+					gold_found += 1
+	_check(iron_found > 0, "地层中生成铁矿石（命中 %d 格）" % iron_found)
+	_check(gold_found > 0, "更深处生成金矿石（命中 %d 格）" % gold_found)
+
+	# P-3 新材料合成与冶炼链路
+	var iron_recipe := ItemTypes.SMELT_RECIPES[3]
+	_check(int(iron_recipe["result"]) == ItemTypes.IRON_INGOT, "冶炼配方含铁矿 → 铁锭")
+	var chain_inv := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	chain_inv.add_item(BlockTypes.Block.IRON_ORE, 2)
+	_check(
+		chain_inv.craft(iron_recipe) and chain_inv.count_item(ItemTypes.IRON_INGOT) == 1,
+		"铁矿×2 冶炼为铁锭",
+	)
+	chain_inv.add_item(ItemTypes.IRON_INGOT, 3)
+	chain_inv.add_item(BlockTypes.Block.WOOD, 2)
+	var iron_pick_recipe := _find_recipe(ItemTypes.IRON_PICKAXE)
+	_check(
+		not iron_pick_recipe.is_empty() and chain_inv.craft(iron_pick_recipe)
+		and chain_inv.count_item(ItemTypes.IRON_PICKAXE) == 1,
+		"铁锭×3 + 木×2 合成铁镐",
+	)
+	_check(
+		int(ItemTypes.TOOL_DURABILITY[ItemTypes.IRON_PICKAXE]) > int(ItemTypes.TOOL_DURABILITY[ItemTypes.BRONZE_PICKAXE]),
+		"铁镐耐久高于青铜镐",
+	)
+	var arrow_inv := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	arrow_inv.add_item(BlockTypes.Block.WOOD, 1)
+	arrow_inv.add_item(BlockTypes.Block.COBBLESTONE, 1)
+	arrow_inv.add_item(ItemTypes.FEATHER, 1)
+	var arrow_recipe := _find_recipe(ItemTypes.ARROW)
+	_check(
+		not arrow_recipe.is_empty() and arrow_inv.craft(arrow_recipe)
+		and arrow_inv.count_item(ItemTypes.ARROW) == ItemTypes.recipe_count(arrow_recipe),
+		"木+圆石+羽毛 一次合成 4 支箭",
+	)
+	_check(
+		BlockTypes.drop_count_for(BlockTypes.Block.WHEAT_CROP) == 2
+		and BlockTypes.drop_count_for(BlockTypes.Block.WHEAT_CROP, "sickle") == 4,
+		"镰刀收割小麦收成翻倍（2 → 4）",
+	)
+
+	# P-4 生物生长阶段
+	_check(
+		Mob.stage_count_of(Mob.MobType.CHICKEN) == 3
+		and Mob.stage_count_of(Mob.MobType.BUTTERFLY) == 4
+		and Mob.stage_count_of(Mob.MobType.COW) == 2
+		and Mob.stage_count_of(Mob.MobType.ZOMBIE) == 1,
+		"成长链：鸡 3 段 / 蝴蝶 4 段 / 牛 2 段 / 僵尸无成长",
+	)
+	var adult_hen := Mob.new()
+	adult_hen.setup(Mob.MobType.CHICKEN, player, day_night)
+	_check(
+		adult_hen.is_adult() and adult_hen.stage_name() == "鸡" and adult_hen.max_health == 3,
+		"默认以成体出现（「鸡」/ 生命 3），与旧行为一致",
+	)
+	var egg := _spawn_mob(
+		main_scene, Mob.MobType.CHICKEN, player, day_night, Vector3(28.5, base_y + 1.1, 24.5), 0
+	)
+	_check(
+		not egg.is_adult() and egg.stage_name() == "鸡蛋" and not egg.is_huntable()
+		and egg.max_health < adult_hen.max_health and egg.is_still(),
+		"卵阶段：名「鸡蛋」/ 生命更低 / 原地不动 / 不可狩猎",
+	)
+	Events.mob_grown.connect(_on_probe_grown)
+	_grown_events = 0
+	day_night.advance_days(1)
+	await get_tree().process_frame
+	_check(egg.stage == 1 and egg.stage_name() == "小鸡", "跨过一个游戏日后鸡蛋孵出小鸡")
+	_check(_grown_events == 1, "成长事件已广播一次（供成就计数）")
+	_check(
+		egg.stage_scale() < adult_hen.stage_scale() and egg._visual_root.scale.x < 0.99,
+		"幼体外观按阶段缩放（%.2f）" % egg.stage_scale(),
+	)
+	_check(egg._visual_root.get_child_count() > 0, "阶段切换后外观已重建")
+	_check(egg.advance_stage() and egg.stage == 2 and egg.is_adult(), "再推进一阶段即成年为鸡")
+	_check(not egg.advance_stage(), "成体阶段不再推进")
+	Events.mob_grown.disconnect(_on_probe_grown)
+	var frog_chain := Mob.stages_of(Mob.MobType.FROG)
+	_check(
+		String(frog_chain[0]["name"]) == "蛙卵" and String(frog_chain[1]["name"]) == "蝌蚪"
+		and String(frog_chain[2]["name"]) == "青蛙",
+		"青蛙成长链为 蛙卵 → 蝌蚪 → 青蛙",
+	)
+	var butterfly_chain := Mob.stages_of(Mob.MobType.BUTTERFLY)
+	_check(
+		String(butterfly_chain[2]["name"]) == "茧" and String(butterfly_chain[1]["name"]) == "毛毛虫",
+		"蝴蝶成长链含 毛毛虫 → 茧 → 蝴蝶",
+	)
+	_check(day_night.day_count() > 1, "昼夜循环已累计游戏天数（第 %d 天）" % day_night.day_count())
+
+	# P-5 保护动物
+	_check(
+		Mob.is_protected(Mob.MobType.PANDA) and Mob.is_protected(Mob.MobType.CRESTED_IBIS)
+		and Mob.is_protected(Mob.MobType.BUTTERFLY) and Mob.is_protected(Mob.MobType.VILLAGER)
+		and not Mob.is_protected(Mob.MobType.COW),
+		"保护名录：大熊猫/朱鹮/蝴蝶/村民受保护，牛不受保护",
+	)
+	var panda := _spawn_mob(
+		main_scene, Mob.MobType.PANDA, player, day_night, Vector3(31.5, base_y + 1.1, 26.5)
+	)
+	_check(
+		panda.display_name() == "大熊猫" and Mob.is_passive(Mob.MobType.PANDA)
+		and panda.max_health == 14 and not panda.is_huntable(),
+		"大熊猫：被动词条 / 生命 14 / 不可狩猎",
+	)
+	_check(
+		panda._nametag.modulate.g > panda._nametag.modulate.r,
+		"保护动物名牌为绿色（r=%.2f g=%.2f）" % [panda._nametag.modulate.r, panda._nametag.modulate.g],
+	)
+	var panda_hit := HuntRules.evaluate(panda, ItemTypes.IRON_AXE)
+	_check(
+		not bool(panda_hit["ok"]) and bool(panda_hit["protection"])
+		and String(panda_hit["toast"]).find("保护") >= 0,
+		"攻击大熊猫被拦下并给出保护提示（「%s」）" % String(panda_hit["toast"]),
+	)
+	_check(
+		int(RegionAtlas.profile(RegionAtlas.ASIA)["passive"].get("PANDA", 0)) > 0
+		and int(RegionAtlas.profile(RegionAtlas.ASIA)["passive"].get("GOLDEN_MONKEY", 0)) > 0
+		and int(RegionAtlas.profile(RegionAtlas.ARCTIC)["passive"].get("POLAR_BEAR", 0)) > 0
+		and int(RegionAtlas.profile(RegionAtlas.OCEANIA)["passive"].get("KANGAROO", 0)) > 0
+		and int(RegionAtlas.profile(RegionAtlas.NORTH_AMERICA)["passive"].get("BALD_EAGLE", 0)) > 0,
+		"各区域生成表已含本地代表保护动物（熊猫/金丝猴/北极熊/袋鼠/白头海雕）",
+	)
+	var new_mob_visuals_ok := true
+	for mob_type: int in [
+		Mob.MobType.BUTTERFLY, Mob.MobType.PANDA, Mob.MobType.GOLDEN_MONKEY,
+		Mob.MobType.CRESTED_IBIS, Mob.MobType.BALD_EAGLE, Mob.MobType.POLAR_BEAR, Mob.MobType.KANGAROO,
+	]:
+		var specimen := Mob.new()
+		specimen.setup(mob_type, player, day_night)
+		main_scene.add_child(specimen)
+		specimen.global_position = Vector3(30.5, base_y + 1.1, 30.5)
+		if specimen._visual_root.get_child_count() == 0:
+			new_mob_visuals_ok = false
+		specimen.queue_free()
+	_check(new_mob_visuals_ok, "7 种新增生物（蝴蝶与 6 种保护动物）外观均可构建")
+
+	# P-6 狩猎规则引擎
+	var cow := _spawn_mob(
+		main_scene, Mob.MobType.COW, player, day_night, Vector3(26.5, base_y + 1.1, 28.5)
+	)
+	var bare_hit := HuntRules.evaluate(cow, -1)
+	var axe_hit := HuntRules.evaluate(cow, ItemTypes.WOOD_AXE)
+	var wrong_hit := HuntRules.evaluate(cow, ItemTypes.WOOD_SHOVEL)
+	_check(
+		bool(axe_hit["ok"]) and int(axe_hit["damage"]) == 4 and not HuntRules.rule_for(Mob.MobType.COW).is_empty(),
+		"木斧狩猎牛造成 4 点伤害",
+	)
+	_check(
+		int(bare_hit["damage"]) < int(axe_hit["damage"]),
+		"徒手伤害低于斧头（%d < %d）" % [int(bare_hit["damage"]), int(axe_hit["damage"])],
+	)
+	_check(
+		int(wrong_hit["damage"]) == int(bare_hit["damage"]) and not String(wrong_hit["toast"]).is_empty(),
+		"用错工具伤害减半并提示正确工具（「%s」）" % String(wrong_hit["toast"]),
+	)
+	_check(
+		HuntRules.wears_tool(cow, ItemTypes.WOOD_AXE) and not HuntRules.wears_tool(cow, ItemTypes.WOOD_SHOVEL),
+		"只有用对的工具才会磨损耐久",
+	)
+	var hunter_fish := Mob.new()
+	hunter_fish.setup(Mob.MobType.FISH, player, day_night)
+	_check(
+		int(HuntRules.evaluate(hunter_fish, ItemTypes.WOOD_FISHING_ROD)["damage"]) == 5
+		and int(HuntRules.evaluate(hunter_fish, ItemTypes.IRON_AXE)["damage"]) == 2,
+		"鱼：鱼竿伤害 5、斧头只有 2",
+	)
+	var calf := _spawn_mob(
+		main_scene, Mob.MobType.COW, player, day_night, Vector3(24.5, base_y + 1.1, 30.5), 0
+	)
+	var calf_hit := HuntRules.evaluate(calf, ItemTypes.IRON_AXE)
+	_check(
+		not bool(calf_hit["ok"]) and bool(calf_hit["stage_blocked"]) and not calf.is_huntable(),
+		"幼体不可狩猎（提示：「%s」）" % String(calf_hit["toast"]),
+	)
+	var calf_drops := await _kill_and_collect(main_scene, calf)
+	_check(
+		calf_drops.has(ItemTypes.RAW_BEEF) and not calf_drops.has(ItemTypes.HIDE),
+		"幼体掉落更少（只有生牛排，没有兽皮）",
+	)
+	var adult_drops := await _kill_and_collect(main_scene, cow)
+	_check(adult_drops.has(ItemTypes.HIDE), "成体牛额外掉落兽皮")
+	var bear := _spawn_mob(
+		main_scene, Mob.MobType.POLAR_BEAR, player, day_night, Vector3(33.5, base_y + 1.1, 28.5)
+	)
+	_check(bear.counters_back() and not Mob.COUNTER_MOBS.has(Mob.MobType.COW), "北极熊会反击，牛只会逃跑")
+	bear.take_damage(1)
+	_check(
+		bear.is_countering()
+		and bear._nametag.modulate.r > bear._nametag.modulate.g
+		and bear._nametag.modulate.g > bear._nametag.modulate.b,
+		"受击后进入反击状态且名牌转红",
+	)
+	bear.queue_free()
+	panda.queue_free()
+
+	# P-7 弓箭
+	_check(
+		HuntRules.bow_damage(0.0) == HuntRules.BOW_DAMAGE_MIN
+		and HuntRules.bow_damage(1.0) == HuntRules.BOW_DAMAGE_MAX
+		and HuntRules.bow_damage(0.5) < HuntRules.bow_damage(1.0),
+		"弓伤害随蓄力提升（%d → %d）" % [HuntRules.BOW_DAMAGE_MIN, HuntRules.BOW_DAMAGE_MAX],
+	)
+	var calf_ref := Mob.new()
+	calf_ref.setup(Mob.MobType.COW, player, day_night, 0)
+	var panda_ref := Mob.new()
+	panda_ref.setup(Mob.MobType.PANDA, player, day_night)
+	var cow_ref := Mob.new()
+	cow_ref.setup(Mob.MobType.COW, player, day_night)
+	_check(
+		HuntRules.arrow_damage(cow_ref, 6) == 6 and HuntRules.arrow_damage(panda_ref, 6) == 0
+		and HuntRules.arrow_damage(calf_ref, 6) == 0,
+		"箭对保护动物与幼体免伤",
+	)
+	player.inventory.slots[0] = {
+		"item": ItemTypes.WOOD_BOW, "count": 1,
+		"durability": ItemTypes.tool_durability(ItemTypes.WOOD_BOW),
+	}
+	player.inventory.slots[1] = {"item": ItemTypes.ARROW, "count": 5, "durability": -1}
+	player.inventory.hotbar_map[0] = 0
+	player.inventory.hotbar_map[1] = 1
+	player.select_slot(0)
+	_check(player.get_selected_item() == ItemTypes.WOOD_BOW, "快捷栏 1 号位手持木弓")
+	player._begin_use()
+	_check(player.is_charging_bow(), "按住右键开始拉弓蓄力")
+	player._update_bow(1.0)
+	_check(
+		player.bow_charge_ratio() > 0.5,
+		"蓄力进度可读取（%.2f）" % player.bow_charge_ratio(),
+	)
+	var arrows_before := player.inventory.count_item(ItemTypes.ARROW)
+	player._end_use()
+	await get_tree().process_frame
+	var arrows_shot := 0
+	for child in main_scene.get_children():
+		if child is ArrowProjectile:
+			arrows_shot += 1
+			child.queue_free()
+	_check(arrows_shot == 1 and not player.is_charging_bow(), "松手射出一支箭且蓄力归零")
+	_check(
+		player.inventory.count_item(ItemTypes.ARROW) == arrows_before - 1,
+		"射击消耗一支箭（%d → %d）" % [arrows_before, player.inventory.count_item(ItemTypes.ARROW)],
+	)
+
+	# P-8 垂钓：抛竿 → 咬钩 → 收竿
+	var fish_spot := _find_kind_cell(
+		world, Vector2i(int(player.global_position.x), int(player.global_position.z)), World.WATER_LARGE, 60
+	)
+	if fish_spot == Vector2i.ZERO:
+		fish_spot = _find_kind_cell(
+			world, Vector2i(int(player.global_position.x), int(player.global_position.z)), World.WATER_POND, 60
+		)
+	_check(fish_spot != Vector2i.ZERO, "玩家附近可找到水体用于垂钓")
+	_ensure_water_chunks(world, fish_spot, 8)
+	player.set_physics_process(false)
+	player.global_position = Vector3(
+		float(fish_spot.x) + 4.5, float(World.SEA_LEVEL) + 2.0, float(fish_spot.y) + 0.5
+	)
+	player._camera.look_at(
+		Vector3(float(fish_spot.x) + 0.5, float(World.SEA_LEVEL) - 1.0, float(fish_spot.y) + 0.5), Vector3.UP
+	)
+	player.inventory.slots[2] = {
+		"item": ItemTypes.WOOD_FISHING_ROD, "count": 1,
+		"durability": ItemTypes.tool_durability(ItemTypes.WOOD_FISHING_ROD),
+	}
+	player.inventory.hotbar_map[0] = 2
+	player.select_slot(0)
+	_check(player.get_selected_item() == ItemTypes.WOOD_FISHING_ROD, "快捷栏 1 号位手持木鱼竿")
+	var casted := player._cast_fishing()
+	_check(
+		casted and player.fishing_state() == Player.FISH_WAITING and player._bobber != null,
+		"抛竿后浮标落在水面并进入等待咬钩",
+	)
+	player._fish_timer = 0.001
+	await get_tree().process_frame
+	_check(
+		player.fishing_state() == Player.FISH_BITING and player._bobber.is_biting(),
+		"等待结束后浮标下沉、提示可以收竿",
+	)
+	var bag_before := _inventory_total(player.inventory)
+	player._reel_fishing()
+	_check(
+		player.fishing_state() == Player.FISH_IDLE and player._bobber == null,
+		"收竿后回到待机状态并回收浮标",
+	)
+	_check(
+		_inventory_total(player.inventory) > bag_before,
+		"咬钩时收竿有收获（背包物品 %d → %d）" % [bag_before, _inventory_total(player.inventory)],
+	)
+	player._cast_fishing()
+	player._reel_fishing()
+	_check(player.fishing_state() == Player.FISH_IDLE, "提前收竿（未咬钩）也能安全回到待机")
+	player.set_physics_process(true)
+
 	if _failed == 0:
 		print("LIFE_TEST_OK")
 		get_tree().quit(0)
@@ -906,9 +1285,9 @@ func _water_spawn_position(world: World, center: Vector2i, prefer_bottom: bool) 
 	return Vector3(0.0, -1.0, 0.0)
 
 
-func _spawn_mob(parent: Node, mob_type: Mob.MobType, player: Player, dn: DayNightCycle, pos: Vector3) -> Mob:
+func _spawn_mob(parent: Node, mob_type: Mob.MobType, player: Player, dn: DayNightCycle, pos: Vector3, start_stage: int = -1) -> Mob:
 	var mob := Mob.new()
-	mob.setup(mob_type, player, dn)
+	mob.setup(mob_type, player, dn, start_stage)
 	parent.add_child(mob)
 	mob.global_position = pos
 	return mob
@@ -934,6 +1313,14 @@ func _kill_and_collect(parent: Node, mob: Mob) -> Array[int]:
 	return ids
 
 
+## 背包内所有槽位的数量之和（垂钓收益断言用）。
+func _inventory_total(inv: Inventory) -> int:
+	var total := 0
+	for slot: Dictionary in inv.slots:
+		total += int(slot["count"])
+	return total
+
+
 func _find_recipe(result: int) -> Dictionary:
 	for recipe in ItemTypes.RECIPES:
 		if int(recipe["result"]) == result:
@@ -946,6 +1333,11 @@ func _find_slot(inv: Inventory, item: int) -> int:
 		if int(inv.slots[i]["item"]) == item and int(inv.slots[i]["count"]) > 0:
 			return i
 	return -1
+
+
+## 阶段 P 的成长事件统计回调（成员变量，供 lambda/connect 使用）。
+func _on_probe_grown(_mob_type: int, _stage: int) -> void:
+	_grown_events += 1
 
 
 func _check(cond: bool, label: String) -> void:

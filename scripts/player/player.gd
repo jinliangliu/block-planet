@@ -21,6 +21,19 @@ const STARVATION_DAMAGE_INTERVAL := 4.0
 # 落地速度阈值：sqrt(2 * GRAVITY * 3) ≈ 12 m/s，对应约 3 格内免伤。
 const FALL_DAMAGE_THRESHOLD := 12.0
 const FALL_DAMAGE_SCALE := 0.5
+## 蓄力射箭：按住右键满蓄 BOW_MAX_CHARGE 秒，伤害与初速随蓄力提升。
+const BOW_MIN_CHARGE := 0.15
+const BOW_MAX_CHARGE := 1.2
+## 垂钓状态机取值：未抛竿 / 等待咬钩 / 咬钩中。
+const FISH_IDLE := 0
+const FISH_WAITING := 1
+const FISH_BITING := 2
+## 垂钓：抛竿最远距离、等待咬钩的时间区间与咬钩窗口。
+const FISH_CAST_RANGE := 14.0
+const FISH_WAIT_MIN := 2.0
+const FISH_WAIT_MAX := 5.0
+const FISH_BITE_WINDOW := 1.6
+## 兼容旧命名的基准伤害（狩猎实际伤害由 HuntRules 按工具结算）。
 const ATTACK_DAMAGE := 1
 const ATTACK_COOLDOWN_MS := 500
 const DOUBLE_TAP_FLY_MS := 300
@@ -41,6 +54,12 @@ var virtual_descend := false
 var virtual_look := Vector2.ZERO
 var break_held := false
 var virtual_place := false
+## 弓的蓄力秒数（>0 表示正在拉弓）。
+var _bow_charge := 0.0
+## 当前垂钓状态（FISH_IDLE / FISH_WAITING / FISH_BITING）。
+var _fishing := FISH_IDLE
+var _fish_timer := 0.0
+var _bobber: FishingBobber
 var selected_slot := 0
 
 signal selected_slot_changed(slot: int)
@@ -107,8 +126,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				start_break_or_attack()
 			else:
 				break_held = false
-		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			_use_selected()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			if event.pressed:
+				_begin_use()
+			else:
+				_end_use()
 
 	if event is InputEventKey and event.pressed and not event.echo:
 		for i in range(Inventory.HOTBAR_SIZE):
@@ -138,9 +160,29 @@ func _handle_jump_tap() -> void:
 
 func _process(delta: float) -> void:
 	_update_breaking(delta)
+	_update_bow(delta)
+	_update_fishing(delta)
 	if virtual_place:
 		virtual_place = false
-		_use_selected()
+		_begin_use()
+
+
+## 右键按下：手持弓开始蓄力，手持鱼竿抛竿/收竿，其余走 _use_selected。
+func _begin_use() -> void:
+	var item := get_selected_item()
+	if ItemTypes.is_bow(item):
+		_bow_charge = BOW_MIN_CHARGE
+		return
+	if ItemTypes.is_rod(item):
+		_toggle_fishing()
+		return
+	_use_selected()
+
+
+## 右键松开：松开弓即射箭。
+func _end_use() -> void:
+	if _bow_charge > 0.0:
+		_release_bow()
 
 
 ## 使用选中物品：手持食物且饥饿未满时优先食用，
@@ -365,9 +407,26 @@ func _try_attack_mob() -> bool:
 		return false
 	if Time.get_ticks_msec() - _last_attack_ms < ATTACK_COOLDOWN_MS:
 		return true
-	collider.take_damage(ATTACK_DAMAGE)
+	_attack_mob(collider as Mob)
 	_last_attack_ms = Time.get_ticks_msec()
 	return true
+
+
+## 近战命中生物：伤害与提示由 HuntRules 结算（保护动物与幼体免伤）。
+func _attack_mob(mob: Mob) -> void:
+	var tool := get_selected_tool()
+	var outcome := HuntRules.evaluate(mob, tool)
+	var toast := String(outcome["toast"])
+	if not toast.is_empty():
+		Events.notice.emit(toast)
+	if not bool(outcome["ok"]):
+		# 保护动物与幼体免伤：记一笔「了解保护动物」，用于对应成就。
+		if bool(outcome["protection"]):
+			Progress.notify("protected_blocked")
+		return
+	mob.take_damage(int(outcome["damage"]))
+	if GameState.is_survival() and HuntRules.wears_tool(mob, tool):
+		inventory.damage_tool(active_inventory_slot(), 1)
 
 
 func _update_breaking(delta: float) -> void:
@@ -438,6 +497,16 @@ func _finish_break(cell: Vector3i, id: int) -> void:
 	var tool_type := ItemTypes.tool_type(tool) if tool != -1 else ""
 	var drop := BlockTypes.drop_for(id, tool_type)
 
+	# 矿石有最低工具等级要求：等级不够时采下却不给掉落，并提示该用什么。
+	var required := BlockTypes.required_tier(id)
+	if required > 0:
+		var have_tier := ItemTypes.tool_tier(tool) if tool != -1 else 0
+		if have_tier < required:
+			drop = BlockTypes.Block.AIR
+			Events.notice.emit("%s 太硬了，需要 %s 才能采下。" % [
+				BlockTypes.display_name(id), BlockTypes.tier_hint(id)
+			])
+
 	# 储物箱被破坏前散落箱内全部物品，避免物资凭空消失。
 	if id == BlockTypes.Block.CHEST:
 		_world.spill_box(cell, self)
@@ -445,7 +514,7 @@ func _finish_break(cell: Vector3i, id: int) -> void:
 	_world.set_block(cell, BlockTypes.Block.AIR)
 	if GameState.is_survival():
 		if drop != BlockTypes.Block.AIR:
-			inventory.add_item(drop, BlockTypes.drop_count_for(id))
+			inventory.add_item(drop, BlockTypes.drop_count_for(id, tool_type))
 		if tool != -1:
 			inventory.damage_tool(active_inventory_slot(), 1)
 	Events.block_broken.emit(id, cell)
@@ -644,3 +713,151 @@ func _apply_camera_mode() -> void:
 	_held_item.visible = first_person
 	_model.set_third_person(not first_person)
 	_spring_arm.spring_length = camera_distance
+
+
+## ── 蓄力射箭（M8.4） ──────────────────────────────────
+## 推进蓄力：满蓄后不再增加；手中换成非弓时取消拉弓。
+func _update_bow(delta: float) -> void:
+	if _bow_charge <= 0.0:
+		return
+	if not ItemTypes.is_bow(get_selected_item()):
+		_bow_charge = 0.0
+		return
+	_bow_charge = minf(BOW_MAX_CHARGE, _bow_charge + delta)
+
+
+## 蓄力进度 0..1（供 HUD 画蓄力条）。
+func bow_charge_ratio() -> float:
+	if _bow_charge <= 0.0:
+		return 0.0
+	return clampf((_bow_charge - BOW_MIN_CHARGE) / (BOW_MAX_CHARGE - BOW_MIN_CHARGE), 0.0, 1.0)
+
+
+func is_charging_bow() -> bool:
+	return _bow_charge > 0.0
+
+
+## 松手射箭：生存模式消耗一支箭，伤害与初速随蓄力提升。
+func _release_bow() -> void:
+	var charge := bow_charge_ratio()
+	_bow_charge = 0.0
+	if get_parent() == null:
+		return
+	if GameState.is_survival():
+		if inventory.count_item(ItemTypes.ARROW) <= 0:
+			Events.notice.emit("没有箭了——用木头、圆石和羽毛做几支吧。")
+			return
+		inventory.consume_item(ItemTypes.ARROW, 1)
+	var arrow := ArrowProjectile.new()
+	arrow.setup_player_shot(self, _ray_forward(), charge, HuntRules.bow_damage(charge))
+	get_parent().add_child(arrow)
+	arrow.global_position = camera_position() + _ray_forward() * 0.6
+	_held_item.swing()
+	_model.swing_arms()
+
+
+## ── 垂钓（M8.4） ──────────────────────────────────────
+## 右键手持鱼竿：未抛竿则抛竿，已抛竿则收竿。
+func _toggle_fishing() -> void:
+	if _fishing == FISH_IDLE:
+		_cast_fishing()
+	else:
+		_reel_fishing()
+
+
+## 抛竿：沿准星找最近的一格水，把浮标放在水面并开始等待咬钩。
+func _cast_fishing() -> bool:
+	if _world == null:
+		return false
+	var from := camera_position()
+	var dir := _ray_forward()
+	var found := Vector3.INF
+	var travelled := 0.0
+	while travelled <= FISH_CAST_RANGE:
+		travelled += 0.5
+		var cell := Vector3i((from + dir * travelled).floor())
+		var id := _world.get_block(cell)
+		if id == BlockTypes.Block.WATER:
+			found = Vector3(float(cell.x) + 0.5, float(World.SEA_LEVEL) + 1.05, float(cell.z) + 0.5)
+			break
+		# 撞到实心方块说明水在障碍后面，不再继续找。
+		if id != BlockTypes.Block.AIR and not BlockTypes.is_water_plant(id):
+			break
+			break
+	if found == Vector3.INF:
+		Events.notice.emit("把浮标甩到水面上才能钓鱼。")
+		return false
+	if get_parent() == null:
+		return false
+	_bobber = FishingBobber.new()
+	_bobber.setup(self)
+	get_parent().add_child(_bobber)
+	_bobber.global_position = found
+	_fishing = FISH_WAITING
+	_fish_timer = randf_range(FISH_WAIT_MIN, FISH_WAIT_MAX)
+	Events.notice.emit("抛竿啦，等浮标下沉时再按右键。")
+	_held_item.swing()
+	return true
+
+
+## 收竿：咬钩窗口内收竿则有收获，否则空手而归。
+func _reel_fishing() -> void:
+	if _fishing == FISH_BITING:
+		var loot := ItemTypes.roll_fishing_loot()
+		var item := int(loot["item"])
+		var count := int(loot["count"])
+		var leftover := inventory.add_item(item, count)
+		var gained := count - leftover
+		if gained > 0:
+			Events.notice.emit("钓到了 %s ×%d！" % [ItemTypes.item_name(item), gained])
+		else:
+			Events.notice.emit("背包满了，%s 溜走了。" % ItemTypes.item_name(item))
+	else:
+		Events.notice.emit("还没有鱼上钩，再耐心等等。")
+	_clear_fishing()
+
+
+func _clear_fishing() -> void:
+	_fishing = FISH_IDLE
+	_fish_timer = 0.0
+	if _bobber != null and is_instance_valid(_bobber):
+		_bobber.queue_free()
+	_bobber = null
+
+
+## 垂钓状态推进：等待 → 咬钩 → 超时回到等待。
+func _update_fishing(delta: float) -> void:
+	if _fishing == FISH_IDLE:
+		return
+	if _bobber == null or not is_instance_valid(_bobber):
+		_clear_fishing()
+		return
+	_fish_timer -= delta
+	if _fish_timer > 0.0:
+		return
+	if _fishing == FISH_WAITING:
+		_fishing = FISH_BITING
+		_fish_timer = FISH_BITE_WINDOW
+		_bobber.set_biting(true)
+		Events.notice.emit("咬钩了！快按右键收竿。")
+	else:
+		# 咬钩窗口错过：鱼儿脱钩，回到等待状态。
+		_fishing = FISH_WAITING
+		_fish_timer = randf_range(FISH_WAIT_MIN, FISH_WAIT_MAX)
+		_bobber.set_biting(false)
+		Events.notice.emit("鱼跑掉了……继续等吧。")
+
+
+## 垂钓状态：0 未抛竿，1 等待咬钩，2 咬钩中（供 HUD 与探针读取）。
+func fishing_state() -> int:
+	return _fishing
+
+
+## 相机世界坐标（浮标牵引钓线时读取）。
+func camera_position() -> Vector3:
+	return _camera.global_position
+
+
+## 相机朝向（射箭与抛竿的基准方向）。
+func _ray_forward() -> Vector3:
+	return -_camera.global_transform.basis.z

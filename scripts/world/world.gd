@@ -350,14 +350,19 @@ func _block_at(wx: int, wy: int, wz: int, height: int) -> int:
 	return _ore_or_stone(wx, wy, wz)
 
 
-## 石层矿物：确定性哈希散布有色金属矿石（铜约 2.5% 见于全部石层，
-## 锡约 1% 仅见于更深岩层），其余为石头。种子固定，矿点可复现。
+## 石层矿物：确定性哈希散布矿物。铜（约 2.5%）见于全部石层，锡（约 1%）
+## 仅见于较浅岩层底部；铁（约 1%）在地表以下 6 格起、金（约 0.4%）在
+## 地表以下 12 格起才出现，构成「越深越珍贵」的挖掘动力。种子固定，矿点可复现。
 func _ore_or_stone(wx: int, wy: int, wz: int) -> int:
 	var r := _ore_rng(wx, wy, wz)
 	if r < 0.025:
 		return BlockTypes.Block.COPPER_ORE
-	if r < 0.035 and wy <= SEA_LEVEL + 2:
-		return BlockTypes.Block.TIN_ORE
+	if r < 0.035:
+		return BlockTypes.Block.TIN_ORE if wy <= SEA_LEVEL + 2 else BlockTypes.Block.STONE
+	if r < 0.045:
+		return BlockTypes.Block.IRON_ORE if wy <= SEA_LEVEL - 6 else BlockTypes.Block.STONE
+	if r < 0.049:
+		return BlockTypes.Block.GOLD_ORE if wy <= SEA_LEVEL - 12 else BlockTypes.Block.STONE
 	return BlockTypes.Block.STONE
 
 

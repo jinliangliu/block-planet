@@ -43,6 +43,13 @@ func _run() -> void:
 	var chicken := _find_mob(spawner, Mob.MobType.CHICKEN)
 	_check(cow != null and sheep != null and chicken != null, "三类动物均在场景中")
 
+	# 生成器会随机抽中幼体阶段（12%/阶段），掉落断言要求成体：统一强制拉到末段。
+	for specimen: Mob in [cow, sheep, chicken]:
+		if specimen != null and not specimen.is_adult():
+			specimen.stage = Mob.stage_count_of(specimen.type) - 1
+			specimen._rebuild_visual()
+			specimen._apply_stage_stats()
+
 	# 白天推进若干帧：动物不被清除。
 	for i in range(30):
 		await get_tree().process_frame

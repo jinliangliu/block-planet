@@ -37,3 +37,10 @@ signal craft_done(item_id: int)
 ## 玩家在冶炼炉完成一次冶炼后广播，进度核心据此累计。
 signal smelt_done(item_id: int)
 
+## 通用提示通道：任意系统（狩猎拦截、工具等级不足、垂钓结果等）发出后
+## 由 HUD 以 Toast 呈现，避免各模块各自持有界面引用。
+signal notice(text: String)
+
+## 生物长大一个阶段后广播，进度核心据此累计「观察成长」类成就。
+signal mob_grown(mob_type: int, stage: int)
+

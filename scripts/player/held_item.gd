@@ -7,7 +7,6 @@ extends Node3D
 const BLOCK_SIZE := 0.26
 const ARM_COLOR := Color(0.87, 0.66, 0.51)
 const HANDLE_COLOR := Color(0.47, 0.33, 0.19)
-const TIER_COLORS: Array[Color] = [Color(0.62, 0.49, 0.29), Color(0.55, 0.55, 0.58)]
 
 var _player: Player
 var _root: Node3D
@@ -103,7 +102,6 @@ func _build_plain_item(item: int) -> void:
 
 
 func _build_tool(item: int) -> void:
-	var tier := clampi(ItemTypes.tool_tier(item), 0, TIER_COLORS.size() - 1)
 	var rot := Vector3(12.0, 0.0, -18.0)
 
 	var handle := _make_box(Vector3(0.055, 0.42, 0.055), _flat_material(HANDLE_COLOR))
@@ -111,7 +109,8 @@ func _build_tool(item: int) -> void:
 	handle.rotation_degrees = rot
 	_root.add_child(handle)
 
-	var head := _make_box(Vector3(0.2, 0.1, 0.09), _flat_material(TIER_COLORS[tier]))
+	# 头部颜色与格子微缩图同源（木/石/青铜/铁/银/金由 ItemTypes 统一决定）。
+	var head := _make_box(Vector3(0.2, 0.1, 0.09), _flat_material(ItemTypes.item_color(item)))
 	head.position = Vector3(0.32, 0.02, -0.48)
 	head.rotation_degrees = rot
 	_root.add_child(head)
