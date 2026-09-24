@@ -612,6 +612,33 @@ func _run() -> void:
 		if step_label.modulate.a < 1.0:
 			steps_visible = false
 	_check(steps_visible, "植被/生物/气候/风貌四段说明已逐条揭示")
+
+	# 地理知识卡片：每区域 3 张、字段齐全、剪影类型受支持。
+	var cards_ok := true
+	var known_arts := [
+		"mountain", "dune", "forest", "wave", "ice", "aurora", "storm", "rift",
+		"reef", "waterfall", "rock", "trench", "sun",
+		"panda", "penguin", "kangaroo", "lion", "polar_bear",
+	]
+	for region_id in RegionAtlas.COUNT:
+		var cards := RegionAtlas.cards_of(region_id)
+		if cards.size() != 3:
+			cards_ok = false
+		for card: Dictionary in cards:
+			if String(card["title"]).is_empty() or String(card["text"]).is_empty():
+				cards_ok = false
+			if not known_arts.has(String(card["art"])):
+				cards_ok = false
+	_check(cards_ok, "11 个区域各含 3 张知识卡片且标题/正文/剪影类型齐全")
+	var card_count := hud._map_selector._card_row.get_child_count()
+	_check(card_count == 3, "介绍页为所选区域生成 3 张知识卡片（实际 %d）" % card_count)
+	hud._map_selector._open_card_detail(1)
+	_check(
+		hud._map_selector._card_detail.visible and not String(hud._map_selector._detail_title.text).is_empty(),
+		"点卡片弹出大图详情浮层",
+	)
+	hud._map_selector._close_card_detail()
+	_check(not hud._map_selector._card_detail.visible, "详情浮层可关闭")
 	hud.close_map_selector()
 	_check(not hud._map_selector.is_open() and player.is_physics_processing(),
 		"关闭选择器后玩家恢复物理处理")

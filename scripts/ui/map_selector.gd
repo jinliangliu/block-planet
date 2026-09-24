@@ -40,6 +40,14 @@ var _intro_panel: PanelContainer
 var _intro_title: Label
 var _intro_subtitle: Label
 var _intro_body: Label
+var _card_row: HBoxContainer
+var _card_detail: Control
+var _detail_panel: PanelContainer
+var _detail_art: Control
+var _detail_title: Label
+var _detail_text: Label
+var _detail_cards: Array = []
+var _detail_index := 0
 var _loading_panel: PanelContainer
 var _loading_title: Label
 var _loading_bar: ProgressBar
@@ -167,6 +175,12 @@ func _show_intro(region_id: int) -> void:
 	_intro_title.text = String(data["title"])
 	_intro_subtitle.text = String(data["subtitle"])
 	_intro_body.text = String(data["intro"])
+	_detail_cards = RegionAtlas.cards_of(region_id)
+	for child in _card_row.get_children():
+		child.queue_free()
+	for i in range(_detail_cards.size()):
+		_card_row.add_child(_make_card(_detail_cards[i], i))
+	_close_card_detail()
 	_show_page(Page.INTRO)
 
 
@@ -315,8 +329,8 @@ func _build_intro_panel() -> void:
 	_intro_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_intro_panel.offset_left = -260.0
 	_intro_panel.offset_right = 260.0
-	_intro_panel.offset_top = -140.0
-	_intro_panel.offset_bottom = 140.0
+	_intro_panel.offset_top = -250.0
+	_intro_panel.offset_bottom = 250.0
 	add_child(_intro_panel)
 
 	var vbox := VBoxContainer.new()
@@ -342,6 +356,16 @@ func _build_intro_panel() -> void:
 	_intro_body.add_theme_color_override("font_color", TEXT_BODY)
 	vbox.add_child(_intro_body)
 
+	# 地理知识卡片横滚区：每张卡 = 程序化剪影插图 + 标题 + 短句。
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 186)
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vbox.add_child(scroll)
+	_card_row = HBoxContainer.new()
+	_card_row.add_theme_constant_override("separation", 10)
+	scroll.add_child(_card_row)
+
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 14)
@@ -360,6 +384,312 @@ func _build_intro_panel() -> void:
 	enter.focus_mode = Control.FOCUS_NONE
 	enter.pressed.connect(_start_loading)
 	row.add_child(enter)
+
+	_build_card_detail()
+
+
+## 知识卡详情浮层：全屏半透明遮罩 + 居中大图面板，点遮罩或按钮关闭。
+func _build_card_detail() -> void:
+	_card_detail = Control.new()
+	_card_detail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_card_detail.mouse_filter = Control.MOUSE_FILTER_STOP
+	_card_detail.visible = false
+	_card_detail.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed:
+			_close_card_detail()
+	)
+	add_child(_card_detail)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.05, 0.10, 0.55)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_card_detail.add_child(dim)
+
+	_detail_panel = _make_panel(Vector2(420, 0))
+	_detail_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_detail_panel.offset_left = -210.0
+	_detail_panel.offset_right = 210.0
+	_detail_panel.offset_top = -178.0
+	_detail_panel.offset_bottom = 178.0
+	_card_detail.add_child(_detail_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	_detail_panel.add_child(vbox)
+
+	_detail_art = Control.new()
+	_detail_art.custom_minimum_size = Vector2(0, 170)
+	_detail_art.clip_contents = true
+	_detail_art.draw.connect(func(): _draw_art(_detail_art, _detail_art_kind(), _detail_art_tint()))
+	vbox.add_child(_detail_art)
+
+	_detail_title = Label.new()
+	_detail_title.add_theme_font_size_override("font_size", 22)
+	_detail_title.add_theme_color_override("font_color", TEXT_DARK)
+	vbox.add_child(_detail_title)
+
+	_detail_text = Label.new()
+	_detail_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_detail_text.add_theme_font_size_override("font_size", 15)
+	_detail_text.add_theme_color_override("font_color", TEXT_BODY)
+	vbox.add_child(_detail_text)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	vbox.add_child(row)
+
+	var prev := Button.new()
+	prev.text = "上一张"
+	prev.custom_minimum_size = Vector2(96, 40)
+	prev.focus_mode = Control.FOCUS_NONE
+	prev.pressed.connect(func(): _open_card_detail((_detail_index - 1 + _detail_cards.size()) % _detail_cards.size()))
+	row.add_child(prev)
+
+	var close := Button.new()
+	close.text = "关闭"
+	close.custom_minimum_size = Vector2(96, 40)
+	close.focus_mode = Control.FOCUS_NONE
+	close.pressed.connect(_close_card_detail)
+	row.add_child(close)
+
+	var next := Button.new()
+	next.text = "下一张"
+	next.custom_minimum_size = Vector2(96, 40)
+	next.focus_mode = Control.FOCUS_NONE
+	next.pressed.connect(func(): _open_card_detail((_detail_index + 1) % _detail_cards.size()))
+	row.add_child(next)
+
+
+func _detail_art_kind() -> String:
+	if _detail_cards.is_empty():
+		return "wave"
+	return String(_detail_cards[_detail_index]["art"])
+
+
+func _detail_art_tint() -> Color:
+	if _detail_cards.is_empty():
+		return Color(0.4, 0.5, 0.6)
+	return _detail_cards[_detail_index]["tint"]
+
+
+## 介绍页卡片横滚区内的一张知识卡。
+func _make_card(card: Dictionary, index: int) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(156, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.99, 0.97, 0.90)
+	style.border_color = PANEL_BORDER
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(6)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	panel.add_child(vbox)
+
+	var art := Control.new()
+	art.custom_minimum_size = Vector2(0, 84)
+	art.clip_contents = true
+	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var kind: String = card["art"]
+	var tint: Color = card["tint"]
+	art.draw.connect(func(): _draw_art(art, kind, tint))
+	vbox.add_child(art)
+
+	var title := Label.new()
+	title.text = String(card["title"])
+	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_color_override("font_color", TEXT_DARK)
+	vbox.add_child(title)
+
+	var text := Label.new()
+	text.text = String(card["text"])
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text.add_theme_font_size_override("font_size", 11)
+	text.add_theme_color_override("font_color", TEXT_BODY)
+	vbox.add_child(text)
+
+	panel.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_open_card_detail(index)
+	)
+	return panel
+
+
+func _open_card_detail(index: int) -> void:
+	_detail_index = index
+	var card: Dictionary = _detail_cards[index]
+	_detail_title.text = String(card["title"])
+	_detail_text.text = String(card["text"])
+	_detail_art.queue_redraw()
+	_card_detail.visible = true
+	_card_detail.z_index = 10
+
+
+func _close_card_detail() -> void:
+	if _card_detail != null:
+		_card_detail.visible = false
+
+
+## 程序化剪影插图：按 kind 分派，背景铺 tint 亮色，剪影用 tint 暗色；
+## 动物类使用固有色，不随 tint 变化。
+func _draw_art(art: Control, kind: String, tint: Color) -> void:
+	var w := art.size.x
+	var h := art.size.y
+	if w <= 0.0 or h <= 0.0:
+		return
+	var bg := tint.lightened(0.62)
+	var fg := tint.darkened(0.25)
+	art.draw_rect(Rect2(Vector2.ZERO, art.size), bg)
+	var cx := w * 0.5
+	var cy := h * 0.5
+	match kind:
+		"mountain":
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - w * 0.34, h * 0.82), Vector2(cx - w * 0.10, h * 0.30), Vector2(cx + w * 0.12, h * 0.82),
+			]), fg)
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - w * 0.06, h * 0.82), Vector2(cx + w * 0.22, h * 0.18), Vector2(cx + w * 0.46, h * 0.82),
+			]), fg)
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(cx + w * 0.16, h * 0.30), Vector2(cx + w * 0.22, h * 0.18), Vector2(cx + w * 0.28, h * 0.30),
+			]), Color(0.96, 0.97, 1.0))
+			art.draw_rect(Rect2(0.0, h * 0.82, w, h * 0.18), fg.darkened(0.2))
+		"dune":
+			art.draw_circle(Vector2(cx - w * 0.30, h * 0.18), h * 0.09, Color(1.0, 0.95, 0.75))
+			art.draw_circle(Vector2(cx - w * 0.22, h * 1.02), h * 0.62, fg)
+			art.draw_circle(Vector2(cx + w * 0.30, h * 1.08), h * 0.74, fg.lightened(0.12))
+			art.draw_circle(Vector2(cx + w * 0.72, h * 0.96), h * 0.48, fg.darkened(0.12))
+		"forest":
+			for tree_x: float in [cx - w * 0.28, cx, cx + w * 0.28]:
+				art.draw_rect(Rect2(tree_x - 2.5, h * 0.62, 5.0, h * 0.26), fg.darkened(0.35))
+				art.draw_colored_polygon(PackedVector2Array([
+					Vector2(tree_x - w * 0.13, h * 0.66), Vector2(tree_x, h * 0.16), Vector2(tree_x + w * 0.13, h * 0.66),
+				]), fg)
+			art.draw_rect(Rect2(0.0, h * 0.86, w, h * 0.14), fg.darkened(0.4))
+		"wave":
+			for i in range(3):
+				var points := PackedVector2Array()
+				var base_y := h * (0.34 + 0.22 * i)
+				for step in range(25):
+					var px := w * 0.08 + w * 0.84 * step / 24.0
+					points.append(Vector2(px, base_y + sin(step * 1.4 + i * 2.0) * h * 0.055))
+				art.draw_polyline(points, fg.darkened(0.1 * (2 - i)), 3.0, true)
+		"ice":
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - w * 0.36, h * 0.84), Vector2(cx - w * 0.16, h * 0.24), Vector2(cx + w * 0.02, h * 0.52), Vector2(cx + w * 0.18, h * 0.16), Vector2(cx + w * 0.38, h * 0.84),
+			]), Color(0.94, 0.97, 1.0))
+			art.draw_rect(Rect2(0.0, h * 0.84, w, h * 0.16), tint.lightened(0.35))
+		"aurora":
+			for i in range(3):
+				var band := Color(0.35 + 0.15 * i, 0.85, 0.55 + 0.1 * i, 0.55)
+				art.draw_arc(Vector2(cx - w * 0.10 + i * w * 0.14, h * 1.05), h * 0.85, PI + 0.25, PI + 0.85, 24, band, 9.0)
+			art.draw_rect(Rect2(0.0, h * 0.88, w, h * 0.12), Color(0.10, 0.14, 0.24))
+		"storm":
+			art.draw_circle(Vector2(cx - w * 0.12, h * 0.38), h * 0.16, fg)
+			art.draw_circle(Vector2(cx + w * 0.06, h * 0.32), h * 0.20, fg)
+			art.draw_circle(Vector2(cx + w * 0.24, h * 0.40), h * 0.14, fg)
+			for i in range(4):
+				var rx := cx - w * 0.18 + i * w * 0.13
+				art.draw_line(Vector2(rx, h * 0.58), Vector2(rx - w * 0.03, h * 0.76), fg.darkened(0.15), 2.5)
+		"rift":
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(0.0, h * 0.50), Vector2(cx - w * 0.10, h * 0.44), Vector2(cx - w * 0.06, h * 0.86), Vector2(0.0, h * 0.90),
+			]), fg)
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(w, h * 0.52), Vector2(cx + w * 0.08, h * 0.46), Vector2(cx + w * 0.05, h * 0.88), Vector2(w, h * 0.92),
+			]), fg.lightened(0.12))
+			art.draw_line(Vector2(cx - w * 0.08, h * 0.45), Vector2(cx + w * 0.06, h * 0.87), tint.darkened(0.45), 3.0)
+		"reef":
+			art.draw_rect(Rect2(0.0, h * 0.80, w, h * 0.20), fg.darkened(0.4))
+			for i in range(3):
+				var bx := cx - w * 0.22 + i * w * 0.22
+				art.draw_line(Vector2(bx, h * 0.80), Vector2(bx, h * 0.44), fg, 4.0)
+				art.draw_line(Vector2(bx, h * 0.58), Vector2(bx - w * 0.07, h * 0.42), fg, 3.0)
+				art.draw_line(Vector2(bx, h * 0.52), Vector2(bx + w * 0.06, h * 0.36), fg, 3.0)
+				art.draw_circle(Vector2(bx + w * 0.06, h * 0.36), 3.0, Color(1.0, 0.85, 0.85))
+		"waterfall":
+			art.draw_rect(Rect2(0.0, 0.0, w * 0.30, h * 0.62), fg.darkened(0.3))
+			art.draw_rect(Rect2(w * 0.70, 0.0, w * 0.30, h * 0.62), fg.darkened(0.3))
+			art.draw_rect(Rect2(w * 0.30, 0.0, w * 0.40, h * 0.16), fg)
+			for i in range(4):
+				art.draw_rect(Rect2(w * (0.33 + 0.09 * i), h * 0.16, 4.0, h * 0.56), Color(0.88, 0.95, 1.0))
+			art.draw_rect(Rect2(0.0, h * 0.74, w, h * 0.26), fg.darkened(0.15))
+		"rock":
+			art.draw_circle(Vector2(cx, h * 0.95), h * 0.62, fg)
+			art.draw_arc(Vector2(cx, h * 0.95), h * 0.62, PI, TAU, 24, fg.darkened(0.2), 3.0)
+			art.draw_rect(Rect2(0.0, h * 0.88, w, h * 0.12), fg.darkened(0.4))
+		"trench":
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(0.0, h * 0.30), Vector2(cx - w * 0.30, h * 0.30), Vector2(cx - w * 0.06, h * 0.88), Vector2(0.0, h * 0.88),
+			]), fg)
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(w, h * 0.30), Vector2(cx + w * 0.30, h * 0.30), Vector2(cx + w * 0.06, h * 0.88), Vector2(w, h * 0.88),
+			]), fg.lightened(0.1))
+			art.draw_rect(Rect2(cx - w * 0.06, h * 0.30, w * 0.12, h * 0.58), tint.darkened(0.45))
+			for i in range(3):
+				var wy := h * (0.20 + 0.05 * i)
+				art.draw_line(Vector2(w * 0.10, wy), Vector2(w * 0.90, wy), Color(0.85, 0.92, 1.0, 0.7), 2.0)
+		"sun":
+			art.draw_circle(Vector2(cx, cy - h * 0.04), h * 0.18, fg)
+			for i in range(8):
+				var angle := TAU * i / 8.0
+				var inner := Vector2(cx, cy - h * 0.04) + Vector2(cos(angle), sin(angle)) * h * 0.24
+				var outer := Vector2(cx, cy - h * 0.04) + Vector2(cos(angle), sin(angle)) * h * 0.34
+				art.draw_line(inner, outer, fg, 3.0)
+			art.draw_rect(Rect2(0.0, h * 0.84, w, h * 0.16), fg.darkened(0.35))
+		"panda":
+			art.draw_circle(Vector2(cx, cy + h * 0.08), h * 0.30, Color(0.96, 0.96, 0.94))
+			art.draw_circle(Vector2(cx - h * 0.20, cy - h * 0.16), h * 0.09, Color(0.12, 0.12, 0.12))
+			art.draw_circle(Vector2(cx + h * 0.20, cy - h * 0.16), h * 0.09, Color(0.12, 0.12, 0.12))
+			art.draw_circle(Vector2(cx - h * 0.09, cy - h * 0.02), h * 0.06, Color(0.12, 0.12, 0.12))
+			art.draw_circle(Vector2(cx + h * 0.09, cy - h * 0.02), h * 0.06, Color(0.12, 0.12, 0.12))
+			art.draw_circle(Vector2(cx, cy + h * 0.04), h * 0.035, Color(0.12, 0.12, 0.12))
+			art.draw_rect(Rect2(cx - h * 0.26, cy + h * 0.14, h * 0.11, h * 0.22), Color(0.12, 0.12, 0.12))
+			art.draw_rect(Rect2(cx + h * 0.15, cy + h * 0.14, h * 0.11, h * 0.22), Color(0.12, 0.12, 0.12))
+			art.draw_rect(Rect2(cx - h * 0.06, cy - h * 0.06, h * 0.12, h * 0.30), Color(0.12, 0.12, 0.12))
+		"penguin":
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - h * 0.20, cy + h * 0.36), Vector2(cx - h * 0.13, cy - h * 0.30), Vector2(cx + h * 0.13, cy - h * 0.30), Vector2(cx + h * 0.20, cy + h * 0.36),
+			]), Color(0.15, 0.17, 0.22))
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - h * 0.11, cy + h * 0.32), Vector2(cx - h * 0.08, cy - h * 0.22), Vector2(cx + h * 0.08, cy - h * 0.22), Vector2(cx + h * 0.11, cy + h * 0.32),
+			]), Color(0.96, 0.96, 0.94))
+			art.draw_circle(Vector2(cx - h * 0.055, cy - h * 0.16), h * 0.028, Color(0.05, 0.05, 0.05))
+			art.draw_circle(Vector2(cx + h * 0.055, cy - h * 0.16), h * 0.028, Color(0.05, 0.05, 0.05))
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - h * 0.05, cy - h * 0.10), Vector2(cx + h * 0.05, cy - h * 0.10), Vector2(cx, cy - h * 0.04),
+			]), Color(0.95, 0.62, 0.20))
+			art.draw_rect(Rect2(cx - h * 0.16, cy + h * 0.34, h * 0.12, h * 0.05), Color(0.95, 0.62, 0.20))
+			art.draw_rect(Rect2(cx + h * 0.04, cy + h * 0.34, h * 0.12, h * 0.05), Color(0.95, 0.62, 0.20))
+		"kangaroo":
+			art.draw_circle(Vector2(cx - h * 0.06, cy - h * 0.02), h * 0.24, fg)
+			art.draw_circle(Vector2(cx - h * 0.26, cy - h * 0.22), h * 0.12, fg)
+			art.draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - h * 0.34, cy - h * 0.28), Vector2(cx - h * 0.26, cy - h * 0.34), Vector2(cx - h * 0.24, cy - h * 0.20),
+			]), fg)
+			art.draw_arc(Vector2(cx + h * 0.42, cy + h * 0.10), h * 0.40, PI * 0.75, PI * 1.45, 20, fg, 7.0)
+			art.draw_rect(Rect2(cx - h * 0.10, cy + h * 0.14, h * 0.22, h * 0.08), fg.darkened(0.15))
+		"lion":
+			art.draw_circle(Vector2(cx, cy), h * 0.32, Color(0.80, 0.55, 0.20))
+			art.draw_circle(Vector2(cx, cy + h * 0.02), h * 0.21, Color(0.90, 0.72, 0.40))
+			art.draw_circle(Vector2(cx - h * 0.08, cy - h * 0.02), h * 0.03, Color(0.15, 0.12, 0.08))
+			art.draw_circle(Vector2(cx + h * 0.08, cy - h * 0.02), h * 0.03, Color(0.15, 0.12, 0.08))
+			art.draw_circle(Vector2(cx, cy + h * 0.07), h * 0.035, Color(0.15, 0.12, 0.08))
+			art.draw_arc(Vector2(cx, cy - h * 0.30), h * 0.07, PI * 0.9, PI * 2.1, 16, Color(0.80, 0.55, 0.20), 4.0)
+		"polar_bear":
+			art.draw_circle(Vector2(cx + h * 0.02, cy + h * 0.08), h * 0.30, Color(0.95, 0.96, 0.98))
+			art.draw_circle(Vector2(cx - h * 0.26, cy - h * 0.10), h * 0.17, Color(0.95, 0.96, 0.98))
+			art.draw_circle(Vector2(cx - h * 0.36, cy - h * 0.24), h * 0.06, Color(0.95, 0.96, 0.98))
+			art.draw_circle(Vector2(cx - h * 0.20, cy - h * 0.26), h * 0.06, Color(0.95, 0.96, 0.98))
+			art.draw_circle(Vector2(cx - h * 0.30, cy - h * 0.10), h * 0.025, Color(0.10, 0.10, 0.12))
+			art.draw_rect(Rect2(cx - h * 0.16, cy + h * 0.28, h * 0.09, h * 0.14), Color(0.88, 0.90, 0.94))
+			art.draw_rect(Rect2(cx + h * 0.10, cy + h * 0.28, h * 0.09, h * 0.14), Color(0.88, 0.90, 0.94))
+		_:
+			art.draw_circle(Vector2(cx, cy), h * 0.26, fg)
 
 
 func _build_loading_panel() -> void:
