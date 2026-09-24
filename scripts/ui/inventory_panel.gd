@@ -7,6 +7,9 @@ extends Control
 signal closed
 ## 一键售卖完成后发出，携带 sell_all() 的结算结果。
 signal sold(result: Dictionary)
+## 鼠标悬停到物品格：带格子引用与当前物品 ID（0 表示空格），由 HUD 弹出预览卡。
+signal slot_hovered(slot: ItemSlot, item_id: int)
+signal slot_hover_ended
 
 const PANEL_BG := Color(0.95, 0.92, 0.84)
 const PANEL_BORDER := Color(0.62, 0.47, 0.27)
@@ -343,9 +346,20 @@ func _build_grid(parent: Control, count: int, columns: int, offset: int, zone: S
 		cell.toggle_mode = true
 		cell.custom_minimum_size = Vector2(SLOT_SIZE, SLOT_SIZE)
 		cell.pressed.connect(_on_cell_pressed.bind(zone, offset + i))
+		cell.mouse_entered.connect(_on_cell_mouse_entered.bind(cell))
+		cell.mouse_exited.connect(_on_cell_mouse_exited)
 		grid.add_child(cell)
 		cells.append(cell)
 	return cells
+
+
+## 悬停预览：读格子当前物品（空格发 0，HUD 会隐藏预览卡）。
+func _on_cell_mouse_entered(cell: Cell) -> void:
+	slot_hovered.emit(cell, item_at(cell.zone, cell.index))
+
+
+func _on_cell_mouse_exited() -> void:
+	slot_hover_ended.emit()
 
 
 func _on_cell_pressed(zone: String, index: int) -> void:

@@ -297,11 +297,37 @@ func has_space_for(item: int) -> bool:
 
 
 func can_craft(recipe: Dictionary) -> bool:
+	# 材料总量足够是前提。
 	for ingredient in recipe["ingredients"]:
 		if count_item(ingredient) < int(recipe["ingredients"][ingredient]):
 			return false
-	# 预检产物空位，避免消耗材料后产物无处放入而丢失。
-	return has_space_for(int(recipe["result"]))
+	# 空位预检要模拟「先扣材料、再放产物」：扣料可能清空某一堆而腾出格子
+	# （例如两堆木头 5+4，合成耗 5 后空出一格），直接查现状会误判背包已满。
+	var virt_items: Array[int] = []
+	var virt_counts: Array[int] = []
+	for i in range(_fill_range()):
+		virt_items.append(int(slots[i]["item"]))
+		virt_counts.append(int(slots[i]["count"]))
+	for ingredient in recipe["ingredients"]:
+		var remaining := int(recipe["ingredients"][ingredient])
+		for i in range(virt_items.size()):
+			if remaining <= 0:
+				break
+			if virt_items[i] == ingredient:
+				var take := mini(virt_counts[i], remaining)
+				virt_counts[i] -= take
+				remaining -= take
+	var result := int(recipe["result"])
+	for i in range(virt_items.size()):
+		if virt_items[i] == BlockTypes.Block.AIR or virt_counts[i] <= 0:
+			return true
+		if (
+			result == virt_items[i]
+			and not ItemTypes.is_tool_item(result)
+			and virt_counts[i] < BlockTypes.STACK_SIZE
+		):
+			return true
+	return false
 
 
 func craft(recipe: Dictionary) -> bool:

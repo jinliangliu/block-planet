@@ -73,6 +73,8 @@ func setup(player: Player) -> void:
 	_player.health_changed.connect(_on_health_changed)
 	_player.hunger_changed.connect(_on_hunger_changed)
 	_player.inventory.changed.connect(_refresh_hotbar)
+	# 背包变化时若合成台开着，同步刷新按钮可用态，避免「攒够材料按钮却还灰着」。
+	_player.inventory.changed.connect(_on_inventory_changed_for_craft)
 	GameState.mode_changed.connect(_on_mode_changed)
 	Events.player_mode_changed.connect(_on_player_flying_changed)
 	Events.request_trade.connect(set_trade_open.bind(true))
@@ -800,9 +802,11 @@ func _refresh_craft_panel() -> void:
 	if _craft_result_grid == null:
 		return
 	_hide_item_tip()
+	# 成品卡角标显示当前持有量（至少 ×1，保证图标可见）。
 	for i in range(ItemTypes.RECIPES.size()):
 		var b := _craft_result_grid.get_child(i) as ItemSlot
-		b.set_slot({"item": ItemTypes.RECIPES[i]["result"], "count": 1})
+		var owned := _player.inventory.count_item(ItemTypes.RECIPES[i]["result"]) if _player != null else 0
+		b.set_slot({"item": ItemTypes.RECIPES[i]["result"], "count": maxi(1, owned)})
 	_selected_recipe = clampi(_selected_recipe, 0, ItemTypes.RECIPES.size() - 1)
 	var selected := _craft_result_grid.get_child(_selected_recipe) as ItemSlot
 	selected.button_pressed = true
@@ -814,7 +818,8 @@ func _refresh_craft_path() -> void:
 	if _craft_result_slot == null or _craft_material_row == null:
 		return
 	var recipe: Dictionary = ItemTypes.RECIPES[_selected_recipe]
-	_craft_result_slot.set_slot({"item": recipe["result"], "count": 1})
+	var owned := _player.inventory.count_item(recipe["result"]) if _player != null else 0
+	_craft_result_slot.set_slot({"item": recipe["result"], "count": maxi(1, owned)})
 	for child in _craft_material_row.get_children():
 		_craft_material_row.remove_child(child)
 		child.queue_free()
@@ -878,11 +883,19 @@ func _on_craft_pressed() -> void:
 		return
 	var recipe: Dictionary = ItemTypes.RECIPES[_selected_recipe]
 	if not _player.inventory.craft(recipe):
+		# 理论上按钮禁用时点不到；走到这里说明状态过期或边界异常，给出提示而非静默。
+		Events.notice.emit("暂时无法合成：请确认材料充足且背包常用区有空位。")
 		return
 	Events.craft_done.emit(int(recipe["result"]))
 	_refresh_craft_path()
 	_refresh_hotbar()
 	_play_craft_fly(int(recipe["result"]))
+
+
+## 背包变化且合成台可见时，实时刷新成品持有量与按钮可用态。
+func _on_inventory_changed_for_craft() -> void:
+	if _craft_overlay != null and _craft_overlay.visible:
+		_refresh_craft_panel()
 
 
 ## 成品飞入背包动画：从成品格飞向底部快捷栏中心，落地后播报获得。
@@ -1603,6 +1616,9 @@ func _build_inventory_panel(root: Control) -> void:
 	_inventory_panel = InventoryPanel.new()
 	_inventory_panel.closed.connect(_on_inventory_closed)
 	_inventory_panel.sold.connect(_on_inventory_sold)
+	# 悬停预览：与储物箱/合成台共用同一张预览卡。
+	_inventory_panel.slot_hovered.connect(_show_item_tip)
+	_inventory_panel.slot_hover_ended.connect(_hide_item_tip)
 	root.add_child(_inventory_panel)
 	if _player != null:
 		_inventory_panel.setup(_player.inventory)
@@ -1620,6 +1636,7 @@ func open_inventory() -> void:
 func close_inventory() -> void:
 	if _inventory_panel == null:
 		return
+	_hide_item_tip()
 	_inventory_panel.close()
 
 

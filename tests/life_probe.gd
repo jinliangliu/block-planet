@@ -280,6 +280,26 @@ func _run() -> void:
 		_check(player.inventory.count_item(ItemTypes.BREAD) == 0, "食用后面包被消耗")
 
 	_check(ItemTypes.TRADES.size() == 13, "村庄交易共 13 条（新增食物与材料交易，现 %d 条）" % ItemTypes.TRADES.size())
+
+	# ── 合成空位预检：模拟「先扣料再放产物」──
+	# 满背包但材料分成两堆（5+4）：扣掉 5 那堆会腾出一格，木镐应当可合成。
+	var ci := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	ci.add_item(BlockTypes.Block.WOOD, 5)
+	ci.add_item(BlockTypes.Block.WOOD, 4)
+	for i in range(2, Inventory.COMMON_COUNT):
+		ci.slots[i] = {"item": BlockTypes.Block.STONE, "count": 1, "durability": -1}
+	var pick_recipe2 := _find_recipe(ItemTypes.WOOD_PICKAXE)
+	_check(pick_recipe2 != null and ci.can_craft(pick_recipe2),
+		"满包但扣料能腾格时木镐可合成（木头 5+4 两堆）")
+	_check(ci.craft(pick_recipe2) and ci.count_item(ItemTypes.WOOD_PICKAXE) == 1,
+		"满包扣料腾格合成实际成功")
+	# 单堆 9 木头：扣 5 后仍占一格，满包时确实放不下，按钮应保持禁用。
+	var cj := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	cj.add_item(BlockTypes.Block.WOOD, 9)
+	for i in range(1, Inventory.COMMON_COUNT):
+		cj.slots[i] = {"item": BlockTypes.Block.STONE, "count": 1, "durability": -1}
+	_check(not cj.can_craft(pick_recipe2), "满包且扣料腾不出格时木镐不可合成")
+
 	var has_food_trade := false
 	for trade: Dictionary in ItemTypes.TRADES:
 		if trade["result"] in [ItemTypes.RAW_PORK, ItemTypes.BREAD, ItemTypes.WHEAT]:
@@ -727,10 +747,14 @@ func _run() -> void:
 	_check(not manual.is_open(), "关闭说明书后状态复位")
 
 	# 阶段 L：任务与成就系统。先备份真实进度再清空，保证断言确定性。
+	# 连对计数是独立成员（落盘为 quiz_streak），不还原会让下一轮的
+	# 「答对 2 题尚未触发连对奖励」凭空失败——探针给自己下毒。
 	var saved_counters: Dictionary = Progress.counters.duplicate()
 	var saved_states: Dictionary = Progress.states.duplicate()
+	var saved_quiz_streak: int = Progress._quiz_correct_since_reward
 	Progress.counters.clear()
 	Progress.states.clear()
+	Progress._quiz_correct_since_reward = 0
 
 	_check(QuestData.quests().size() == 8, "新手任务链共 8 环")
 	_check(QuestData.achievements().size() == 25, "成就共 25 枚（现 %d 枚）" % QuestData.achievements().size())
@@ -778,6 +802,7 @@ func _run() -> void:
 
 	Progress.counters = saved_counters
 	Progress.states = saved_states
+	Progress._quiz_correct_since_reward = saved_quiz_streak
 	Progress._save()
 
 	# 区域化世界生成：独立 World 实例按区域配置产出地表材质与树木密度。

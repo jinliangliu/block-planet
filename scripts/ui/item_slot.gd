@@ -68,7 +68,9 @@ func _build_styles(dark: bool) -> void:
 func set_slot(slot: Dictionary) -> void:
 	_item_id = int(slot["item"])
 	_count = int(slot["count"])
-	_durability = int(slot.get("durability", 0))
+	# 缺省 -1（无耐久信息）：合成路径里的工具预览格没有耐久概念，
+	# 若缺省 0 会在角标显示误导性的「0」。
+	_durability = int(slot.get("durability", -1))
 	queue_redraw()
 
 
@@ -108,7 +110,10 @@ func _draw() -> void:
 	else:
 		_draw_item_icon(center, half, base)
 
-	var corner := str(_durability) if ItemTypes.is_tool_item(_item_id) else "×%d" % _count
+	# 有耐久信息的工具角标显示耐久；其余（含无耐久信息的工具预览格）显示数量。
+	var corner := "×%d" % _count
+	if ItemTypes.is_tool_item(_item_id) and _durability >= 0:
+		corner = str(_durability)
 	draw_string(get_theme_default_font(), Vector2(4.0, size.y - 5.0), corner,
 		HORIZONTAL_ALIGNMENT_RIGHT, size.x - 8.0, 14, _text_color)
 
