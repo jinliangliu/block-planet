@@ -43,6 +43,18 @@ var _craft_tree: Control
 var _craft_material_row: HBoxContainer
 var _craft_craft_button: Button
 var _selected_recipe := 0
+## 合成台分类页：当前页号 + 页签按钮 + 页签分组（与成品格分组分开）。
+var _craft_cat := 0
+var _craft_cat_buttons: Array[Button] = []
+var _craft_cat_group: ButtonGroup
+
+## 合成台分页：名称 + 说明。配方按产物经 ItemTypes.recipe_page 自动归页。
+const CRAFT_PAGES := [
+	["工具", "镐 · 斧 · 铲 · 镰"],
+	["武器钓具", "弓 · 箭 · 鱼竿"],
+	["方块", "玻璃 · 储物箱 · 冶炼炉"],
+	["食物", "面包等可食用成品"],
+]
 var _log_label: Label
 var _log_lines := PackedStringArray()
 var _trade_overlay: Control
@@ -672,6 +684,31 @@ func _build_craft_panel(root: Control) -> void:
 	left.add_theme_constant_override("separation", 8)
 	columns.add_child(left)
 
+	# 分类页签：配方按产物自动归页（工具/武器钓具/方块/食物），
+	# 格子仍是一次建齐、按页切换显隐——与图鉴卡片同一套「建一次」策略。
+	var cat_row := HBoxContainer.new()
+	cat_row.add_theme_constant_override("separation", 6)
+	left.add_child(cat_row)
+	_craft_cat_group = ButtonGroup.new()
+	for c in CRAFT_PAGES.size():
+		var chip := Button.new()
+		chip.text = String(CRAFT_PAGES[c][0])
+		chip.tooltip_text = String(CRAFT_PAGES[c][1])
+		chip.toggle_mode = true
+		chip.button_group = _craft_cat_group
+		chip.button_pressed = c == _craft_cat
+		chip.focus_mode = Control.FOCUS_NONE
+		chip.custom_minimum_size = Vector2(0, 32)
+		chip.add_theme_font_size_override("font_size", 15)
+		chip.add_theme_color_override("font_color", Color(0.36, 0.26, 0.13))
+		chip.add_theme_color_override("font_pressed_color", Color(0.30, 0.20, 0.08))
+		chip.add_theme_stylebox_override("normal", _craft_chip_style(false))
+		chip.add_theme_stylebox_override("hover", _craft_chip_style(false))
+		chip.add_theme_stylebox_override("pressed", _craft_chip_style(true))
+		chip.pressed.connect(_on_craft_cat.bind(c))
+		cat_row.add_child(chip)
+		_craft_cat_buttons.append(chip)
+
 	var left_title := Label.new()
 	left_title.text = "成品（点击选择）"
 	left_title.add_theme_font_size_override("font_size", 16)
@@ -699,6 +736,7 @@ func _build_craft_panel(root: Control) -> void:
 		b.pressed.connect(_on_recipe_selected.bind(i))
 		b.mouse_entered.connect(_on_slot_hover.bind(b))
 		b.mouse_exited.connect(_hide_item_tip)
+		b.visible = ItemTypes.recipe_page(ItemTypes.RECIPES[i]) == _craft_cat
 		_craft_result_grid.add_child(b)
 
 	var right := VBoxContainer.new()
@@ -732,7 +770,7 @@ func _build_craft_panel(root: Control) -> void:
 	right.add_child(_craft_material_row)
 
 	_craft_craft_button = Button.new()
-	_craft_craft_button.text = "开始合成"
+	_craft_craft_button.text = "合成"
 	_craft_craft_button.custom_minimum_size = Vector2(128, 46)
 	_craft_craft_button.focus_mode = Control.FOCUS_NONE
 	_craft_craft_button.pressed.connect(_on_craft_pressed)
@@ -807,10 +845,42 @@ func _refresh_craft_panel() -> void:
 		var b := _craft_result_grid.get_child(i) as ItemSlot
 		var owned := _player.inventory.count_item(ItemTypes.RECIPES[i]["result"]) if _player != null else 0
 		b.set_slot({"item": ItemTypes.RECIPES[i]["result"], "count": maxi(1, owned)})
-	_selected_recipe = clampi(_selected_recipe, 0, ItemTypes.RECIPES.size() - 1)
-	var selected := _craft_result_grid.get_child(_selected_recipe) as ItemSlot
-	selected.button_pressed = true
+	_apply_craft_cat()
+
+
+## 当前分类页生效：格子显隐 + 选中项不在本页时改选本页第一个。
+func _apply_craft_cat() -> void:
+	var page_slots: Array[int] = []
+	for i in range(ItemTypes.RECIPES.size()):
+		var in_page := ItemTypes.recipe_page(ItemTypes.RECIPES[i]) == _craft_cat
+		(_craft_result_grid.get_child(i) as ItemSlot).visible = in_page
+		if in_page:
+			page_slots.append(i)
+	if page_slots.is_empty():
+		return
+	if not page_slots.has(_selected_recipe):
+		_selected_recipe = page_slots[0]
+	for i in range(ItemTypes.RECIPES.size()):
+		(_craft_result_grid.get_child(i) as ItemSlot).button_pressed = i == _selected_recipe
 	_refresh_craft_path()
+
+
+## 切换分类页：只动显隐与选中，不重建任何格子。
+func _on_craft_cat(page: int) -> void:
+	_craft_cat = clampi(page, 0, CRAFT_PAGES.size() - 1)
+	_apply_craft_cat()
+
+
+## 分类页签底色：选中态金、未选中米灰。
+func _craft_chip_style(active: bool) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.80, 0.72, 0.55) if active else Color(0.89, 0.85, 0.74)
+	style.set_corner_radius_all(7)
+	style.content_margin_left = 12.0
+	style.content_margin_right = 12.0
+	style.content_margin_top = 4.0
+	style.content_margin_bottom = 4.0
+	return style
 
 
 ## 右侧路径图刷新：顶端成品格 + 下层材料格（拥有量不足描红框）。

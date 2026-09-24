@@ -2,8 +2,8 @@ class_name BestiaryUI
 extends Control
 ## 星球生物图鉴（F2）：两页签的模态窗口，配色与储物箱/说明书同色系。
 ##
-##   图鉴页 —— 左栏三组筛选芯片（界 / 类 / 地区）+ 搜索框，右栏卡片网格，
-##             下栏条目详情；卡片按界的主色描边，游戏里能遇见的物种额外标记。
+##   图鉴页 —— 左栏三组筛选芯片（界 / 类 / 地区）+ 搜索框，右栏卡片网格；
+##             点击卡片弹出居中预览卡：游戏内物种配 3D 实体模型，其余配界色剪影。
 ##   问答页 —— data/bestiary/quiz.json 的题目打乱出题，答对计入 Progress
 ##             （沿用既有的「知识问答」成就与每 3 题发奖链路，不另建一套）。
 ##
@@ -54,11 +54,15 @@ var _category_flow: HFlowContainer
 var _region_flow: HFlowContainer
 var _grid: GridContainer
 var _summary_label: Label
+## 预览卡（点击卡片弹出）：字段变量名与旧详情栏一致，探针直接读它们。
+var _preview_layer: Control
 var _detail_name: Label
 var _detail_latin: Label
 var _detail_badges: HBoxContainer
 var _detail_fact: Label
 var _detail_game: Label
+var _preview_mobs: Node3D
+var _preview_silhouette: MeshInstance3D
 var _cards: Dictionary = {}
 var _selected_card: EntryCard
 
@@ -110,6 +114,7 @@ func open_for_atlas_region(atlas_id: int) -> void:
 func close() -> void:
 	if not visible:
 		return
+	_close_preview()
 	visible = false
 	closed.emit()
 
@@ -160,6 +165,7 @@ func _build() -> void:
 	main.add_child(_quiz_page)
 
 	main.add_child(_build_status_bar())
+	_build_preview_popup()
 
 
 func _build_header() -> Control:
@@ -261,31 +267,106 @@ func _build_entry_page() -> Control:
 	_grid.add_theme_constant_override("h_separation", 8)
 	_grid.add_theme_constant_override("v_separation", 8)
 	card_scroll.add_child(_grid)
-
-	right.add_child(_build_detail())
 	return page
 
 
-func _build_detail() -> Control:
-	var detail := PanelContainer.new()
-	detail.custom_minimum_size = Vector2(0.0, 148.0)
-	var style := StyleBoxFlat.new()
-	style.bg_color = DETAIL_BG
-	style.border_color = PANEL_BORDER
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(8)
-	style.set_content_margin_all(10)
-	detail.add_theme_stylebox_override("panel", style)
+## ── 预览卡：点击卡片弹出的居中浮层。左 3D 预览（游戏内物种放真模型，
+## 其余放界色剪影盒），右资料（名 / 学名 / 徽章 / 冷知识 / 游戏内指引）。
+## 点暗幕或 ✕ 关闭；不抢键盘焦点，Esc 仍由 HUD 统一处理关整个图鉴。
+func _build_preview_popup() -> void:
+	_preview_layer = Control.new()
+	_preview_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_preview_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_preview_layer.visible = false
+	_preview_layer.z_index = 10
+	add_child(_preview_layer)
 
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.0, 0.0, 0.0, 0.45)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed:
+			_close_preview())
+	_preview_layer.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_preview_layer.add_child(center)
+
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(560.0, 0.0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = PANEL_BG
+	style.border_color = PANEL_BORDER
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(12)
+	style.set_content_margin_all(18)
+	card.add_theme_stylebox_override("panel", style)
+	center.add_child(card)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	card.add_child(row)
+
+	# 左：3D 预览视口（170×170），游戏内物种挂真模型，其余挂界色剪影。
+	var vpc := SubViewportContainer.new()
+	vpc.stretch = true
+	vpc.custom_minimum_size = Vector2(170, 170)
+	vpc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vpc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(vpc)
+	var viewport := SubViewport.new()
+	viewport.own_world_3d = true
+	viewport.transparent_bg = true
+	viewport.size = Vector2i(170, 170)
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vpc.add_child(viewport)
+	var cam := Camera3D.new()
+	cam.position = Vector3(1.35, 1.2, 1.35)
+	viewport.add_child(cam)
+	cam.look_at(Vector3(0.0, 0.55, 0.0))
+	var light := DirectionalLight3D.new()
+	light.rotation_degrees = Vector3(-45.0, 30.0, 0.0)
+	viewport.add_child(light)
+	_preview_mobs = Node3D.new()
+	viewport.add_child(_preview_mobs)
+	_preview_silhouette = MeshInstance3D.new()
+	var sil_mesh := BoxMesh.new()
+	sil_mesh.size = Vector3(0.9, 0.9, 0.9)
+	var sil_mat := StandardMaterial3D.new()
+	sil_mat.albedo_color = Color(0.62, 0.47, 0.27)
+	sil_mesh.material = sil_mat
+	_preview_silhouette.mesh = sil_mesh
+	_preview_silhouette.rotation = Vector3(0.35, 0.6, 0.0)
+	_preview_silhouette.visible = false
+	_preview_mobs.add_child(_preview_silhouette)
+
+	# 右：资料栏。
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 2)
-	detail.add_child(column)
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_theme_constant_override("separation", 4)
+	row.add_child(column)
+
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 8)
+	column.add_child(head)
 
 	_detail_name = Label.new()
-	_detail_name.add_theme_font_size_override("font_size", 20)
+	_detail_name.add_theme_font_size_override("font_size", 22)
 	_detail_name.add_theme_color_override("font_color", TITLE_COLOR)
-	_detail_name.text = "点上面的卡片，查看它的资料"
-	column.add_child(_detail_name)
+	_detail_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(_detail_name)
+
+	var close_btn := Button.new()
+	close_btn.text = "✕"
+	close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.add_theme_color_override("font_color", CLOSE_COLOR)
+	close_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.35, 0.32))
+	close_btn.add_theme_font_size_override("font_size", 20)
+	close_btn.pressed.connect(_close_preview)
+	head.add_child(close_btn)
 
 	_detail_latin = Label.new()
 	_detail_latin.add_theme_font_size_override("font_size", 13)
@@ -298,7 +379,7 @@ func _build_detail() -> Control:
 
 	_detail_fact = Label.new()
 	_detail_fact.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_detail_fact.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_detail_fact.custom_minimum_size = Vector2(320.0, 0.0)
 	_detail_fact.add_theme_font_size_override("font_size", 15)
 	_detail_fact.add_theme_color_override("font_color", BODY_COLOR)
 	column.add_child(_detail_fact)
@@ -308,7 +389,11 @@ func _build_detail() -> Control:
 	_detail_game.add_theme_font_size_override("font_size", 13)
 	_detail_game.add_theme_color_override("font_color", GOOD_COLOR)
 	column.add_child(_detail_game)
-	return detail
+
+
+func _close_preview() -> void:
+	if _preview_layer != null:
+		_preview_layer.visible = false
 
 
 func _build_quiz_page() -> Control:
@@ -607,11 +692,30 @@ func _show_detail(entry: Dictionary) -> void:
 		BestiaryData.category_color(String(entry.get("category", ""))))
 	_add_badge(String(entry.get("region_name_zh", "")), Color(0.35, 0.50, 0.62))
 
+	# 3D 预览：游戏内物种挂真模型（成体、关名牌），否则退回界色剪影盒。
+	# 上一次的模型先撤走，避免多次点击后视口里叠一堆生物。
+	for child in _preview_mobs.get_children():
+		if child != _preview_silhouette:
+			_preview_mobs.remove_child(child)
+			child.queue_free()
 	var mob_type := BestiaryData.mob_of_entry(entry)
+	var show_sil := true
+	if mob_type >= 0:
+		var mob := Mob.new()
+		mob.setup(mob_type as Mob.MobType, null, null)
+		_preview_mobs.add_child(mob)
+		if mob.get("_nametag") != null:
+			(mob.get("_nametag") as Node3D).visible = false
+		show_sil = false
+	_preview_silhouette.visible = show_sil
+	if show_sil:
+		var mat := (_preview_silhouette.mesh as BoxMesh).material as StandardMaterial3D
+		mat.albedo_color = BestiaryData.kingdom_color(String(entry.get("kingdom", "")))
+
+	var extra := ""
 	if mob_type < 0:
 		_detail_game.text = ""
 	else:
-		var extra := ""
 		if Mob.is_protected(mob_type):
 			extra = "（受保护动物，名牌是绿色，打不到）"
 		elif Mob.is_passive(mob_type):
@@ -619,6 +723,7 @@ func _show_detail(entry: Dictionary) -> void:
 		else:
 			extra = "（敌对生物，夜里会出来，小心）"
 		_detail_game.text = "游戏内可遇见：%s%s" % [String(Mob.MOB_NAMES.get(mob_type, "")), extra]
+	_preview_layer.visible = true
 
 
 func _add_badge(text: String, tint: Color) -> void:
@@ -645,6 +750,7 @@ func _add_badge(text: String, tint: Color) -> void:
 
 func _set_tab(tab: int) -> void:
 	_tab = clampi(tab, 0, 1)
+	_close_preview()
 	for i in _tab_buttons.size():
 		var style := _chip_style(CHIP_ACTIVE if i == _tab else CHIP_BG)
 		_tab_buttons[i].add_theme_stylebox_override("normal", style)

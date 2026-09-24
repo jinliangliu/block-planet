@@ -34,7 +34,7 @@ func _run() -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shot_path("bestiary_shot_all.png"))
 
-	# 第二张：筛到「动物 / 哺乳动物」并点开一张卡片，检查卡片网格与详情栏。
+	# 第二张：筛到「动物 / 哺乳动物」并点开一张卡片，弹出居中预览卡（3D 模型）。
 	panel._set_kingdom("animalia")
 	panel._set_category("mammal")
 	panel._region = "asia"
@@ -42,6 +42,11 @@ func _run() -> void:
 	panel._refresh_grid()
 	panel._on_card_pressed("giant_panda")
 	for i in range(12):
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(_shot_path("bestiary_shot_preview.png"))
+	panel._close_preview()
+	for i in range(6):
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shot_path("bestiary_shot_filtered.png"))

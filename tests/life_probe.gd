@@ -1830,6 +1830,32 @@ func _run() -> void:
 		panel._detail_game.text.contains("大熊猫"),
 		"图鉴会指出该物种在游戏内也能遇见：%s" % panel._detail_game.text,
 	)
+	_check(panel._preview_layer.visible, "点卡片后弹出居中预览卡（而不是在底部显示说明）")
+	_check(
+		panel._preview_layer.visible and panel._preview_mobs.get_child_count() >= 1
+		and not panel._preview_silhouette.visible,
+		"游戏内物种的预览卡挂出真 3D 模型（大熊猫）",
+	)
+	panel._close_preview()
+	_check(not panel._preview_layer.visible, "预览卡可关闭")
+	# 任选一个不在游戏里的条目验证剪影兜底：遍历找第一个 mob_of_entry<0 的。
+	var non_game_id := ""
+	for e_value: Variant in BestiaryData.get_entries():
+		var e: Dictionary = e_value
+		if BestiaryData.mob_of_entry(e) < 0:
+			non_game_id = String(e.get("id", ""))
+			break
+	if non_game_id.is_empty():
+		_check(true, "（图鉴条目全部在游戏内，剪影兜底无样本可测）")
+	else:
+		panel._on_card_pressed(non_game_id)
+		await get_tree().process_frame
+		_check(
+			panel._preview_layer.visible and panel._preview_silhouette.visible,
+			"非游戏物种的预览卡退回界色剪影（%s）" % non_game_id,
+		)
+		panel._close_preview()
+	panel._set_kingdom("")
 
 	# S-7 问答页：出题 → 答对计入进度 → 答错不计
 	panel._set_tab(BestiaryUI.Tab.QUIZ)
@@ -1888,7 +1914,42 @@ func _run() -> void:
 	hud.close_bestiary()
 	_check(not panel.is_open(), "关闭图鉴后状态复位")
 
-	# S-9 说明书里写明了入口：文档与实现不同步时（加了键没说）这里会红
+	# S-9 合成台分类分页：每页非空、页间总数守恒、切换后选中项必落在本页。
+	var page_totals := {}
+	for i in range(ItemTypes.RECIPES.size()):
+		var page_no := ItemTypes.recipe_page(ItemTypes.RECIPES[i])
+		page_totals[page_no] = int(page_totals.get(page_no, 0)) + 1
+	_check(
+		page_totals.size() == HUD.CRAFT_PAGES.size()
+		and int(page_totals.values().reduce(func(a: int, b: int) -> int: return a + b, 0)) == ItemTypes.RECIPES.size(),
+		"配方分成 %d 页且页间总数守恒（%s）" % [page_totals.size(), str(page_totals)],
+	)
+	hud.set_craft_open(true)
+	await get_tree().process_frame
+	var tools_visible := 0
+	for i in range(ItemTypes.RECIPES.size()):
+		if (hud._craft_result_grid.get_child(i) as ItemSlot).visible:
+			tools_visible += 1
+	_check(tools_visible == int(page_totals.get(0, -1)), "默认工具页显示 %d 格" % tools_visible)
+	hud._on_craft_cat(3)
+	await get_tree().process_frame
+	var food_visible := 0
+	var food_wrong := 0
+	for i in range(ItemTypes.RECIPES.size()):
+		var slot := hud._craft_result_grid.get_child(i) as ItemSlot
+		if slot.visible:
+			food_visible += 1
+			if ItemTypes.recipe_page(ItemTypes.RECIPES[i]) != 3:
+				food_wrong += 1
+	var sel_in_page := ItemTypes.recipe_page(ItemTypes.RECIPES[hud._selected_recipe]) == 3
+	_check(
+		food_visible == int(page_totals.get(3, -1)) and food_wrong == 0 and sel_in_page,
+		"切到食物页显示 %d 格、无串页、选中项在本页" % food_visible,
+	)
+	_check(hud._craft_craft_button.text == "合成", "按钮文案是「合成」")
+	hud.set_craft_open(false)
+
+	# S-10 说明书里写明了入口：文档与实现不同步时（加了键没说）这里会红
 	var manual_mentions := false
 	for page_value: Variant in ManualPanel.PAGES:
 		var page: Dictionary = page_value

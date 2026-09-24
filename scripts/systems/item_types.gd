@@ -257,6 +257,19 @@ const RECIPES := [
 static func recipe_count(recipe: Dictionary) -> int:
 	return maxi(1, int(recipe.get("count", 1)))
 
+
+## 配方在合成台的分页（0 工具 / 1 武器钓具 / 2 方块 / 3 食物）。
+## 分类按「产物」判断，顺序即页面顺序；新增配方无需登记，自动归页。
+static func recipe_page(recipe: Dictionary) -> int:
+	var result: int = int(recipe["result"])
+	if is_food(result):
+		return 3
+	if is_bow(result) or is_rod(result) or result == ARROW:
+		return 1
+	if category(result) == 0:
+		return 2
+	return 0
+
 # 冶炼炉配方（右键冶炼炉打开）：矿石炼锭、铜锡合青铜、铁+碳+银炼合金。
 const SMELT_RECIPES := [
 	{"result": COPPER_INGOT, "ingredients": {BlockTypes.Block.COPPER_ORE: 2}},
