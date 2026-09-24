@@ -2,7 +2,8 @@ class_name ManualPanel
 extends Control
 
 ## 游戏说明书：F1 唤出的分页说明窗口，配色与储物箱面板同色系。
-## 左侧页签导航，右侧正文；ESC 或 F1 关闭，左右方向键翻页。
+## 左侧页签导航（文字居中），右侧正文；底部为状态栏，随页显示该页 Tips；
+## ESC 或 F1 关闭，左右方向键翻页。
 
 signal closed
 
@@ -22,8 +23,8 @@ const PAGES: Array[Dictionary] = [
 			"空格 —— 跳跃；快速连按两次空格可以起飞（创造模式），再按一次落地",
 			"Ctrl —— 下降（飞行时）· Shift —— 冲刺，跑得更快但更容易饿",
 			"Esc —— 释放或重新捕获鼠标",
-			"小提示：走路掉进水里会游泳，按空格往上浮。",
 		],
+		"tip": "走路掉进水里会游泳，按空格往上浮。",
 	},
 	{
 		"title": "挖掘与建造",
@@ -32,8 +33,8 @@ const PAGES: Array[Dictionary] = [
 			"右键 —— 放置当前手持方块 / 吃食物 / 打开储物箱 / 使用冶炼炉",
 			"数字键 1-9 或滚轮 —— 选择快捷栏物品",
 			"先选中快捷栏里的方块，再指到哪里放哪里",
-			"小提示：用对工具挖得更快——镐子敲石头、斧头砍木头、铲子挖沙土、镰刀收作物。",
 		],
+		"tip": "用对工具挖得更快——镐子敲石头、斧头砍木头、铲子挖沙土、镰刀收作物。",
 	},
 	{
 		"title": "生存须知",
@@ -42,8 +43,8 @@ const PAGES: Array[Dictionary] = [
 			"夜晚会出没敌对生物，天黑前盖好庇护所、插好火把",
 			"死亡后会在出生点复活，掉落的东西记得回去捡",
 			"G —— 在生存模式和创造模式之间切换（创造可飞行、方块无限）",
-			"小提示：食物可以从村庄农田采集，也可以击杀温顺动物获得。",
 		],
+		"tip": "食物可以从村庄农田采集，也可以击杀温顺动物获得。",
 	},
 	{
 		"title": "合成与熔炼",
@@ -54,8 +55,8 @@ const PAGES: Array[Dictionary] = [
 			"工具会用旧：快捷栏上的耐久条变短就该换新的了",
 			"工具分 4 级：木 → 石 → 青铜 → 铁，等级越高越快、越耐用",
 			"矿石也有等级门槛：锡矿要石镐、铁矿要青铜镐、金矿要铁镐",
-			"小提示：储物箱能帮你把多余的物资分门别类存好。",
 		],
+		"tip": "储物箱能帮你把多余的物资分门别类存好。",
 	},
 	{
 		"title": "村庄与交易",
@@ -66,8 +67,8 @@ const PAGES: Array[Dictionary] = [
 			"待售区的物品点「一键售卖」就能换成绿宝石",
 			"右键储物箱可以存取物品，箱子里的东西只属于你",
 			"村里的农田是可靠的食物来源，收割后会长回来",
-			"小提示：把基地建在村庄附近，交易和补给都方便。",
 		],
+		"tip": "把基地建在村庄附近，交易和补给都方便。",
 	},
 	{
 		"title": "世界地图",
@@ -76,8 +77,8 @@ const PAGES: Array[Dictionary] = [
 			"点选七大洲或四大洋，看完介绍就能进入那片区域",
 			"每个区域的地形、植被、生物和天空颜色都不一样",
 			"切换区域会重新生成世界，背包里的东西都会带走",
-			"小提示：右上角小地图带指南针框，红色指针永远指向北方。",
 		],
+		"tip": "右上角小地图带指南针框，红色指针永远指向北方。",
 	},
 	{
 		"title": "狩猎与生态",
@@ -91,6 +92,7 @@ const PAGES: Array[Dictionary] = [
 			"大熊猫、金丝猴、朱鹮、白头海雕、北极熊、袋鼠受保护，名牌是绿色，打不到",
 			"村民和蜻蜓蝴蝶同样是我们的朋友，请让它们自由生活",
 		],
+		"tip": "弓和鱼竿都在合成台制作，打猎前记得提前备足箭。",
 	},
 	{
 		"title": "探索的乐趣",
@@ -99,8 +101,8 @@ const PAGES: Array[Dictionary] = [
 			"创造模式下按两次空格起飞，从天上俯瞰大地",
 			"给自己盖一座小屋，种上树、挖口井",
 			"收集不同区域的方块，是完成收藏的好办法",
-			"小提示：键位速查可随时按 F1 打开本说明书的第一页。",
 		],
+		"tip": "键位速查可随时按 F1 打开本说明书的第一页。",
 	},
 ]
 
@@ -108,6 +110,7 @@ var _open := false
 var _page := 0
 var _page_title: Label
 var _page_body: Label
+var _status_label: Label
 var _nav_buttons: Array[Button] = []
 
 
@@ -135,9 +138,15 @@ func _ready() -> void:
 	panel.add_theme_stylebox_override("panel", _make_panel_style())
 	wrapper.add_child(panel)
 
+	# 主列布局：上方为导航 + 正文，底部整窗宽状态栏。
+	var main := VBoxContainer.new()
+	main.add_theme_constant_override("separation", 10)
+	panel.add_child(main)
+
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 14)
-	panel.add_child(columns)
+	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.add_child(columns)
 
 	var nav := VBoxContainer.new()
 	nav.custom_minimum_size = Vector2(150, 0)
@@ -148,7 +157,7 @@ func _ready() -> void:
 		var btn := Button.new()
 		btn.text = String(PAGES[i]["title"])
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 		btn.custom_minimum_size = Vector2(150, 40)
 		btn.add_theme_font_size_override("font_size", 17)
 		btn.add_theme_color_override("font_color", TITLE_COLOR)
@@ -186,11 +195,38 @@ func _ready() -> void:
 	_page_body.add_theme_color_override("font_color", BODY_COLOR)
 	content.add_child(_page_body)
 
-	var footer := Label.new()
-	footer.text = "左右方向键翻页 · Esc 或 F1 关闭"
-	footer.add_theme_font_size_override("font_size", 14)
-	footer.add_theme_color_override("font_color", Color(BODY_COLOR, 0.7))
-	content.add_child(footer)
+	# 状态栏：左侧随页显示 Tips，右侧保留翻页/关闭键位提示。
+	var status := PanelContainer.new()
+	var status_style := StyleBoxFlat.new()
+	status_style.bg_color = PAGE_BTN_BG
+	status_style.border_color = PANEL_BORDER
+	status_style.set_border_width_all(1)
+	status_style.set_corner_radius_all(8)
+	status_style.content_margin_left = 12.0
+	status_style.content_margin_right = 12.0
+	status_style.content_margin_top = 7.0
+	status_style.content_margin_bottom = 7.0
+	status.add_theme_stylebox_override("panel", status_style)
+	main.add_child(status)
+
+	var status_row := HBoxContainer.new()
+	status_row.add_theme_constant_override("separation", 12)
+	status.add_child(status_row)
+
+	_status_label = Label.new()
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_status_label.add_theme_font_size_override("font_size", 14)
+	_status_label.add_theme_color_override("font_color", BODY_COLOR)
+	status_row.add_child(_status_label)
+
+	var keys_hint := Label.new()
+	keys_hint.text = "左右方向键翻页 · Esc 或 F1 关闭"
+	keys_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	keys_hint.add_theme_font_size_override("font_size", 13)
+	keys_hint.add_theme_color_override("font_color", Color(BODY_COLOR, 0.7))
+	status_row.add_child(keys_hint)
 
 	var close_btn := Button.new()
 	close_btn.text = "✕"
@@ -233,6 +269,7 @@ func select_page(index: int) -> void:
 	var data: Dictionary = PAGES[_page]
 	_page_title.text = String(data["title"])
 	_page_body.text = "\n".join(PackedStringArray(data["lines"]))
+	_status_label.text = "提示：" + String(data.get("tip", ""))
 	for i in _nav_buttons.size():
 		var style := _make_btn_style(PAGE_BTN_ACTIVE if i == _page else PAGE_BTN_BG)
 		_nav_buttons[i].add_theme_stylebox_override("normal", style)
