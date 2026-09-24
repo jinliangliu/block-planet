@@ -572,6 +572,18 @@ func _run() -> void:
 		mesh_node != null and mesh_node.mesh != null and mesh_node.mesh.get_surface_count() == 1,
 		"地球球面网格已生成（单表面顶点色）",
 	)
+	globe.set_view_angles(0.0, 0.0)
+	globe.rotate_view(Vector2(100.0, -50.0))
+	var drag_angles := globe.get_view_angles()
+	_check(
+		is_equal_approx(drag_angles.x, 100.0 * MapGlobe.DRAG_SPEED)
+		and is_equal_approx(drag_angles.y, -50.0 * MapGlobe.DRAG_SPEED)
+		and MapGlobe.DRAG_SPEED >= 0.06,
+		"拖动灵敏度为 4 倍速（%.2f 弧度/像素，横拖 100px 约 %.0f°）" % [
+			MapGlobe.DRAG_SPEED, 100.0 * MapGlobe.DRAG_SPEED * 180.0 / PI
+		],
+	)
+	globe.set_view_angles(0.0, 0.0)
 	var picked := globe.region_at_world_ray(Vector3(0.0, 0.0, 3.0), Vector3(0.0, 0.0, -1.0))
 	_check(
 		picked == RegionAtlas.region_at_lat_lon(0.0, 0.0),
