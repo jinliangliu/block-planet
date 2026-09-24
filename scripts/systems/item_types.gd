@@ -292,6 +292,26 @@ static func category(id: int) -> int:
 	return 0
 
 
+## 可售卖给交易中心的物品：绿宝石本身与空气不可售，其余均可（含工具与食物）。
+static func is_sellable(id: int) -> bool:
+	if id == BlockTypes.Block.AIR or id == EMERALD:
+		return false
+	return id > 0
+
+
+## 单件售价（绿宝石）：按分类定价——材料 3、工具 4、食物 2、方块 1。
+static func sell_price(id: int) -> int:
+	match category(id):
+		1:
+			return 4
+		2:
+			return 2
+		3:
+			return 3
+		_:
+			return 1
+
+
 ## 物品/方块的展示基色：工具按材质、普通物品查表、方块取顶面瓦片色。
 static func item_color(id: int) -> Color:
 	if is_tool_item(id):

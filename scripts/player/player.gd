@@ -50,7 +50,7 @@ signal died
 
 var health := MAX_HEALTH
 var hunger := float(MAX_HUNGER)
-var inventory := Inventory.new()
+var inventory := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
 var spawn_position := Vector3(8.5, 32.0, 8.5)
 
 var _world: World
@@ -111,7 +111,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_use_selected()
 
 	if event is InputEventKey and event.pressed and not event.echo:
-		for i in range(Inventory.SLOT_COUNT):
+		for i in range(Inventory.HOTBAR_SIZE):
 			if event.is_action_pressed("slot_%d" % (i + 1)):
 				select_slot(i)
 		if event.is_action_pressed("jump"):
@@ -188,7 +188,7 @@ func _eat_selected() -> bool:
 	if hunger >= float(MAX_HUNGER):
 		return false
 	hunger = minf(float(MAX_HUNGER), hunger + float(ItemTypes.food_value(id)))
-	inventory.remove_item(selected_slot, 1)
+	inventory.remove_item(active_inventory_slot(), 1)
 	hunger_changed.emit(int(hunger))
 	_held_item.swing()
 	_model.swing_arms()
@@ -288,8 +288,16 @@ func set_spawn_position(pos: Vector3) -> void:
 
 ## 选择快捷栏槽位并广播变化。
 func select_slot(slot: int) -> void:
-	selected_slot = clampi(slot, 0, Inventory.SLOT_COUNT - 1)
+	selected_slot = clampi(slot, 0, Inventory.HOTBAR_SIZE - 1)
 	selected_slot_changed.emit(selected_slot)
+
+
+## 当前快捷栏位所引用的背包槽索引（-1 表示无有效映射）。
+## 快捷栏是背包槽的视图：手持/消耗/耐久都以该索引操作背包本体。
+func active_inventory_slot() -> int:
+	if inventory == null:
+		return -1
+	return inventory.hotbar_slot(selected_slot)
 
 
 ## 切换飞行状态；仅创造模式允许飞行，切换时经事件总线广播。
@@ -313,7 +321,7 @@ func get_selected_item() -> int:
 	if GameState.is_creative():
 		var blocks := BlockTypes.HOTBAR_BLOCKS
 		return blocks[clampi(selected_slot, 0, blocks.size() - 1)]
-	return inventory.get_item(selected_slot)
+	return inventory.get_item(active_inventory_slot())
 
 
 func get_selected_tool() -> int:
@@ -439,7 +447,7 @@ func _finish_break(cell: Vector3i, id: int) -> void:
 		if drop != BlockTypes.Block.AIR:
 			inventory.add_item(drop, BlockTypes.drop_count_for(id))
 		if tool != -1:
-			inventory.damage_tool(selected_slot, 1)
+			inventory.damage_tool(active_inventory_slot(), 1)
 	Events.block_broken.emit(id, cell)
 
 
@@ -464,7 +472,7 @@ func _place_target() -> void:
 		return
 	_world.set_block(cell, id)
 	if GameState.is_survival():
-		inventory.remove_item(selected_slot, 1)
+		inventory.remove_item(active_inventory_slot(), 1)
 	Events.block_placed.emit(id, cell)
 	_held_item.swing()
 	_model.swing_arms()

@@ -22,6 +22,7 @@ var _map_name_label: Label
 var _map_selector: MapSelector
 var _manual: ManualPanel
 var _quest_panel: QuestPanel
+var _inventory_panel: InventoryPanel
 var _toast_label: Label
 var _toast_tween: Tween
 var _day_night: DayNightCycle
@@ -98,6 +99,7 @@ func _build() -> void:
 	_build_smelt_panel(root)
 	_build_minimap(root)
 	_build_manual(root)
+	_build_inventory_panel(root)
 	_build_quest_panel(root)
 	_build_toast(root)
 	_connect_progress()
@@ -131,6 +133,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_craft_panel()
 		elif event.is_action_pressed("toggle_mode"):
 			_toggle_game_mode()
+		elif event.is_action_pressed("toggle_inventory"):
+			open_inventory()
 		elif event.is_action_pressed("toggle_trade"):
 			_toggle_trade_panel()
 		elif event.is_action_pressed("toggle_map"):
@@ -145,6 +149,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_ESCAPE and _craft_overlay != null and _craft_overlay.visible:
 			set_craft_open(false)
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_ESCAPE and _inventory_panel != null and _inventory_panel.is_open():
+			close_inventory()
 			get_viewport().set_input_as_handled()
 
 
@@ -521,13 +528,15 @@ func _refresh_hotbar() -> void:
 			else:
 				b.set_slot({"item": 0, "count": 0})
 		else:
-			var item := _player.inventory.get_item(i)
+			# 快捷栏是背包槽的视图：读取 hotbar_map 指向的背包格。
+			var slot := _player.inventory.hotbar_slot(i)
+			var item := _player.inventory.get_item(slot)
 			if item == BlockTypes.Block.AIR:
 				b.set_slot({"item": 0, "count": 0})
 			elif ItemTypes.is_tool_item(item):
-				b.set_slot({"item": item, "count": 1, "durability": _player.inventory.get_durability(i)})
+				b.set_slot({"item": item, "count": 1, "durability": _player.inventory.get_durability(slot)})
 			else:
-				b.set_slot({"item": item, "count": _player.inventory.get_count(i)})
+				b.set_slot({"item": item, "count": _player.inventory.get_count(slot)})
 
 
 ## 合成台面板：储物箱同款淡色设计。左栏成品栏（3 格一行），右栏自上而下
@@ -954,7 +963,7 @@ func _build_box_panel(root: Control) -> void:
 	_box_overlay.add_child(center)
 
 	var wrapper := Control.new()
-	wrapper.custom_minimum_size = Vector2(664, 560)
+	wrapper.custom_minimum_size = Vector2(664, 620)
 	center.add_child(wrapper)
 
 	var panel := PanelContainer.new()
@@ -1021,14 +1030,14 @@ func _build_box_panel(root: Control) -> void:
 
 	for i in range(36):
 		var b := ItemSlot.new()
-		b.custom_minimum_size = Vector2(64, 64)
+		b.custom_minimum_size = Vector2(56, 56)
 		b.pressed.connect(_on_box_slot_pressed.bind(i))
 		b.mouse_entered.connect(_on_box_slot_hover.bind(i, true, b))
 		b.mouse_exited.connect(_hide_item_tip)
 		_box_grid.add_child(b)
 	for i in range(Inventory.SLOT_COUNT):
 		var b := ItemSlot.new()
-		b.custom_minimum_size = Vector2(64, 64)
+		b.custom_minimum_size = Vector2(56, 56)
 		b.pressed.connect(_on_box_player_slot_pressed.bind(i))
 		b.mouse_entered.connect(_on_box_slot_hover.bind(i, false, b))
 		b.mouse_exited.connect(_hide_item_tip)
@@ -1490,6 +1499,56 @@ func _build_manual(root: Control) -> void:
 	_manual = ManualPanel.new()
 	_manual.closed.connect(_on_manual_closed)
 	root.add_child(_manual)
+
+
+func _build_inventory_panel(root: Control) -> void:
+	_inventory_panel = InventoryPanel.new()
+	_inventory_panel.closed.connect(_on_inventory_closed)
+	_inventory_panel.sold.connect(_on_inventory_sold)
+	root.add_child(_inventory_panel)
+	if _player != null:
+		_inventory_panel.setup(_player.inventory)
+
+
+func open_inventory() -> void:
+	if _inventory_panel == null:
+		return
+	_inventory_panel.setup(_player.inventory)
+	_inventory_panel.open()
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_inventory() -> void:
+	if _inventory_panel == null:
+		return
+	_inventory_panel.close()
+
+
+## 背包窗口关闭：没有其他面板仍打开时收回鼠标捕获。
+func _on_inventory_closed() -> void:
+	if _any_overlay_open() or DisplayServer.is_touchscreen_available():
+		return
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## 售卖完成：写系统日志，并把入包后的背包变化暴露给任务系统计数。
+func _on_inventory_sold(result: Dictionary) -> void:
+	var sold := int(result.get("sold", 0))
+	if sold <= 0:
+		return
+	_push_log("售出 %d 件物品，获得绿宝石 ×%d" % [sold, int(result.get("emeralds", 0))])
+	Progress.notify("trade_done", sold)
+
+
+## 是否有任一覆盖层处于打开状态（决定关闭后是否收回鼠标捕获）。
+func _any_overlay_open() -> bool:
+	return (_box_overlay != null and _box_overlay.visible) \
+		or (_craft_overlay != null and _craft_overlay.visible) \
+		or (_trade_overlay != null and _trade_overlay.visible) \
+		or (_smelt_overlay != null and _smelt_overlay.visible) \
+		or (_manual != null and _manual.is_open()) \
+		or (_quest_panel != null and _quest_panel.is_open())
 
 
 func open_manual() -> void:

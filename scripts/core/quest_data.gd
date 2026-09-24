@@ -111,7 +111,7 @@ static func _build() -> void:
 		},
 		{
 			"id": "newbie_trade", "category": Category.QUEST, "prerequisite": "newbie_pick",
-			"title": "以物易物", "desc": "去村庄按 B 打开交易面板，和村民换一次东西。",
+			"title": "以物易物", "desc": "去村庄按 T 打开交易面板，和村民换一次东西。",
 			"goal": {"type": "count", "key": "traded", "count": 1},
 			"reward": {"item": 204, "count": 2},
 		},

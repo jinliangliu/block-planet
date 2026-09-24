@@ -155,7 +155,8 @@ func _run() -> void:
 	box.add_item(BlockTypes.Block.WOOD, 10)
 	_check(world.get_box(chest_cell) == box, "同一箱体重复访问返回同一背包实例")
 	_check(box.count_item(BlockTypes.Block.WOOD) == 10, "箱内存入木头×10")
-	_check(player.inventory.slots.size() == Inventory.SLOT_COUNT and Inventory.SLOT_COUNT == 18, "玩家背包扩至 18 格")
+	_check(player.inventory.slots.size() == Inventory.SLOT_COUNT and Inventory.SLOT_COUNT == 27,
+		"玩家背包扩至 27 格")
 
 	# 玩家面向储物箱右键 → 事件开面板。
 	player.global_position = Vector3(30.5, base_y + 1.1, 26.5)
@@ -757,6 +758,85 @@ func _run() -> void:
 		"切换区域同步应用该区域随机种子",
 	)
 	desert.queue_free()
+
+	# ── 阶段 O：背包分区、快捷栏指派与待售区一键售卖 ──
+	var bag := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	_check(bag.slots.size() == 27 and Inventory.COMMON_COUNT == 18 and Inventory.SELL_COUNT == 9,
+		"背包 27 格 = 常用区 18 + 待售区 9")
+	_check(not bag.is_sell_slot(0) and bag.is_sell_slot(18) and bag.is_sell_slot(26)
+		and not bag.is_sell_slot(27), "待售区槽位判定覆盖 18~26")
+	_check(bag.hotbar_map.size() == 9 and bag.hotbar_slot(0) == 0 and bag.hotbar_slot(8) == 8,
+		"快捷栏默认映射背包前 9 格")
+
+	# 自动入包只落常用区：填满后剩余量原样返回，待售区保持空。
+	for i in range(Inventory.COMMON_COUNT):
+		bag.slots[i] = {"item": BlockTypes.Block.STONE, "count": BlockTypes.STACK_SIZE, "durability": -1}
+	var leftover := bag.add_item(BlockTypes.Block.DIRT, 3)
+	_check(leftover == 3 and bag.get_item(Inventory.COMMON_COUNT) == BlockTypes.Block.AIR,
+		"常用区满时拾取不再落入待售区")
+
+	# 快捷栏指派：新槽位直接指派，占用中的槽位互换。
+	var assign_bag := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	assign_bag.slots[20] = {"item": ItemTypes.EMERALD, "count": 5, "durability": -1}
+	_check(assign_bag.assign_hotbar(0, 20) and assign_bag.hotbar_item(0) == ItemTypes.EMERALD,
+		"可把背包第 21 格指派到快捷栏 1 号位")
+	_check(assign_bag.assign_hotbar(1, 20) and assign_bag.hotbar_item(1) == ItemTypes.EMERALD
+		and assign_bag.hotbar_item(0) == BlockTypes.Block.AIR,
+		"重复指派同一背包槽时与原快捷位互换")
+	_check(assign_bag.swap_hotbar(1, 3) and assign_bag.hotbar_item(3) == ItemTypes.EMERALD,
+		"快捷栏两位可互换")
+
+	# 搬运：同物按数量合并，异格整栈互换。
+	var move_bag := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	move_bag.slots[0] = {"item": BlockTypes.Block.WOOD, "count": 16, "durability": -1}
+	move_bag.slots[1] = {"item": BlockTypes.Block.WOOD, "count": 8, "durability": -1}
+	_check(move_bag.move_between(0, 1, 4) and move_bag.get_count(1) == 12
+		and move_bag.get_count(0) == 12, "同物搬运按数量合并（16+8 → 12+12）")
+	move_bag.slots[2] = {"item": BlockTypes.Block.SAND, "count": 3, "durability": -1}
+	_check(move_bag.move_between(0, 2, move_bag.get_count(0))
+		and move_bag.get_item(0) == BlockTypes.Block.SAND, "异格整栈搬运为互换")
+
+	# 售价与可售判定。
+	_check(ItemTypes.sell_price(BlockTypes.Block.STONE) == 1
+		and ItemTypes.sell_price(ItemTypes.WOOD_AXE) == 4
+		and ItemTypes.sell_price(ItemTypes.BREAD) == 2
+		and ItemTypes.sell_price(ItemTypes.BONE) == 3, "售价按分类定价（方块1/工具4/食物2/材料3）")
+	_check(not ItemTypes.is_sellable(ItemTypes.EMERALD)
+		and ItemTypes.is_sellable(BlockTypes.Block.STONE), "绿宝石不可售、方块可售")
+
+	# 待售区一键售卖：结算为绿宝石且待售区清空。
+	var sell_bag := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	sell_bag.slots[Inventory.COMMON_COUNT] = {"item": BlockTypes.Block.WOOD, "count": 10, "durability": -1}
+	sell_bag.slots[Inventory.COMMON_COUNT + 1] = {"item": ItemTypes.BONE, "count": 2, "durability": -1}
+	var sale := sell_bag.sell_all()
+	_check(int(sale["emeralds"]) == 16 and int(sale["sold"]) == 12,
+		"一键售卖按售价结算（木头×10 + 骨头×2 = 16 绿宝石）")
+	_check(sell_bag.get_item(Inventory.COMMON_COUNT) == BlockTypes.Block.AIR
+		and sell_bag.count_item(ItemTypes.EMERALD) == 16, "售出后待售区清空、绿宝石入包")
+
+	# 整理背包不触动待售区。
+	var sort_bag := Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	sort_bag.slots[0] = {"item": BlockTypes.Block.STONE, "count": 2, "durability": -1}
+	sort_bag.slots[Inventory.COMMON_COUNT] = {"item": BlockTypes.Block.SAND, "count": 7, "durability": -1}
+	sort_bag.sort_by_category()
+	_check(sort_bag.get_item(Inventory.COMMON_COUNT) == BlockTypes.Block.SAND
+		and sort_bag.get_count(Inventory.COMMON_COUNT) == 7, "整理背包不影响待售区")
+
+	# 面板：开关、选区、数量钳制、快捷栏视图联动。
+	player.inventory.slots[0] = {"item": BlockTypes.Block.STONE, "count": 5, "durability": -1}
+	hud.open_inventory()
+	_check(hud._inventory_panel.is_open(), "可按 B 打开背包窗口（B 键路径）")
+	hud._inventory_panel._on_cell_pressed("common", 0)
+	var sel := hud._inventory_panel.selection()
+	_check(String(sel["zone"]) == "common" and int(sel["index"]) == 0, "点选背包格后可读取选区")
+	hud._inventory_panel.set_amount(99999)
+	_check(int(hud._inventory_panel.selection()["amount"]) == 5, "搬运数量被钳制在该格数量内")
+	player.select_slot(0)
+	_check(player.active_inventory_slot() == 0
+		and player.inventory.get_item(player.active_inventory_slot()) == BlockTypes.Block.STONE,
+		"快捷栏 1 号位手持物品来自映射的背包槽")
+	hud.close_inventory()
+	_check(not hud._inventory_panel.is_open(), "关闭背包窗口后状态复位")
 
 	if _failed == 0:
 		print("LIFE_TEST_OK")
