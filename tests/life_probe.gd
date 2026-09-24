@@ -243,15 +243,16 @@ func _run() -> void:
 		world.set_block(p, BlockTypes.Block.LEAVES)
 	var leaves_in_bag := player.inventory.count_item(BlockTypes.Block.LEAVES)
 
-	player._finish_break(tree_b + Vector3i(0, 2, 0), BlockTypes.Block.WOOD)
+	# 自上而下砍（自上而下不会触发倒塌：每砍一格时上方已经没有树干）。
+	player._finish_break(tree_b + Vector3i(0, 3, 0), BlockTypes.Block.WOOD)
 	_check(
 		world.get_block(tree_leaves[0]) == BlockTypes.Block.LEAVES,
 		"树干未砍尽时树叶不落（上方仍有木头）",
 	)
-	# 自下而上砍完剩余树干：最后一块破坏后整冠消失。
+	# 继续往下砍到只剩树根：最后一块破坏后整冠消失。
+	player._finish_break(tree_b + Vector3i(0, 2, 0), BlockTypes.Block.WOOD)
 	player._finish_break(tree_b + Vector3i(0, 1, 0), BlockTypes.Block.WOOD)
 	player._finish_break(tree_b, BlockTypes.Block.WOOD)
-	player._finish_break(tree_b + Vector3i(0, 3, 0), BlockTypes.Block.WOOD)
 	var leaves_left := 0
 	for p in tree_leaves:
 		if world.get_block(p) == BlockTypes.Block.LEAVES:
@@ -260,6 +261,71 @@ func _run() -> void:
 	_check(
 		player.inventory.count_item(BlockTypes.Block.LEAVES) == leaves_in_bag,
 		"落下的树叶直接消散、不进背包",
+	)
+
+	# ── 树干被砍断后整截倒下 ──
+	# 再搭一棵 4 格树干 + 顶端树冠，从底部砍断：上方那截应当被清走（倒下），
+	# 树冠随树一起走，落地后木头铺在地面上而不是悬在半空。
+	# 树要搭在真实地面上：这里的地形比农田层低 8 格，用 base_y 会让树飘在空中，
+	# 倒下的木头也就找不到落点（这就是第一轮断言失败的原因）。
+	var fall_x := farm_o.x + 12
+	var fall_z := farm_o.z + 6
+	var fall_y := -1
+	for y in range(base_y + 8, base_y - 24, -1):
+		if world.get_block(Vector3i(fall_x, y, fall_z)) != BlockTypes.Block.AIR:
+			fall_y = y + 1
+			break
+	_check(fall_y > 0, "找到 pos 处的地面以便搭一棵落地树（y=%d）" % fall_y)
+	var fall_b := Vector3i(fall_x, fall_y, fall_z)
+	for i in range(4):
+		world.set_block(fall_b + Vector3i(0, i, 0), BlockTypes.Block.WOOD)
+	# 树冠压在树干顶端之上（y=+4），别盖掉最后一节树干。
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			world.set_block(fall_b + Vector3i(dx, 4, dz), BlockTypes.Block.LEAVES)
+	# 砍第二格：上方还剩 2 格树干 + 树冠 → 判据成立
+	player._finish_break(fall_b + Vector3i(0, 1, 0), BlockTypes.Block.WOOD)
+	_check(
+		world.trunk_height_above(fall_b + Vector3i(0, 1, 0)) == 0,
+		"砍断后上方那截树干被清走（倒下演出接管）",
+	)
+	_check(
+		world.get_block(fall_b + Vector3i(0, 4, 0)) == BlockTypes.Block.AIR,
+		"树冠随倒下的那截一起消失，不再悬在空中",
+	)
+	# 演出节点存在且会自己收尾；落地后木头铺在地面（存在 WOOD 且下方实心）。
+	var falling := 0
+	for child in world.get_children():
+		if child is FallingTree:
+			falling += 1
+	_check(falling == 1, "生成了 1 个倒塌演出节点（现 %d 个）" % falling)
+	for i in range(60):
+		await get_tree().physics_frame
+	var landed_wood := 0
+	for i in range(1, 6):
+		for axis_v: Vector3i in [Vector3i(1, 0, 0), Vector3i(-1, 0, 0),
+				Vector3i(0, 0, 1), Vector3i(0, 0, -1)]:
+			var p := fall_b + axis_v * i
+			for dy in range(-3, 4):
+				var q := Vector3i(p.x, fall_b.y + dy, p.z)
+				if world.get_block(q) == BlockTypes.Block.WOOD \
+						and world.get_block(q + Vector3i(0, -1, 0)) != BlockTypes.Block.AIR:
+					landed_wood += 1
+	_check(landed_wood >= 2, "倒下的木头落地铺在地面上（%d 段）" % landed_wood)
+	var still_falling := 0
+	for child in world.get_children():
+		if child is FallingTree:
+			still_falling += 1
+	_check(still_falling == 0, "落地后演出节点自行回收（残留 %d 个）" % still_falling)
+
+	# 手搭的木柱（上方没有树冠）不该被当成树推倒。
+	var post_b := Vector3i(farm_o.x + 18, base_y + 1, farm_o.z + 6)
+	for i in range(3):
+		world.set_block(post_b + Vector3i(0, i, 0), BlockTypes.Block.WOOD)
+	player._finish_break(post_b, BlockTypes.Block.WOOD)
+	_check(
+		world.get_block(post_b + Vector3i(0, 1, 0)) == BlockTypes.Block.WOOD,
+		"手搭木柱不触发倒塌（上方木头仍在原位）",
 	)
 
 	var bread_recipe := _find_recipe(ItemTypes.BREAD)

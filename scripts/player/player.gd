@@ -512,15 +512,63 @@ func _finish_break(cell: Vector3i, id: int) -> void:
 		_world.spill_box(cell, self)
 
 	_world.set_block(cell, BlockTypes.Block.AIR)
-	# 砍掉的是木头且这一列树干已全部砍光 → 树冠的树叶随之落下消失。
+	# 砍的是木头：上方还立着树干就让它倒下来（_on_log_broken 内部判断是否成树）。
 	if id == BlockTypes.Block.WOOD:
-		_world.decay_tree_leaves(cell)
+		_on_log_broken(cell)
 	if GameState.is_survival():
 		if drop != BlockTypes.Block.AIR:
 			inventory.add_item(drop, BlockTypes.drop_count_for(id, tool_type))
 		if tool != -1:
 			inventory.damage_tool(active_inventory_slot(), 1)
 	Events.block_broken.emit(id, cell)
+
+
+## 砍断木头后的处置：上方还立着一截树干且顶着树冠 → 整截倒下来；
+## 否则退回「整棵树砍光后树冠落叶」的老逻辑。
+func _on_log_broken(cell: Vector3i) -> void:
+	var height := _world.trunk_height_above(cell)
+	# 手搭的木柱上方没有树冠，不该被当成树推倒——只按落叶处理。
+	if height <= 0 or not _world.has_canopy_above(cell, height):
+		_world.decay_tree_leaves(cell)
+		return
+	var logs := _world.fell_trunk_above(cell)
+	# 树冠属于正在倒下的那截：无论下方是否还剩树桩，都随树一起走。
+	_world.decay_tree_leaves(cell, true)
+	# 倒向先取主轴：演出与落地铺木头必须用同一个方向，否则木头会躺在树倒向的斜对角。
+	var dir := _axis_of(_tree_fall_direction(cell))
+	FallingTree.spawn(
+		_world,
+		Vector3(cell) + Vector3(0.5, 0.5, 0.5),
+		logs,
+		dir,
+		_on_tree_landed.bind(cell, logs, dir),
+	)
+
+
+## 倒向：背离玩家（从玩家指向树），玩家正贴着树时退化为面朝方向。
+func _tree_fall_direction(cell: Vector3i) -> Vector3:
+	var away := Vector3(cell.x + 0.5, 0.0, cell.z + 0.5) \
+		- Vector3(global_position.x, 0.0, global_position.z)
+	if away.length_squared() < 0.25:
+		away = -Vector3(global_basis.z.x, 0.0, global_basis.z.z)
+	if away.length_squared() < 0.01:
+		away = Vector3(1.0, 0.0, 0.0)
+	return away
+
+
+## 把倒向吸附到水平主轴：斜着倒会让木头压在方块缝里，落点也不好预测。
+func _axis_of(dir: Vector3) -> Vector3:
+	if absf(dir.x) >= absf(dir.z):
+		return Vector3(signf(dir.x) if dir.x != 0.0 else 1.0, 0.0, 0.0)
+	return Vector3(0.0, 0.0, signf(dir.z) if dir.z != 0.0 else 1.0)
+
+
+## 树落地：把倒下的树干铺在地面上（放不下的格子就丢弃，不悬空）。
+func _on_tree_landed(cell: Vector3i, logs: int, dir: Vector3) -> void:
+	var dir_cell := Vector3i(roundi(dir.x), 0, roundi(dir.z))
+	if dir_cell == Vector3i.ZERO:
+		dir_cell = Vector3i(1, 0, 0)
+	_world.place_fallen_logs(cell, logs, dir_cell)
 
 
 func _place_target() -> void:

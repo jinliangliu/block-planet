@@ -228,16 +228,12 @@ func _rebuild_chunk(coord: Vector3i) -> void:
 ## 同一 (x,z) 只生成一棵树；相邻树的树冠若在此范围内相接，一并清落也符合直觉）。
 ## 树叶不进背包、不掉落——伴随每片叶子一撮向下飘散的叶屑，「落下消失」。
 ## 返回清除的树叶格数。
-func decay_tree_leaves(cell: Vector3i) -> int:
-	if _column_has_wood(cell):
+func decay_tree_leaves(cell: Vector3i, force: bool = false) -> int:
+	# force：树干被砍断、上半截正倒下去时用——此时树冠属于「正在倒的那截」，
+	# 不能因为下方还残留树桩就把叶子留在半空。
+	if not force and _column_has_wood(cell):
 		return 0
-	var removed: Array[Vector3i] = []
-	for dy in range(1, 8):
-		for dx in range(-2, 3):
-			for dz in range(-2, 3):
-				var p := cell + Vector3i(dx, dy, dz)
-				if get_block(p) == BlockTypes.Block.LEAVES:
-					removed.append(p)
+	var removed := _canopy_cells(cell)
 	if removed.is_empty():
 		return 0
 
@@ -253,6 +249,80 @@ func decay_tree_leaves(cell: Vector3i) -> int:
 	for p in removed:
 		BreakFx.leaf_fall(self, Vector3(p) + Vector3(0.5, 0.5, 0.5))
 	return removed.size()
+
+
+## 树冠：砍口上方 7 层、每层 ±2 范围内的全部树叶。
+func _canopy_cells(cell: Vector3i) -> Array[Vector3i]:
+	var found: Array[Vector3i] = []
+	for dy in range(1, 8):
+		for dx in range(-2, 3):
+			for dz in range(-2, 3):
+				var p := cell + Vector3i(dx, dy, dz)
+				if get_block(p) == BlockTypes.Block.LEAVES:
+					found.append(p)
+	return found
+
+
+## 砍口上方还有没有树冠（区分天然树与手搭的木柱：木柱上方是空的，不该倒）。
+func has_canopy_above(cell: Vector3i, trunk_height: int) -> bool:
+	if not _canopy_cells(cell + Vector3i(0, trunk_height, 0)).is_empty():
+		return true
+	return not _canopy_cells(cell).is_empty()
+
+
+## 砍口上方连续的树干节数（被砍的那一格本身不算）。
+func trunk_height_above(cell: Vector3i) -> int:
+	var height := 0
+	for i in range(1, 9):
+		if get_block(cell + Vector3i(0, i, 0)) != BlockTypes.Block.WOOD:
+			break
+		height += 1
+	return height
+
+
+## 砍断：清除砍口上方那截树干，返回清掉的木头数（供落地时铺回地面）。
+## 同样走批量写入 + 区块统一重建，避免逐块 rebuild。
+func fell_trunk_above(cell: Vector3i) -> int:
+	var cells: Array[Vector3i] = []
+	for i in range(1, 9):
+		var p := cell + Vector3i(0, i, 0)
+		if get_block(p) != BlockTypes.Block.WOOD:
+			break
+		cells.append(p)
+	if cells.is_empty():
+		return 0
+	var touched := {}
+	for p in cells:
+		set_block_deferred(p, BlockTypes.Block.AIR)
+		touched[world_to_chunk(Vector3(p))] = true
+	for coord: Vector3i in touched:
+		_rebuild_chunk(coord)
+	return cells.size()
+
+
+## 倒下的木头铺回地面：沿倒向逐格找最近的可放位置（脚下实心、自身为空），
+## 返回实际落地的格子。放不下的就当碎在林间——总比悬在空中强。
+func place_fallen_logs(cell: Vector3i, logs: int, dir: Vector3i) -> Array[Vector3i]:
+	var placed: Array[Vector3i] = []
+	if logs <= 0:
+		return placed
+	var touched := {}
+	for i in range(logs):
+		var column := cell + dir * (i + 1)
+		for dy in range(0, 10):
+			var y := cell.y - dy
+			var p := Vector3i(column.x, y, column.z)
+			if get_block(p) != BlockTypes.Block.AIR:
+				continue
+			if get_block(p + Vector3i(0, -1, 0)) == BlockTypes.Block.AIR:
+				continue
+			set_block_deferred(p, BlockTypes.Block.WOOD)
+			touched[world_to_chunk(Vector3(p))] = true
+			placed.append(p)
+			break
+	for coord: Vector3i in touched:
+		_rebuild_chunk(coord)
+	return placed
 
 
 ## 该竖列上下是否还有树干残留（玩家手搭的木头列也会被视为树干，一并尊重）。
