@@ -547,6 +547,29 @@ const FISHING_LOOT := [
 ]
 
 
+## 创造模式快捷栏：建筑材料（虚拟满格供应）+ 常用工具（满耐久、不消耗）。
+## 前 9 位与 BlockTypes.HOTBAR_BLOCKS 同序——探针与老玩家肌肉记忆都按
+## 「1~9 号键 = 九种建材」依赖这个顺序，工具追加在其后。
+const CREATIVE_HOTBAR: Array[int] = [
+	BlockTypes.Block.GRASS,
+	BlockTypes.Block.DIRT,
+	BlockTypes.Block.STONE,
+	BlockTypes.Block.SAND,
+	BlockTypes.Block.WOOD,
+	BlockTypes.Block.LEAVES,
+	BlockTypes.Block.GLASS,
+	BlockTypes.Block.COBBLESTONE,
+	BlockTypes.Block.WATER,
+	WOOD_PICKAXE,
+	WOOD_AXE,
+	WOOD_SHOVEL,
+	WOOD_SICKLE,
+	WOOD_BOW,
+	WOOD_FISHING_ROD,
+	BUCKET,
+]
+
+
 static func is_tool_item(id: int) -> bool:
 	return TOOL_TYPE.has(id)
 

@@ -1654,7 +1654,43 @@ func _run() -> void:
 			badge_color, hud._mode_label.get_theme_color("font_color")
 		],
 	)
+	# 创造快捷栏：建材满格（×100）+ 工具可选中（满耐久、不消耗）。
+	var creative_items := ItemTypes.CREATIVE_HOTBAR
+	var slot_buttons := hud._slot_buttons
+	_check(
+		slot_buttons.size() == creative_items.size()
+		and slot_buttons[0].visible and slot_buttons[creative_items.size() - 1].visible,
+		"创造快捷栏 %d 格全部可见（建材+工具）" % creative_items.size()
+	)
+	var material_ok := true
+	for i in range(9):
+		if hud._slot_buttons[i].item_id() != creative_items[i]:
+			material_ok = false
+			break
+	_check(material_ok, "创造快捷栏前 9 格仍按 HOTBAR_BLOCKS 顺序显示九种建材")
+	hud._player.select_slot(0)  # GRASS → 满格角标。
+	var grass_slot := hud._slot_buttons[0] as ItemSlot
+	_check(
+		grass_slot._count == BlockTypes.STACK_SIZE,
+		"创造模式建材角标为满格 ×%d" % BlockTypes.STACK_SIZE
+	)
+	hud._player.select_slot(12)  # 木镰刀 → 工具可用。
+	_check(
+		hud._player.get_selected_item() == ItemTypes.WOOD_SICKLE
+		and hud._player.get_selected_tool() == ItemTypes.WOOD_SICKLE,
+		"创造模式可选工具（12 号位 = 木镰刀）"
+	)
+	hud._player.select_slot(9)  # 木镐。
+	_check(
+		hud._player.get_selected_tool() == ItemTypes.WOOD_PICKAXE,
+		"创造模式 9 号位 = 木镐（工具区起点）"
+	)
 	GameState.set_mode(GameState.Mode.SURVIVAL)
+	_check(
+		hud._player.selected_slot < Inventory.HOTBAR_SIZE
+		and not hud._slot_buttons[15].visible,
+		"切回生存后选中位收回 9 格内、工具格隐藏"
+	)
 	_check(hud._mode_label.text == "生存", "回到生存模式后徽章复位为「生存」")
 
 	# ── 阶段 R：资产完整性守门（新增物种/方块/物品/图鉴时先看这一节） ──

@@ -240,8 +240,9 @@ func _use_bucket() -> bool:
 		var hit := _raycast_water()
 		if hit.is_empty():
 			return false
-		inventory.remove_item(active_inventory_slot(), 1)
-		inventory.add_item(ItemTypes.WATER_BUCKET, 1)
+		if not GameState.is_creative():
+			inventory.remove_item(active_inventory_slot(), 1)
+			inventory.add_item(ItemTypes.WATER_BUCKET, 1)
 		Events.notice.emit("🪣 装满了一桶水。")
 		_held_item.swing()
 		return true
@@ -434,8 +435,12 @@ func set_spawn_position(pos: Vector3) -> void:
 
 
 ## 选择快捷栏槽位并广播变化。
+## 生存模式快捷栏 9 位；创造模式虚拟快捷栏更长（建材 + 工具）。
 func select_slot(slot: int) -> void:
-	selected_slot = clampi(slot, 0, Inventory.HOTBAR_SIZE - 1)
+	var max_slot := Inventory.HOTBAR_SIZE - 1
+	if GameState.is_creative():
+		max_slot = ItemTypes.CREATIVE_HOTBAR.size() - 1
+	selected_slot = clampi(slot, 0, max_slot)
 	selected_slot_changed.emit(selected_slot)
 
 
@@ -462,12 +467,15 @@ func set_flying(value: bool) -> void:
 func _on_game_mode_changed(_mode: int) -> void:
 	if not GameState.can_fly():
 		set_flying(false)
+	# 创造→生存时选中位可能落在工具区（超出 9 格快捷栏），收回有效范围。
+	if selected_slot >= Inventory.HOTBAR_SIZE:
+		select_slot(0)
 
 
 func get_selected_item() -> int:
 	if GameState.is_creative():
-		var blocks := BlockTypes.HOTBAR_BLOCKS
-		return blocks[clampi(selected_slot, 0, blocks.size() - 1)]
+		var items := ItemTypes.CREATIVE_HOTBAR
+		return items[clampi(selected_slot, 0, items.size() - 1)]
 	return inventory.get_item(active_inventory_slot())
 
 

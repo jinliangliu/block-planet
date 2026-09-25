@@ -123,19 +123,28 @@ func _run() -> void:
 		_check(absf(hit_pos.y - float(top_cell.y + 1)) < 0.05, "塔顶碰撞面高度等于方块顶面 y=%d" % (top_cell.y + 1))
 
 	# 阶梯外侧（基座环外一格）自地表起应无金字塔方块：垂直射线应命中"原始地面顶面"，
-	# 而不是更高处——更高处意味着塔外多出方块。地形在此处本身必然实心。
-	var side_x := base.x + BASE_HALF + 1
-	var side_z := base.z
-	var ground_y := _find_ground_y(side_x, side_z)
-	var side_probe := Vector3(float(side_x) + 0.5, float(base.y) + 1.0, float(side_z) + 0.5)
-	var side_hit := _ray_down(side_probe + Vector3(0.0, 6.0, 0.0), side_probe - Vector3(0.0, 6.0, 0.0))
-	_check(not side_hit.is_empty(), "塔外列仍为地形地面（射线命中）")
-	if not side_hit.is_empty():
+	# 而不是更高处——更高处意味着塔外多出方块。
+	# 出生点现已锚定村庄（D-026），基座某一侧可能紧挨房屋/路径等村庄方块；
+	# 因此检查东南西北四个外侧列，至少有一列保持裸地面即视为通过。
+	var side_clear := false
+	var side_any_hit := false
+	for side_dir: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var sx := base.x + (BASE_HALF + 1) * side_dir.x
+		var sz := base.z + (BASE_HALF + 1) * side_dir.y
+		var gy := _find_ground_y(sx, sz)
+		if gy < -20:
+			continue
+		var side_probe := Vector3(float(sx) + 0.5, float(base.y) + 1.0, float(sz) + 0.5)
+		var side_hit := _ray_down(side_probe + Vector3(0.0, 6.0, 0.0), side_probe - Vector3(0.0, 6.0, 0.0))
+		if side_hit.is_empty():
+			continue
+		side_any_hit = true
 		var side_pos: Vector3 = side_hit["position"]
-		_check(
-			absf(side_pos.y - float(ground_y + 1)) < 0.05,
-			"塔外列无多余方块（命中高度=原始地面顶面 y=%d，实测 %.2f）" % [ground_y + 1, side_pos.y]
-		)
+		if absf(side_pos.y - float(gy + 1)) < 0.05:
+			side_clear = true
+			break
+	_check(side_any_hit, "塔外列仍可射线命中（至少一侧为地表）")
+	_check(side_clear, "塔外至少一侧无多余方块（其余侧允许紧贴村庄方块）")
 
 	# --- 留存断言 ---
 	var coord := _world.world_to_chunk(Vector3(base) + Vector3(0.5, 0.5, 0.5))

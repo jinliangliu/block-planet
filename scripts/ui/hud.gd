@@ -23,6 +23,8 @@ var _root: Control
 var _slot_group: ButtonGroup
 var _recipe_group: ButtonGroup
 var _slot_buttons: Array[Button] = []
+## 快捷栏整条容器：创造/生存模式格数不同，刷新时按可见格数重新居中。
+var _hotbar_bar: Control
 var _hunger_label: Label
 var _name_label: Label
 var _hearts: Control
@@ -396,10 +398,11 @@ func _build_action_buttons(root: Control) -> void:
 
 
 func _build_hotbar(root: Control) -> void:
-	var blocks := BlockTypes.HOTBAR_BLOCKS
+	# 快捷栏按「创造模式清单」建满（建材 + 工具）；生存模式只显示前 9 格。
+	var items := ItemTypes.CREATIVE_HOTBAR
 	var slot_size := 52.0
 	var gap := 6.0
-	var total := blocks.size() * slot_size + (blocks.size() - 1) * gap
+	var total := items.size() * slot_size + (items.size() - 1) * gap
 
 	var bar := Control.new()
 	bar.anchor_left = 0.5
@@ -412,9 +415,10 @@ func _build_hotbar(root: Control) -> void:
 	bar.offset_bottom = -16.0
 	bar.mouse_filter = Control.MOUSE_FILTER_PASS
 	root.add_child(bar)
+	_hotbar_bar = bar
 
 	_slot_group = ButtonGroup.new()
-	for i in range(blocks.size()):
+	for i in range(items.size()):
 		var b := ItemSlot.new()
 		b.set_dark_style()
 		b.toggle_mode = true
@@ -607,15 +611,29 @@ func _on_player_slot_changed(slot: int) -> void:
 func _refresh_hotbar() -> void:
 	if _player == null:
 		return
-	var blocks := BlockTypes.HOTBAR_BLOCKS
-	for i in range(_slot_buttons.size()):
-		var b := _slot_buttons[i] as ItemSlot
-		if GameState.is_creative():
-			if i < blocks.size():
-				b.set_slot({"item": blocks[i], "count": 1})
+	var items := ItemTypes.CREATIVE_HOTBAR
+	var slot_size := 52.0
+	var gap := 6.0
+	if GameState.is_creative():
+		# 创造模式：全部格子可见，整条重新居中；建材按堆叠上限满格显示。
+		for i in range(_slot_buttons.size()):
+			var b := _slot_buttons[i] as ItemSlot
+			b.visible = true
+			if i < items.size():
+				var id: int = items[i]
+				var count := BlockTypes.STACK_SIZE if not ItemTypes.is_tool_item(id) else 1
+				b.set_slot({"item": id, "count": count})
 			else:
 				b.set_slot({"item": 0, "count": 0})
-		else:
+		_center_hotbar(items.size(), slot_size, gap)
+	else:
+		# 生存模式：只保留前 9 格（映射背包），其余隐藏并把整条居中。
+		for i in range(_slot_buttons.size()):
+			var b := _slot_buttons[i] as ItemSlot
+			if i >= Inventory.HOTBAR_SIZE:
+				b.visible = false
+				continue
+			b.visible = true
 			# 快捷栏是背包槽的视图：读取 hotbar_map 指向的背包格。
 			var slot := _player.inventory.hotbar_slot(i)
 			var item := _player.inventory.get_item(slot)
@@ -625,6 +643,16 @@ func _refresh_hotbar() -> void:
 				b.set_slot({"item": item, "count": 1, "durability": _player.inventory.get_durability(slot)})
 			else:
 				b.set_slot({"item": item, "count": _player.inventory.get_count(slot)})
+		_center_hotbar(Inventory.HOTBAR_SIZE, slot_size, gap)
+
+
+## 按可见格数把快捷栏整条水平居中（创造 16 格 / 生存 9 格宽度不同）。
+func _center_hotbar(visible_count: int, slot_size: float, gap: float) -> void:
+	if _hotbar_bar == null:
+		return
+	var total := visible_count * slot_size + (visible_count - 1) * gap
+	_hotbar_bar.offset_left = -total / 2.0
+	_hotbar_bar.offset_right = total / 2.0
 
 
 ## 合成台面板：储物箱同款淡色设计。左栏成品栏（6 格一行），右栏自上而下
