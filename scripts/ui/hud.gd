@@ -1413,7 +1413,10 @@ func _refresh_box_panel() -> void:
 	if _box_inventory == null or _player == null:
 		return
 	_hide_item_tip()
-	for i in range(27):
+	# 箱体是 36 格背包：全部刷新（此前只刷 27 格，落入 27~35 的物品
+	# 既看不见也取不出来，看起来就像「存进去数量没变化」）。
+	var box_slots := mini(_box_inventory.slots.size(), _box_grid.get_child_count())
+	for i in range(box_slots):
 		var b := _box_grid.get_child(i) as ItemSlot
 		b.set_slot(_box_inventory.slots[i])
 	for i in range(Inventory.SLOT_COUNT):
@@ -1645,7 +1648,8 @@ func _on_box_slot_pressed(index: int) -> void:
 	var count: int = slot["count"]
 	if item == BlockTypes.Block.AIR or count <= 0:
 		return
-	var remaining := _player.inventory.add_item(item, count)
+	# 传源格耐久：磨旧的工具搬进背包不能凭空修满。
+	var remaining := _player.inventory.add_item(item, count, int(slot["durability"]))
 	var moved := count - remaining
 	if moved <= 0:
 		return
@@ -1662,7 +1666,7 @@ func _on_box_player_slot_pressed(index: int) -> void:
 	var count: int = slot["count"]
 	if item == BlockTypes.Block.AIR or count <= 0:
 		return
-	var remaining := _box_inventory.add_item(item, count)
+	var remaining := _box_inventory.add_item(item, count, int(slot["durability"]))
 	var moved := count - remaining
 	if moved <= 0:
 		return

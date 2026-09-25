@@ -176,9 +176,11 @@ func sell_all() -> Dictionary:
 	return {"emeralds": emeralds, "sold": sold, "leftover": leftover}
 
 
-func add_item(item: int, count: int) -> int:
+## durability：工具入包时保留的耐久（<0 取满耐久）。容器间搬运须传源格耐久，
+## 否则磨旧的镐子搬个家就修满了。
+func add_item(item: int, count: int, durability: int = -1) -> int:
 	if ItemTypes.is_tool_item(item):
-		return _add_tool(item, count)
+		return _add_tool(item, count, durability)
 
 	var remaining := count
 
@@ -206,12 +208,12 @@ func add_item(item: int, count: int) -> int:
 	return remaining
 
 
-func _add_tool(item: int, count: int) -> int:
+func _add_tool(item: int, count: int, durability: int = -1) -> int:
 	for i in range(_fill_range()):
 		if slots[i]["item"] == BlockTypes.Block.AIR:
 			slots[i]["item"] = item
 			slots[i]["count"] = 1
-			slots[i]["durability"] = ItemTypes.tool_durability(item)
+			slots[i]["durability"] = durability if durability >= 0 else ItemTypes.tool_durability(item)
 			changed.emit()
 			return count - 1
 	return count

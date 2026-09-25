@@ -195,6 +195,59 @@ func _run() -> void:
 	hud.set_box_open(false)
 	_check(not hud._box_overlay.visible, "储物箱面板可关闭")
 
+	# 工具搬运保留耐久：磨旧的镐子搬个家不能凭空修满。
+	# 先清掉玩家可能从先前阶段持有的同款工具，避免断言读到旧实例。
+	for i in range(player.inventory.slots.size()):
+		if int(player.inventory.slots[i]["item"]) == ItemTypes.WOOD_PICKAXE:
+			player.inventory.slots[i] = {"item": BlockTypes.Block.AIR, "count": 0, "durability": -1}
+	var worn: Dictionary = {"item": ItemTypes.WOOD_PICKAXE, "count": 1, "durability": 17}
+	box.slots[1] = worn
+	hud._on_box_slot_pressed(1)
+	var carried_dur := -1
+	for s in player.inventory.slots:
+		if int(s["item"]) == ItemTypes.WOOD_PICKAXE:
+			carried_dur = int(s["durability"])
+	_check(
+		carried_dur == 17,
+		"箱→包工具转移保留源耐久（17，实际 %d）" % carried_dur
+	)
+	# 箱格 27~35 与前 27 格同等可见可取（箱体 36 格，此前只刷新前 27 格）。
+	for i in range(27):
+		box.slots[i] = {"item": BlockTypes.Block.DIRT, "count": BlockTypes.STACK_SIZE, "durability": -1}
+	player.inventory.add_item(BlockTypes.Block.STONE, 30)
+	var overflow_slot := -1
+	for i in range(player.inventory.slots.size()):
+		if int(player.inventory.slots[i]["item"]) == BlockTypes.Block.STONE:
+			overflow_slot = i
+			break
+	hud._on_box_player_slot_pressed(overflow_slot)
+	var box_overflow := 0
+	for i in range(27, box.slots.size()):
+		if int(box.slots[i]["item"]) == BlockTypes.Block.STONE:
+			box_overflow += int(box.slots[i]["count"])
+	var overflow_shown := 0
+	for i in range(27, box.slots.size()):
+		var b := hud._box_grid.get_child(i) as ItemSlot
+		if b.item_id() == BlockTypes.Block.STONE:
+			overflow_shown += 1
+	_check(
+		box_overflow == 30 and overflow_shown >= 1,
+		"箱格 27~35 可存入且面板可见（溢出区石头 ×%d，显示格 %d/9）" % [box_overflow, overflow_shown]
+	)
+	hud._on_box_slot_pressed(27)
+	_check(
+		player.inventory.count_item(BlockTypes.Block.STONE) == 30,
+		"箱格 27+ 的物品可点击取出（数量随之减少）"
+	)
+	# 还原现场：后续「破坏散落」阶段要求箱内恰好 10 木头、背包无多余测试物资。
+	for i in range(box.slots.size()):
+		box.slots[i] = {"item": BlockTypes.Block.AIR, "count": 0, "durability": -1}
+	box.add_item(BlockTypes.Block.WOOD, 10)
+	player.inventory.consume_item(BlockTypes.Block.STONE, 30)
+	for i in range(player.inventory.slots.size()):
+		if int(player.inventory.slots[i]["item"]) == ItemTypes.WOOD_PICKAXE:
+			player.inventory.slots[i] = {"item": BlockTypes.Block.AIR, "count": 0, "durability": -1}
+
 	# 面板开着时箱子被破坏 → 自动关闭。
 	Events.request_box_open.emit(chest_cell)
 	_check(hud._box_overlay.visible, "可再次打开储物箱面板")
