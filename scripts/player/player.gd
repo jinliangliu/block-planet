@@ -635,6 +635,16 @@ func _finish_break(cell: Vector3i, id: int) -> void:
 	if GameState.is_survival():
 		if drop != BlockTypes.Block.AIR:
 			inventory.add_item(drop, BlockTypes.drop_count_for(id, tool_type))
+			# 挖矿幸运掉落：额外矿石与宝藏（Toast 播报，让幸运看得见）。
+			# 等级不够的矿连基础掉落都没有，自然也不参与幸运结算。
+			var luck := 0
+			if required > 0 and tool != -1:
+				luck = ItemTypes.tool_tier(tool) - required
+			for bonus: Array in BlockTypes.ore_lucky_drops(id, luck):
+				inventory.add_item(int(bonus[0]), int(bonus[1]))
+				Events.notice.emit("✨ 幸运掉落：%s ×%d！" % [
+					ItemTypes.item_name(int(bonus[0])), int(bonus[1])
+				])
 		if tool != -1:
 			inventory.damage_tool(active_inventory_slot(), 1)
 	Events.block_broken.emit(id, cell)

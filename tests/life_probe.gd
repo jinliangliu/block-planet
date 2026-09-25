@@ -1239,6 +1239,51 @@ func _run() -> void:
 		"镰刀收割小麦收成翻倍（2 → 4）",
 	)
 
+	# P-3b 挖矿掉落加成：矿石基础产量 ×2 + 幸运掉落（统计断言，采样足够大）。
+	_check(
+		BlockTypes.drop_count_for(BlockTypes.Block.COPPER_ORE) == 2
+		and BlockTypes.drop_count_for(BlockTypes.Block.TIN_ORE) == 2
+		and BlockTypes.drop_count_for(BlockTypes.Block.IRON_ORE) == 2
+		and BlockTypes.drop_count_for(BlockTypes.Block.GOLD_ORE) == 2
+		and BlockTypes.drop_count_for(BlockTypes.Block.STONE) == 1,
+		"矿石基础产量 ×2（石头仍为 1）",
+	)
+	var extra_ore := 0
+	var emerald_hits := 0
+	for i in range(400):
+		for bonus: Array in BlockTypes.ore_lucky_drops(BlockTypes.Block.COPPER_ORE, 0):
+			if int(bonus[0]) == BlockTypes.Block.COPPER_ORE:
+				extra_ore += 1
+			elif int(bonus[0]) == ItemTypes.EMERALD:
+				emerald_hits += 1
+	_check(
+		extra_ore >= 30 and extra_ore <= 140 and emerald_hits >= 1,
+		"幸运掉落统计合理：400 次挖掘额外矿石 %d 次（期望 20%%）、绿宝石 %d 次（期望 5%%）" % [
+			extra_ore, emerald_hits
+		],
+	)
+	_check(
+		BlockTypes.ore_lucky_drops(BlockTypes.Block.STONE, 9).is_empty(),
+		"非矿石无幸运掉落",
+	)
+	# 端到端：木镐挖铜矿至少入账 2 份（幸运只多不少）。
+	var ore_cell := Vector3i(34, base_y + 1, 28)
+	world.set_block(ore_cell, BlockTypes.Block.COPPER_ORE)
+	player.inventory.add_item(ItemTypes.WOOD_PICKAXE, 1)
+	player.select_slot(0)
+	for i in range(player.inventory.slots.size()):
+		if int(player.inventory.slots[i]["item"]) == ItemTypes.WOOD_PICKAXE:
+			player.inventory.assign_hotbar(0, i)
+			break
+	var ore_before := player.inventory.count_item(BlockTypes.Block.COPPER_ORE)
+	player._finish_break(ore_cell, BlockTypes.Block.COPPER_ORE)
+	_check(
+		player.inventory.count_item(BlockTypes.Block.COPPER_ORE) >= ore_before + 2,
+		"木镐挖铜矿至少入账 2 份（%d → %d）" % [
+			ore_before, player.inventory.count_item(BlockTypes.Block.COPPER_ORE)
+		],
+	)
+
 	# P-4 生物生长阶段
 	_check(
 		Mob.stage_count_of(Mob.MobType.CHICKEN) == 3

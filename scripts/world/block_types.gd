@@ -298,6 +298,14 @@ const MIN_TIER := {
 	Block.GOLD_ORE: 4,
 }
 
+# 挖矿掉落加成：矿石一次挖出的基础份数（儿童向：慷慨一点，挖矿有收获感）。
+const ORE_BASE_YIELD := {
+	Block.COPPER_ORE: 2,
+	Block.TIN_ORE: 2,
+	Block.IRON_ORE: 2,
+	Block.GOLD_ORE: 2,
+}
+
 # 装备镰刀时收成翻倍的方块（一次收 3 束小麦、2 份水草）。
 const SICKLE_BONUS := {
 	Block.WHEAT_CROP: 2,
@@ -345,13 +353,30 @@ static func drop_for(id: int, tool_type: String) -> int:
 		_:
 			return id
 
-## 一次破坏的掉落数量（成熟小麦掉 2 个，其余 1 个）。
+## 一次破坏的掉落数量（成熟小麦掉 2 个、矿石掉 2 份，其余 1 个）。
 ## 装备镰刀时对 SICKLE_BONUS 列出的作物额外多掉，让镰刀有实用价值。
 static func drop_count_for(id: int, tool: String = "") -> int:
-	var base := 2 if id == Block.WHEAT_CROP else 1
+	var base := 2 if id == Block.WHEAT_CROP else int(ORE_BASE_YIELD.get(id, 1))
 	if tool == "sickle" and SICKLE_BONUS.has(id):
 		return base + int(SICKLE_BONUS[id])
 	return base
+
+
+## 挖矿幸运掉落：返回额外掉落清单 [[物品, 数量], ...]（非矿石恒为空）。
+## luck：工具等级超出矿的最低需求几级（刚好达标为 0，徒手为负）——
+## 镐越好幸运越高：基础 20% 概率多掉一份矿，每高一级再 +10%；
+## 挖任意矿石 5% 惊喜掉绿宝石，金矿再 8% 掉水晶（让深挖金矿值得期待）。
+static func ore_lucky_drops(id: int, luck: int) -> Array:
+	var bonuses: Array = []
+	if not ORE_BASE_YIELD.has(id):
+		return bonuses
+	if randf() < 0.2 + 0.1 * maxi(0, luck):
+		bonuses.append([id, 1])
+	if randf() < 0.05:
+		bonuses.append([ItemTypes.EMERALD, 1])
+	if id == Block.GOLD_ORE and randf() < 0.08:
+		bonuses.append([ItemTypes.CRYSTAL, 1])
+	return bonuses
 
 
 ## 采集该方块所需的最低工具等级；0 表示无等级要求。
