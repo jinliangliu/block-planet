@@ -255,8 +255,8 @@ const RECIPES := [
 	{"result": BlockTypes.Block.GLASS, "ingredients": {BlockTypes.Block.SAND: 2}},
 	{"result": BlockTypes.Block.CHEST, "ingredients": {BlockTypes.Block.WOOD: 6}},
 	{"result": BREAD, "ingredients": {WHEAT: 3}},
-	# 床：羊毛 + 木板（木板用木头代指），夜晚右键睡觉跳到清晨。
-	{"result": BlockTypes.Block.BED, "ingredients": {BlockTypes.Block.WOOL: 3, BlockTypes.Block.WOOD: 3}},
+	# 床：2 羊毛 + 3 木板（木板用木头代指），夜晚右键睡觉跳到清晨。
+	{"result": BlockTypes.Block.BED, "ingredients": {BlockTypes.Block.WOOL: 2, BlockTypes.Block.WOOD: 3}},
 	# 水桶：对着水右键装水，喝水回复体力。
 	{"result": BUCKET, "count": 1, "ingredients": {BlockTypes.Block.WOOD: 3}},
 	{"result": BlockTypes.Block.SMELTER, "ingredients": {BlockTypes.Block.COBBLESTONE: 8}},
@@ -481,7 +481,7 @@ const ITEM_DESCRIPTIONS := {
 	IRON_FISHING_ROD: "更耐用的鱼竿，咬钩时机的容错更宽松。",
 	WOOD_BOW: "按住右键蓄力，松手射出箭，蓄得越满伤害越高。",
 	IRON_BOW: "射得更快也更耐用的弓，狩猎大型猎物更从容。",
-	BlockTypes.Block.BED: "夜晚右键睡觉，一觉睡到天亮。羊毛加木板合成。",
+	BlockTypes.Block.BED: "夜晚右键睡觉，一觉睡到天亮。2 羊毛加 3 木板合成。",
 	BUCKET: "对着水面右键装水。",
 	WATER_BUCKET: "右键喝水，恢复体力还回一点血。喝完变回空桶。",
 	CARROT: "可以生吃，也可以种在耕地上。",

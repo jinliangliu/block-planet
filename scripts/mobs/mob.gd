@@ -1143,7 +1143,8 @@ func _build_villager() -> void:
 	_build_villager_like(
 		Color(0.52, 0.38, 0.27),
 		Color(0.90, 0.76, 0.62),
-		Color(0.05, 0.05, 0.05)
+		Color(0.05, 0.05, 0.05),
+		true
 	)
 
 
@@ -1151,7 +1152,8 @@ func _build_pillager() -> void:
 	_build_villager_like(
 		Color(0.38, 0.40, 0.47),
 		Color(0.70, 0.66, 0.60),
-		Color(0.12, 0.08, 0.24)
+		Color(0.12, 0.08, 0.24),
+		false
 	)
 
 
@@ -1266,7 +1268,8 @@ func _add_eyes(head_size: Vector3, eye_y: float, head_front_z: float) -> void:
 
 
 ## 村民/掠夺者外观：长袍 + 头 + 标志性大鼻子 + 眼。
-func _build_villager_like(robe_color: Color, skin_color: Color, eye_color: Color) -> void:
+func _build_villager_like(robe_color: Color, skin_color: Color, eye_color: Color,
+		arms_crossed: bool = true) -> void:
 	_add_box(Vector3(0.56, 0.95, 0.42), robe_color, Vector3(0.0, 0.475, 0.0))
 	var head_y := 1.16
 	_add_box(Vector3(0.42, 0.42, 0.42), skin_color, Vector3(0.0, head_y, 0.0))
@@ -1274,6 +1277,20 @@ func _build_villager_like(robe_color: Color, skin_color: Color, eye_color: Color
 	_add_box(Vector3(0.12, 0.22, 0.14), skin_color.darkened(0.08), Vector3(0.0, head_y - 0.06, -0.28))
 	for sx in [-0.09, 0.09]:
 		_add_eye_at(Vector3(sx, head_y + 0.06, -0.235), 0.045, eye_color)
+	if arms_crossed:
+		# 村民经典抱臂站姿：肩部前伸的上臂 + 下垂的小臂 + 胸前交叠的横臂。
+		for sx in [-0.27, 0.27]:
+			_add_box(Vector3(0.15, 0.15, 0.26), robe_color.darkened(0.05),
+				Vector3(sx, 0.80, -0.13))
+			_add_box(Vector3(0.15, 0.28, 0.15), robe_color.darkened(0.05),
+				Vector3(sx, 0.64, -0.24))
+		_add_box(Vector3(0.40, 0.15, 0.15), skin_color, Vector3(0.0, 0.53, -0.29))
+	else:
+		# 掠夺者：双臂垂在身侧，末端露肤色手。
+		for sx in [-0.34, 0.34]:
+			_add_box(Vector3(0.15, 0.60, 0.16), robe_color.darkened(0.05),
+				Vector3(sx, 0.60, 0.0))
+			_add_box(Vector3(0.15, 0.14, 0.15), skin_color, Vector3(sx, 0.30, -0.08))
 
 
 func _build_hostile() -> void:

@@ -1245,6 +1245,17 @@ func _run() -> void:
 	var panda := _spawn_mob(
 		main_scene, Mob.MobType.PANDA, player, day_night, Vector3(31.5, base_y + 1.1, 26.5)
 	)
+	# 人形生物必须有手臂：村民抱臂（10 网格）、掠夺者垂臂，缺失即造型回退。
+	var villager_arm := Mob.new()
+	villager_arm.setup(Mob.MobType.VILLAGER, player, day_night, -1)
+	main_scene.add_child(villager_arm)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var villager_meshes := 0
+	for child in villager_arm.get_children():
+		villager_meshes += _count_meshes_recursive(child)
+	villager_arm.queue_free()
+	_check(villager_meshes >= 10, "村民模型有手臂（网格 %d 个，抱臂 >= 10）" % villager_meshes)
 	_check(
 		panda.display_name() == "大熊猫" and Mob.is_passive(Mob.MobType.PANDA)
 		and panda.max_health == 14 and not panda.is_huntable(),
@@ -2256,6 +2267,14 @@ func _run() -> void:
 	else:
 		print("LIFE_TEST_FAILED count=%d" % _failed)
 		get_tree().quit(1)
+
+
+## 递归统计节点树中 MeshInstance3D 的数量（含自身层级）。
+func _count_meshes_recursive(node: Node) -> int:
+	var count := 1 if node is MeshInstance3D else 0
+	for child in node.get_children():
+		count += _count_meshes_recursive(child)
+	return count
 
 
 ## 复算村庄基准高度：与 VillageBuilder._probe_base_y 同款循环。
