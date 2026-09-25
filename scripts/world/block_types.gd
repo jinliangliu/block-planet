@@ -33,6 +33,7 @@ enum Block {
 	CARROT_CROP = 27,
 	POTATO_CROP = 28,
 	RADISH_CROP = 29,
+	ICE = 30,
 }
 
 const NAMES := {
@@ -66,6 +67,7 @@ const NAMES := {
 	Block.CARROT_CROP: "胡萝卜",
 	Block.POTATO_CROP: "土豆",
 	Block.RADISH_CROP: "白萝卜",
+	Block.ICE: "冰块",
 }
 
 const SOLID := {
@@ -99,6 +101,7 @@ const SOLID := {
 	Block.CARROT_CROP: false,
 	Block.POTATO_CROP: false,
 	Block.RADISH_CROP: false,
+	Block.ICE: true,
 }
 
 const TRANSPARENT := {
@@ -132,6 +135,7 @@ const TRANSPARENT := {
 	Block.CARROT_CROP: true,
 	Block.POTATO_CROP: true,
 	Block.RADISH_CROP: true,
+	Block.ICE: false,
 }
 
 # 每个方块的纹理瓦片：[顶面, 底面, 侧面]
@@ -165,6 +169,7 @@ const TILES := {
 	Block.CARROT_CROP: Vector3i(28, 28, 28),
 	Block.POTATO_CROP: Vector3i(29, 29, 29),
 	Block.RADISH_CROP: Vector3i(30, 30, 30),
+	Block.ICE: Vector3i(31, 31, 31),
 }
 
 # 水生植物：生长在水中/水面的非固体装饰方块，徒手可采，可再放置。
@@ -219,6 +224,7 @@ const SHORT_NAMES := {
 	Block.CARROT_CROP: "萝卜",
 	Block.POTATO_CROP: "土豆",
 	Block.RADISH_CROP: "萝",
+	Block.ICE: "冰",
 }
 
 # 可堆叠物品（方块/材料/食物）的每格上限。
@@ -254,6 +260,7 @@ const HARDNESS := {
 	Block.CARROT_CROP: 0.1,
 	Block.POTATO_CROP: 0.1,
 	Block.RADISH_CROP: 0.1,
+	Block.ICE: 0.6,
 }
 
 # 有效工具类型；空字符串表示徒手/任意工具即可。
@@ -287,6 +294,7 @@ const EFFECTIVE_TOOL := {
 	Block.CARROT_CROP: "sickle",
 	Block.POTATO_CROP: "sickle",
 	Block.RADISH_CROP: "sickle",
+	Block.ICE: "pickaxe",
 }
 
 # 采集该方块所需的最低工具等级（1 木 / 2 石 / 3 青铜 / 4 铁）。

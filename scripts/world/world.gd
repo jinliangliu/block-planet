@@ -30,6 +30,8 @@ var _modified_data: Dictionary[Vector3i, PackedByteArray] = {}
 var _pending_rebuilds: Array[Vector3i] = []
 var _atlas_material: StandardMaterial3D
 var _noise := FastNoiseLite.new()
+# 极地冰山噪声：低频成团，决定哪里隆起露出海面的冰山（D-028）。
+var _iceberg_noise := FastNoiseLite.new()
 var _player: Player
 var _neighbor_lookup: Callable
 # 储物箱内容物：按方块坐标记录独立 36 格背包，破坏时散落至地面。
@@ -403,6 +405,10 @@ func _configure_noise() -> void:
 	_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_noise.frequency = 0.012
 	_noise.fractal_octaves = 3
+	_iceberg_noise.seed = seed_value + 7717
+	_iceberg_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_iceberg_noise.frequency = 0.05
+	_iceberg_noise.fractal_octaves = 2
 
 
 func _build_atlas_material() -> void:
@@ -517,8 +523,20 @@ func _terrain_height(wx: int, wz: int) -> int:
 
 ## 地表材质由区域配置决定：高于 low_line 用 surface，低于等于则用 surface_low。
 ## 例如非洲低地为沙（沙漠）、高地长草；两极一律为雪。地下三格同理。
+## 水体策略（D-028）：dry 沙漠洼地不留河塘；iceberg 极地海面封冻成冰、
+## 噪声成团处隆起从海底长到海面之上的冰山（顶面积雪）。
 func _block_at(wx: int, wy: int, wz: int, height: int) -> int:
 	if wy > height:
+		var policy := String(_profile.get("water", "normal"))
+		if policy == "dry":
+			return BlockTypes.Block.AIR
+		if policy == "iceberg" and height < SEA_LEVEL:
+			var top := _iceberg_top(wx, wz)
+			if top > 0 and wy <= top:
+				return BlockTypes.Block.SNOW if wy == top else BlockTypes.Block.ICE
+			if wy == SEA_LEVEL:
+				return BlockTypes.Block.ICE
+			return BlockTypes.Block.WATER if wy < SEA_LEVEL else BlockTypes.Block.AIR
 		return BlockTypes.Block.WATER if wy <= SEA_LEVEL else BlockTypes.Block.AIR
 	var low_line := int(_profile.get("low_line", SEA_LEVEL))
 	var high := height > low_line
@@ -528,6 +546,16 @@ func _block_at(wx: int, wy: int, wz: int, height: int) -> int:
 	if wy >= height - 3:
 		return int(_profile.get("sub", BlockTypes.Block.DIRT)) if high else int(_profile.get("sub_low", BlockTypes.Block.SAND))
 	return _ore_or_stone(wx, wy, wz)
+
+
+## 极地冰山：该列冰山的顶格高度（无冰山返回 0）。
+## 噪声超过阈值即成团隆起，超出越多山体越高——冰山成群且高低错落，
+## 从海底一直长到海面以上，看上去像搁浅的浮冰山。确定性哈希，可复现。
+func _iceberg_top(wx: int, wz: int) -> int:
+	var n := _iceberg_noise.get_noise_2d(float(wx), float(wz))
+	if n < 0.5:
+		return 0
+	return SEA_LEVEL + 1 + int(round((n - 0.5) * 14.0))
 
 
 ## 石层矿物：确定性哈希散布矿物。铜（约 2.5%）见于全部石层，锡（约 1%）
@@ -605,7 +633,10 @@ func _in_chunk(p: Vector3i) -> bool:
 
 ## 水生植物：大河底部生成水草/藻类，小池塘水面生成浮萍/荷叶/莲花。
 ## 逐列确定性散布（种子固定），密度稀疏以免遮挡水体本身。
+## 仅常规水体策略生效：干燥沙漠没有水可生，极地封冻冰面不容浮萍打洞。
 func _generate_water_life(chunk: Chunk, origin: Vector3i) -> void:
+	if String(_profile.get("water", "normal")) != "normal":
+		return
 	for x in CHUNK_SIZE.x:
 		for z in CHUNK_SIZE.z:
 			var wx := origin.x + x

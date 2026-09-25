@@ -62,7 +62,10 @@ func _on_region_entered(region_id: int) -> void:
 
 ## 生成固定村庄与掠夺塔（含村民与掠夺者，挂载于本节点，不受昼夜清空管理）。
 ## 每个区域建 3 座村庄：出生点旁一座（亚洲出生锚定该村），东西南各远处一座。
+## 极地例外（D-028）：一望无际的冰海无人定居，不设村庄。
 func _build_village() -> void:
+	if GameState.current_region in [RegionAtlas.ARCTIC, RegionAtlas.ANTARCTICA]:
+		return
 	for offset: Vector3i in [
 		Vector3i.ZERO,
 		Vector3i(64, 0, 8),

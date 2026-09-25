@@ -787,6 +787,64 @@ func _run() -> void:
 	_check(seeds.size() == RegionAtlas.COUNT, "11 个区域各有独立随机种子")
 	_check(texts_ok, "每个区域的介绍与四段地理说明均非空")
 
+	# 区域水体策略（D-028）：沙漠无河塘，极地冰海冰山，其余常规注水。
+	_check(
+		RegionAtlas.profile(RegionAtlas.AFRICA)["water"] == "dry"
+		and RegionAtlas.profile(RegionAtlas.OCEANIA)["water"] == "dry",
+		"非洲/大洋洲水体策略为「干燥」（沙漠不生河塘）",
+	)
+	_check(
+		RegionAtlas.profile(RegionAtlas.ARCTIC)["water"] == "iceberg"
+		and RegionAtlas.profile(RegionAtlas.ANTARCTICA)["water"] == "iceberg",
+		"北冰洋/南极洲水体策略为「冰海冰山」",
+	)
+	_check(
+		RegionAtlas.profile(RegionAtlas.PACIFIC)["water"] == "normal"
+		and RegionAtlas.profile(RegionAtlas.ASIA)["water"] == "normal",
+		"岛屿与大陆区域保持常规水体",
+	)
+	var polar_below_sea := true
+	for pid: int in [RegionAtlas.ARCTIC, RegionAtlas.ANTARCTICA]:
+		var pp: Dictionary = RegionAtlas.profile(pid)
+		if float(pp["base_height"]) + float(pp["amplitude"]) > float(World.SEA_LEVEL):
+			polar_below_sea = false
+	_check(polar_below_sea, "极地地形全域低于海平面（一望无际的海洋）")
+
+	# 冰方块登记齐全，冰海行为抽样（确定性，可直接断言）。
+	_check(
+		BlockTypes.display_name(BlockTypes.Block.ICE) == "冰块"
+		and BlockTypes.is_solid(BlockTypes.Block.ICE)
+		and BlockTypes.HARDNESS.has(BlockTypes.Block.ICE)
+		and BlockTypes.EFFECTIVE_TOOL[BlockTypes.Block.ICE] == "pickaxe",
+		"冰方块登记齐全（名称/固体/硬度/工具）",
+	)
+	var polar_world := World.new()
+	polar_world.set_region(RegionAtlas.ARCTIC)
+	_check(
+		polar_world._block_at(3, World.SEA_LEVEL, 3, 15) == BlockTypes.Block.ICE,
+		"北极海面封冻为冰",
+	)
+	var frozen_ok := true
+	for ix in range(0, 60, 7):
+		for iz in range(0, 60, 7):
+			if polar_world._block_at(ix, World.SEA_LEVEL, iz, 15) != BlockTypes.Block.ICE:
+				frozen_ok = false
+	_check(frozen_ok, "北极海面整片封冻为冰（海平面层全为冰）")
+	var icebergs := 0
+	for ix in range(0, 240, 3):
+		for iz in range(0, 240, 3):
+			if polar_world._iceberg_top(ix, iz) > 0:
+				icebergs += 1
+	_check(icebergs >= 20, "北极散布成群冰山（采样命中 %d 列）" % icebergs)
+	polar_world.free()
+	var desert_world := World.new()
+	desert_world.set_region(RegionAtlas.AFRICA)
+	_check(
+		desert_world._block_at(3, World.SEA_LEVEL, 3, 15) == BlockTypes.Block.AIR,
+		"非洲洼地不生成水（沙漠无河塘）",
+	)
+	desert_world.free()
+
 	# 经纬度归属：七大洲四大洋各取一点。
 	_check(RegionAtlas.region_at_lat_lon(0.0, 20.0) == RegionAtlas.AFRICA, "0°N 20°E 判为非洲")
 	_check(RegionAtlas.region_at_lat_lon(50.0, 100.0) == RegionAtlas.ASIA, "50°N 100°E 判为亚洲")

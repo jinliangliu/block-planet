@@ -180,7 +180,10 @@ func _maintain_water_life(delta: float) -> void:
 
 ## 在玩家附近找一处水体生成生物：大河出鱼/虾/蟹，池塘出蜻蜓/青蛙。
 ## 返回是否成功生成（同时供探针直接调用）。
+## 区域水体策略（D-028）：干燥沙漠无水可生，极地冰海不下网——均不刷水生物。
 func _spawn_water_life() -> bool:
+	if String(_profile.get("water", "normal")) != "normal":
+		return false
 	for i in range(WATER_SCAN_TRIES):
 		var angle := randf() * TAU
 		var dist := randf_range(WATER_SCAN_MIN, WATER_SCAN_MAX)
@@ -290,9 +293,9 @@ func _find_spawn_position(require_ground: bool) -> Vector3:
 	return INVALID_POSITION
 
 
-## 可站立地面：基础草/沙，外加当前区域配置的地表材质。
+## 可站立地面：基础草/沙，外加当前区域配置的地表材质；冰面（极地冰海）也可站。
 func _is_ground_block(id: int) -> bool:
-	if id == BlockTypes.Block.GRASS or id == BlockTypes.Block.SAND:
+	if id == BlockTypes.Block.GRASS or id == BlockTypes.Block.SAND or id == BlockTypes.Block.ICE:
 		return true
 	var surface := int(_profile.get("surface", BlockTypes.Block.GRASS))
 	var surface_low := int(_profile.get("surface_low", BlockTypes.Block.SAND))

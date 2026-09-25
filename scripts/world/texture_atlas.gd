@@ -46,6 +46,19 @@ static func _paint_tile(image: Image, tile: int) -> void:
 				image.set_pixel(ox + x, oy + y, c)
 		return
 
+	# 冰（瓦片 31）：冰蓝底 + 两道斜向白色裂纹高光，一眼读出「滑溜溜」。
+	if tile == 31:
+		for y in range(TILE_SIZE):
+			for x in range(TILE_SIZE):
+				var c := color
+				var h := _hash2(x, y)
+				if h % 9 == 0:
+					c = c.darkened(0.10)
+				if x - y == 3 or x - y == 4 or x + y == 22 or x + y == 23:
+					c = Color(0.94, 0.98, 1.0)
+				image.set_pixel(ox + x, oy + y, c)
+		return
+
 	for y in range(TILE_SIZE):
 		for x in range(TILE_SIZE):
 			var c := color
@@ -125,6 +138,9 @@ static func _tile_color(tile: int) -> Color:
 		30:
 			# 白萝卜作物：绿叶与露白的萝卜身。
 			return Color(0.88, 0.90, 0.80)
+		31:
+			# 冰：清透的冰蓝。
+			return Color(0.62, 0.80, 0.94)
 		_:
 			return Color(1.0, 0.0, 1.0)
 
