@@ -282,7 +282,7 @@ func _interact_village() -> bool:
 	var hit := _raycast_target()
 	if hit.is_empty():
 		return false
-	var collider: Object = hit["collider"]
+	var collider: Object = hit.get("collider")
 	if collider is Mob and (collider as Mob).type == Mob.MobType.VILLAGER:
 		Events.request_trade.emit()
 		return true
@@ -494,7 +494,7 @@ func _try_attack_mob() -> bool:
 	var hit := _raycast_target()
 	if hit.is_empty():
 		return false
-	var collider: Object = hit["collider"]
+	var collider: Object = hit.get("collider")
 	if not (collider and collider is Mob):
 		return false
 	if Time.get_ticks_msec() - _last_attack_ms < ATTACK_COOLDOWN_MS:
@@ -531,7 +531,7 @@ func _update_breaking(delta: float) -> void:
 		_reset_break()
 		return
 
-	var collider: Object = hit["collider"]
+	var collider: Object = hit.get("collider")
 	if collider and collider is Mob:
 		# 按住左键持续攻击：冷却结束后自动再次命中。
 		# 修复原先仅按下瞬间攻击一次的问题；冷却中调用无副作用。
@@ -722,17 +722,19 @@ func _raycast_target() -> Dictionary:
 	var from := _camera.global_position
 	var to := from + (-_camera.global_transform.basis.z) * REACH_DISTANCE
 	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.exclude = [get_rid()]
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
 	var hit := space.intersect_ray(query)
-	# 体素兜底：作物/水草等非固体方块没有碰撞面，物理射线会穿过去；
-	# 两条射线都命中时取更近的一个（正常方块物理面必然先命中，开销可忽略）。
+	# 体素兜底：作物/水草等非固体方块没有碰撞面，物理射线会穿过去。
+	# 体素命中带精确进入距离（distance）：不晚于物理命中（共用面算同时命中）
+	# 就取体素——否则瞄准作物时会被其脚下耕地顶面的物理命中抢走，割到的永远是耕地。
 	if _world != null:
 		var vhit := _world.raycast_blocks(from, to)
 		if not vhit.is_empty():
 			if hit.is_empty() \
-					or (hit["position"] as Vector3).distance_squared_to(from) \
-					> (vhit["position"] as Vector3).distance_squared_to(from):
+					or (vhit["distance"] as float) \
+						<= (hit["position"] as Vector3).distance_to(from) + 0.001:
 				return vhit
 	return hit
 

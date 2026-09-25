@@ -173,29 +173,64 @@ func get_block(world_pos: Vector3i) -> int:
 ## HARDNESS 表中）。物理射线只能命中碰撞面，而作物/水草等非固体方块没有
 ## 碰撞面——玩家对着稻田左键毫无反应的根因就在这。水不在 HARDNESS 表，
 ## 射线自然穿过水面，可以采到水下的作物。未命中返回空字典。
+## 体素步进射线（Amanatides & Woo DDA）：返回射线上第一个有硬度的方块。
+## "distance" 为从起点到进入该格边界的精确距离，供与物理射线命中比近——
+## 瞄准作物等非固体方块时，其进入面与脚下实心块的物理命中面重合，须视为同时命中。
 func raycast_blocks(from: Vector3, to: Vector3) -> Dictionary:
 	var dir := to - from
 	var length := dir.length()
 	if length < 0.001:
 		return {}
-	var step := dir / length * 0.05
-	var last_cell := Vector3i(from.floor())
-	var p := from
-	for i in range(int(length / 0.05) + 1):
-		p += step
-		var cell := Vector3i(p.floor())
-		if cell == last_cell:
-			continue
+	var step := dir / length
+	var cell := Vector3i(from.floor())
+	var t_max := Vector3(
+		_boundary_t(from.x, step.x),
+		_boundary_t(from.y, step.y),
+		_boundary_t(from.z, step.z),
+	)
+	var t_delta := Vector3(_axis_delta(step.x), _axis_delta(step.y), _axis_delta(step.z))
+	var normal := Vector3.ZERO
+	var t := 0.0
+	while t <= length:
 		var id := get_block(cell)
 		if id != BlockTypes.Block.AIR and BlockTypes.HARDNESS.has(id):
 			return {
-				"position": p,
-				"normal": Vector3(last_cell - cell),
+				"position": from + step * t,
+				"normal": normal,
 				"cell": cell,
 				"id": id,
+				"distance": t,
 			}
-		last_cell = cell
+		# 沿最近的格边界推进（平次序无妨，同一边界只跨一格）。
+		if t_max.x <= t_max.y and t_max.x <= t_max.z:
+			t = t_max.x
+			t_max.x += t_delta.x
+			cell.x += 1 if step.x > 0.0 else -1
+			normal = Vector3(-1.0 if step.x > 0.0 else 1.0, 0.0, 0.0)
+		elif t_max.y <= t_max.z:
+			t = t_max.y
+			t_max.y += t_delta.y
+			cell.y += 1 if step.y > 0.0 else -1
+			normal = Vector3(0.0, -1.0 if step.y > 0.0 else 1.0, 0.0)
+		else:
+			t = t_max.z
+			t_max.z += t_delta.z
+			cell.z += 1 if step.z > 0.0 else -1
+			normal = Vector3(0.0, 0.0, -1.0 if step.z > 0.0 else 1.0)
 	return {}
+
+
+## 射线沿某轴到达下一条格边界的参数距离；该轴无分量时为无穷远。
+static func _boundary_t(origin: float, step_c: float) -> float:
+	if absf(step_c) < 0.0000001:
+		return INF
+	return (floorf(origin) + 1.0 - origin) / step_c if step_c > 0.0 \
+		else (origin - floorf(origin)) / -step_c
+
+
+## 该轴每跨一格消耗的参数距离；无分量时为无穷大。
+static func _axis_delta(step_c: float) -> float:
+	return absf(1.0 / step_c) if absf(step_c) > 0.0000001 else INF
 
 
 func set_block(world_pos: Vector3i, id: int) -> void:
