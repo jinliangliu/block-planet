@@ -25,6 +25,8 @@ const STARVATION_DAMAGE_INTERVAL := 5.0
 ## 受击无敌帧：被生物命中后 0.5 秒内的再次命中全部忽略。
 ## 没有它时一群怪会在同一帧把 20 点血一次性打空——玩家只看到血条瞬间归零。
 const HURT_INVULN_TIME := 0.5
+## 死亡停顿：原地立 R.I.P 墓碑的时长，倒计时结束才从出生点复活。
+const DEATH_PAUSE := 2.2
 # 落地速度阈值：sqrt(2 * GRAVITY * 3) ≈ 12 m/s，对应约 3 格内免伤。
 const FALL_DAMAGE_THRESHOLD := 12.0
 const FALL_DAMAGE_SCALE := 0.5
@@ -108,6 +110,8 @@ var _last_jump_ms := 0
 var _last_hunger_int := MAX_HUNGER
 var _stuck_frames := 0
 var _hurt_invuln := 0.0
+## 死亡停顿中：原地立墓碑，倒计时结束后才从出生点复活。
+var _dead := false
 ## 鱼群陪伴回血的计时器。
 var _fish_heal_timer := 0.0
 ## 昼夜循环引用：睡觉跳过夜晚用（由 main 装配时注入）。
@@ -186,6 +190,8 @@ func _handle_jump_tap() -> void:
 
 
 func _process(delta: float) -> void:
+	if _dead:
+		return
 	_update_breaking(delta)
 	_update_bow(delta)
 	_update_fishing(delta)
@@ -196,6 +202,8 @@ func _process(delta: float) -> void:
 
 ## 右键按下：手持弓开始蓄力，手持鱼竿抛竿/收竿，其余走 _use_selected。
 func _begin_use() -> void:
+	if _dead:
+		return
 	var item := get_selected_item()
 	if ItemTypes.is_bow(item):
 		_bow_charge = BOW_MIN_CHARGE
@@ -327,6 +335,11 @@ func _eat_selected() -> bool:
 
 
 func _physics_process(delta: float) -> void:
+	# 死亡停顿：冻结一切（不移动、不掉血、不防卡死），等墓碑倒计时结束复活。
+	if _dead:
+		velocity = Vector3.ZERO
+		return
+
 	var jump_pressed := virtual_jump
 	virtual_jump = false
 	if Input.is_action_pressed("jump"):
@@ -469,6 +482,8 @@ func get_selected_placeable() -> int:
 
 
 func start_break_or_attack() -> void:
+	if _dead:
+		return
 	_held_item.swing()
 	_model.swing_arms()
 	if _try_attack_mob():
@@ -822,7 +837,7 @@ func _apply_fall_damage(fall_speed: float) -> void:
 
 ## 真正的扣血入口：集中处理无敌、死亡、重生与来源广播。
 func _damage(amount: int, reason: String = "") -> void:
-	if GameState.is_creative():
+	if _dead or GameState.is_creative():
 		return
 	health -= amount
 	damage_taken.emit(amount, reason, maxi(0, health))
@@ -834,15 +849,40 @@ func _damage(amount: int, reason: String = "") -> void:
 			return
 		health = 0
 		died.emit()
-		_respawn()
+		_begin_death()
 		return
 	health_changed.emit(health)
+
+
+## 死亡表现：原地立起 R.I.P 墓碑，短暂停顿后再从出生点复活。
+## 停顿期间玩家冻结（不移动、不受击、不交互）；防卡死脱困不走这里（保持瞬间重生）。
+func _begin_death() -> void:
+	if _dead:
+		return
+	_dead = true
+	velocity = Vector3.ZERO
+	var tomb_parent := get_parent()
+	if tomb_parent != null:
+		# 墓碑立在身前 0.8 米（与尸体错开，路人一眼可见；朝向取水平面投影）。
+		var facing := -global_transform.basis.z
+		facing.y = 0.0
+		var front := facing.normalized() if facing.length_squared() > 0.0001 \
+			else Vector3(0.0, 0.0, -1.0)
+		Tombstone.spawn(tomb_parent, global_position + front * 0.8, global_position)
+	get_tree().create_timer(DEATH_PAUSE).timeout.connect(_finish_death)
+
+
+func _finish_death() -> void:
+	if not _dead:
+		return
+	_dead = false
+	_respawn()
 
 
 ## 外部（生物近战、箭矢）打玩家走这里：带来源 + 受击无敌帧。
 ## 无敌帧只拦这条路，不走 _damage，因此卡死脱困与探针直接扣血不受影响。
 func take_damage(amount: int, source: String = "") -> void:
-	if _hurt_invuln > 0.0:
+	if _dead or _hurt_invuln > 0.0:
 		return
 	_hurt_invuln = HURT_INVULN_TIME
 	_damage(amount, source)

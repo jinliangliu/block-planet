@@ -37,6 +37,8 @@ var _quest_panel: QuestPanel
 var _inventory_panel: InventoryPanel
 var _toast_label: Label
 var _toast_tween: Tween
+var _death_overlay: Control
+var _death_tween: Tween
 var _day_night: DayNightCycle
 var _craft_overlay: Control
 var _craft_result_grid: GridContainer
@@ -99,6 +101,8 @@ func setup(player: Player) -> void:
 	Events.request_trade.connect(set_trade_open.bind(true))
 	# 通用提示通道：狩猎拦截、矿石等级不足、垂钓结果等都以 Toast 呈现。
 	Events.notice.connect(_on_notice)
+	# 死亡 RIP 覆盖层：与玩家的墓碑停顿同步浮现与消隐。
+	Events.player_died.connect(_on_player_died)
 	_build()
 	_on_mode_changed(GameState.mode)
 
@@ -138,6 +142,7 @@ func _build() -> void:
 	_build_inventory_panel(root)
 	_build_quest_panel(root)
 	_build_toast(root)
+	_build_death_overlay(root)
 	_connect_progress()
 	_build_map_name(root)
 	_build_map_selector(root)
@@ -2021,6 +2026,61 @@ func _show_toast(text: String) -> void:
 	_toast_tween = create_tween()
 	_toast_tween.tween_interval(2.2)
 	_toast_tween.tween_property(_toast_label, "modulate:a", 0.0, 0.6)
+
+
+## 死亡 RIP 覆盖层：暗幕 + 墓碑图案 + 文案，与玩家的死亡停顿时长同步。
+## mouse_filter 全程 IGNORE：不挡触摸/点击，停顿结束随复活淡出。
+func _build_death_overlay(root: Control) -> void:
+	_death_overlay = Control.new()
+	_death_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_death_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_death_overlay.visible = false
+	root.add_child(_death_overlay)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0.08, 0.05, 0.06, 0.62)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_death_overlay.add_child(dim)
+
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_death_overlay.add_child(box)
+
+	var tomb := Label.new()
+	tomb.text = "🕯\nR.I.P"
+	tomb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tomb.add_theme_font_size_override("font_size", 56)
+	tomb.add_theme_color_override("font_color", Color(0.92, 0.90, 0.86))
+	tomb.add_theme_color_override("font_outline_color", Color(0.10, 0.07, 0.06))
+	tomb.add_theme_constant_override("outline_size", 8)
+	box.add_child(tomb)
+
+	var tip := Label.new()
+	tip.text = "睡了一觉……即将回到出生点"
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tip.add_theme_font_size_override("font_size", 18)
+	tip.add_theme_color_override("font_color", Color(0.85, 0.80, 0.74))
+	tip.add_theme_color_override("font_outline_color", Color(0.10, 0.07, 0.06))
+	tip.add_theme_constant_override("outline_size", 5)
+	box.add_child(tip)
+
+
+## 玩家死亡：浮现 RIP 覆盖层，停顿结束（约 2.2 秒）后淡出，与复活同步。
+func _on_player_died() -> void:
+	if _death_overlay == null:
+		return
+	if _death_tween != null:
+		_death_tween.kill()
+	_death_overlay.modulate.a = 0.0
+	_death_overlay.visible = true
+	_death_tween = create_tween()
+	_death_tween.tween_property(_death_overlay, "modulate:a", 1.0, 0.25)
+	_death_tween.tween_interval(1.6)
+	_death_tween.tween_property(_death_overlay, "modulate:a", 0.0, 0.45)
+	_death_tween.tween_callback(func() -> void: _death_overlay.visible = false)
 
 
 ## 全屏模态期间冻结玩家：关闭物理与输入处理，避免镜头与移动在背后漂移。
