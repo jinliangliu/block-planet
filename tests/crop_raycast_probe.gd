@@ -27,14 +27,26 @@ func _run() -> void:
 
 	var world: World = main_scene.get_node("World")
 	var player: Player = main_scene.get_node("Player")
-	var camera: Camera3D = player.get_node("SpringArm3D/Camera3D")
 
 	# ── 准备：找到村庄农田里的一株小麦 ──────────────────────
 	var crop_cell := Vector3i.ZERO
 	var farm_o := VillageBuilder.FARM_ORIGIN
 	var base_y := _probe_base_y(world)
-	for x in range(7):
-		for z in range(7):
+	# 0.5m 化后农田远离出生点且远离默认锚点：区块可能已被流式卸载，
+	# 射线与 get_block 都会读到空气。先强制加载 + 把玩家挪到农田旁。
+	world.ensure_chunks_in_region(
+		Vector3i(farm_o.x - 2, 0, farm_o.z - 2),
+		Vector3i(farm_o.x + VillageBuilder.FARM_SIZE + 2, base_y + 2, farm_o.z + VillageBuilder.FARM_SIZE + 2),
+	)
+	player.global_position = Vector3(
+		float(farm_o.x) + 2.5, float(base_y) + 1.05, float(farm_o.z) + 2.5)
+	player.velocity = Vector3.ZERO
+	for i in range(10):
+		await get_tree().physics_frame
+	for x in range(VillageBuilder.FARM_SIZE):
+		for z in range(VillageBuilder.FARM_SIZE):
+			if x == VillageBuilder.FARM_SIZE / 2:
+				continue
 			var p := Vector3i(farm_o.x + x, base_y + 1, farm_o.z + z)
 			if world.get_block(p) == BlockTypes.Block.WHEAT_CROP:
 				crop_cell = p
@@ -64,8 +76,14 @@ func _run() -> void:
 	player.velocity = Vector3.ZERO
 	for i in range(10):
 		await get_tree().physics_frame
+	# 瞄准必须转第一人称相机本身（_raycast_target 用的是 $Camera3D，
+	# 不是弹簧臂第三人称相机；老世界相机高 0.7 恰好置身作物格内、
+	# -Z 射线"碰巧"命中，0.5m 化后相机悬于作物层上方，必须真的转过去）。
+	var fp_cam: Camera3D = player.get_node("Camera3D")
 	var crop_center := Vector3(crop_cell) + Vector3(0.5, 0.5, 0.5)
-	camera.look_at(crop_center)
+	var aim := crop_center - fp_cam.global_position
+	player.rotation.y = atan2(-aim.x, -aim.z)
+	fp_cam.rotation.x = asin(clampf(aim.y / aim.length(), -1.0, 1.0))
 
 	var hit := player._raycast_target()
 	var hit_id := -1

@@ -289,8 +289,8 @@ func _rebuild_chunk(coord: Vector3i) -> void:
 
 
 ## 树干砍完后让树冠「落下消失」：由 Player 在破坏 WOOD 后调用。
-## 判据：这一格所在竖列上下 8 格内都不再有木头（整根树干被砍光）。
-## 清除范围：该格上方 7 层、每层水平 ±2 的树叶（树冠始终长在树干顶端，
+## 判据：这一格所在竖列上下 16 格内都不再有木头（整根树干被砍光）。
+## 清除范围：该格上方 15 层、每层水平 ±4 的树叶（树冠始终长在树干顶端，
 ## 同一 (x,z) 只生成一棵树；相邻树的树冠若在此范围内相接，一并清落也符合直觉）。
 ## 树叶不进背包、不掉落——伴随每片叶子一撮向下飘散的叶屑，「落下消失」。
 ## 返回清除的树叶格数。
@@ -317,12 +317,12 @@ func decay_tree_leaves(cell: Vector3i, force: bool = false) -> int:
 	return removed.size()
 
 
-## 树冠：砍口上方 7 层、每层 ±2 范围内的全部树叶。
+## 树冠：砍口上方 15 层、每层 ±4 范围内的全部树叶。
 func _canopy_cells(cell: Vector3i) -> Array[Vector3i]:
 	var found: Array[Vector3i] = []
-	for dy in range(1, 8):
-		for dx in range(-2, 3):
-			for dz in range(-2, 3):
+	for dy in range(1, 16):
+		for dx in range(-4, 5):
+			for dz in range(-4, 5):
 				var p := cell + Vector3i(dx, dy, dz)
 				if get_block(p) == BlockTypes.Block.LEAVES:
 					found.append(p)
@@ -339,7 +339,7 @@ func has_canopy_above(cell: Vector3i, trunk_height: int) -> bool:
 ## 砍口上方连续的树干节数（被砍的那一格本身不算）。
 func trunk_height_above(cell: Vector3i) -> int:
 	var height := 0
-	for i in range(1, 9):
+	for i in range(1, 17):
 		if get_block(cell + Vector3i(0, i, 0)) != BlockTypes.Block.WOOD:
 			break
 		height += 1
@@ -350,7 +350,7 @@ func trunk_height_above(cell: Vector3i) -> int:
 ## 同样走批量写入 + 区块统一重建，避免逐块 rebuild。
 func fell_trunk_above(cell: Vector3i) -> int:
 	var cells: Array[Vector3i] = []
-	for i in range(1, 9):
+	for i in range(1, 17):
 		var p := cell + Vector3i(0, i, 0)
 		if get_block(p) != BlockTypes.Block.WOOD:
 			break
@@ -375,7 +375,7 @@ func place_fallen_logs(cell: Vector3i, logs: int, dir: Vector3i) -> Array[Vector
 	var touched := {}
 	for i in range(logs):
 		var column := cell + dir * (i + 1)
-		for dy in range(0, 10):
+		for dy in range(0, 20):
 			var y := cell.y - dy
 			var p := Vector3i(column.x, y, column.z)
 			if get_block(p) != BlockTypes.Block.AIR:
@@ -393,7 +393,7 @@ func place_fallen_logs(cell: Vector3i, logs: int, dir: Vector3i) -> Array[Vector
 
 ## 该竖列上下是否还有树干残留（玩家手搭的木头列也会被视为树干，一并尊重）。
 func _column_has_wood(cell: Vector3i) -> bool:
-	for i in range(1, 9):
+	for i in range(1, 17):
 		if get_block(cell + Vector3i(0, i, 0)) == BlockTypes.Block.WOOD \
 				or get_block(cell + Vector3i(0, -i, 0)) == BlockTypes.Block.WOOD:
 			return true
@@ -582,7 +582,7 @@ func _ore_rng(x: int, y: int, z: int) -> float:
 func _generate_trees(chunk: Chunk, origin: Vector3i) -> void:
 	for x in CHUNK_SIZE.x:
 		for z in CHUNK_SIZE.z:
-			if x < 2 or x > CHUNK_SIZE.x - 3 or z < 2 or z > CHUNK_SIZE.z - 3:
+			if x < 5 or x > CHUNK_SIZE.x - 6 or z < 5 or z > CHUNK_SIZE.z - 6:
 				continue
 
 			var wx := origin.x + x
@@ -598,17 +598,17 @@ func _generate_trees(chunk: Chunk, origin: Vector3i) -> void:
 
 
 func _place_tree(chunk: Chunk, base: Vector3i) -> void:
-	var trunk_height := 4
+	var trunk_height := 8
 	for i in range(trunk_height):
 		var p := base + Vector3i(0, i, 0)
 		if _in_chunk(p):
 			chunk.set_block_local(p, BlockTypes.Block.WOOD)
 
 	var top := base + Vector3i(0, trunk_height, 0)
-	for dx in range(-2, 3):
-		for dz in range(-2, 3):
-			for dy in range(-1, 3):
-				if abs(dx) == 2 and abs(dz) == 2 and dy != -1:
+	for dx in range(-4, 5):
+		for dz in range(-4, 5):
+			for dy in range(-2, 7):
+				if abs(dx) == 4 and abs(dz) == 4 and dy != -2:
 					continue
 				var p := top + Vector3i(dx, dy, dz)
 				if _in_chunk(p) and chunk.get_block_local(p) == BlockTypes.Block.AIR:

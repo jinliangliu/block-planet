@@ -29,54 +29,61 @@ func _run() -> void:
 	# 探针独立复算村庄基准高度（get_surface_height 为纯噪声，与生成时一致）。
 	var base_y := _probe_base_y(world)
 	_check(base_y > 0, "村庄基准高度可探测（base_y=%d）" % base_y)
+	# 0.5m 化后村庄占地 ×2，四角距出生锚点 40+ 格超出卸载半径：
+	# 结构断言前先强制加载整个村庄区域（村庄改动有卸载留存，原样还原）。
+	world.ensure_chunks_in_region(
+		Vector3i(VillageBuilder.REGION_MIN.x, 0, VillageBuilder.REGION_MIN.z),
+		Vector3i(VillageBuilder.REGION_MAX.x, base_y + 2, VillageBuilder.REGION_MAX.z),
+	)
 
 	# ── 阶段 A：村庄结构 ──────────────────────────────
+	# 坐标全部对应 0.5m 化后的布局（VillageBuilder 常量 ×2）。
 	_check(
-		world.get_block(Vector3i(27, base_y + 1, 26)) == BlockTypes.Block.BREWING,
-		"酿灶台方块存在于广场东侧 (27,%d,26)" % (base_y + 1),
+		world.get_block(Vector3i(54, base_y + 1, 52)) == BlockTypes.Block.BREWING,
+		"酿灶台方块存在于广场东侧 (54,%d,52)" % (base_y + 1),
 	)
 
 	# 亚洲（默认区域）出生点必须落在村庄旁：距广场中心 20 格内，
 	# 且脚下是整平区 GRASS——落地即见村，不用再找。
 	var spawn_xz := Vector2(player.global_position.x, player.global_position.z)
-	var plaza_xz := Vector2(24.5, 26.5)
+	var plaza_xz := Vector2(49.0, 53.0)
 	_check(
 		spawn_xz.distance_to(plaza_xz) < 20.0,
 		"亚洲出生点锚定村庄旁（距广场 %.1f 格）" % spawn_xz.distance_to(plaza_xz),
 	)
 
-	# 民居玻璃窗：位置由 VillageBuilder._build_house 决定（x=0/5 两侧墙 y+2）。
+	# 民居玻璃窗：位置由 VillageBuilder._build_house 决定（x=0/11 两侧墙 y+3）。
 	_check(
-		world.get_block(Vector3i(15, base_y + 2, 20)) == BlockTypes.Block.GLASS
-			and world.get_block(Vector3i(20, base_y + 2, 20)) == BlockTypes.Block.GLASS,
+		world.get_block(Vector3i(30, base_y + 3, 39)) == BlockTypes.Block.GLASS
+			and world.get_block(Vector3i(41, base_y + 3, 39)) == BlockTypes.Block.GLASS,
 		"民居墙体嵌有玻璃窗方块",
 	)
 	_check(BlockTypes.is_transparent(BlockTypes.Block.GLASS), "玻璃在方块表中标记为透明")
 
 	var grass_ok := true
 	for cell: Vector3i in [
-		Vector3i(13, base_y, 16), Vector3i(41, base_y, 40),
-		Vector3i(41, base_y, 16), Vector3i(13, base_y, 40),
-		Vector3i(30, base_y, 20),
+		Vector3i(26, base_y, 32), Vector3i(82, base_y, 80),
+		Vector3i(82, base_y, 32), Vector3i(26, base_y, 80),
+		Vector3i(54, base_y, 52),
 	]:
 		if world.get_block(cell) != BlockTypes.Block.GRASS:
 			grass_ok = false
 	_check(grass_ok, "村庄地基抽查均为 GRASS（四角与中部，整平生效）")
 
 	_check(
-		world.get_block(Vector3i(15, base_y + 1, 18)) == BlockTypes.Block.COBBLESTONE,
+		world.get_block(Vector3i(30, base_y + 1, 36)) == BlockTypes.Block.COBBLESTONE,
 		"民居圆石墙体",
 	)
-	_check(world.get_block(Vector3i(15, base_y + 3, 18)) == BlockTypes.Block.WOOD, "民居木质屋顶")
+	_check(world.get_block(Vector3i(30, base_y + 5, 36)) == BlockTypes.Block.WOOD, "民居木质屋顶")
 	_check(
-		world.get_block(Vector3i(37, base_y + 5, 22)) == BlockTypes.Block.COBBLESTONE,
+		world.get_block(Vector3i(74, base_y + 5, 44)) == BlockTypes.Block.COBBLESTONE,
 		"掠夺塔塔体为圆石",
 	)
 	_check(
-		world.get_block(Vector3i(37, base_y + 9, 22)) == BlockTypes.Block.WOOD,
+		world.get_block(Vector3i(74, base_y + 17, 44)) == BlockTypes.Block.WOOD,
 		"掠夺塔顶为木质平台",
 	)
-	_check(world.get_block(Vector3i(37, base_y + 1, 21)) == BlockTypes.Block.AIR, "掠夺塔南门门洞")
+	_check(world.get_block(Vector3i(74, base_y + 1, 42)) == BlockTypes.Block.AIR, "掠夺塔南门门洞")
 	_check(ItemTypes.is_placeable(BlockTypes.Block.BREWING), "酿灶台判定为可放置物品")
 	_check(BlockTypes.HARDNESS.has(BlockTypes.Block.BREWING), "酿灶台在硬度表中（可破坏）")
 
@@ -103,7 +110,7 @@ func _run() -> void:
 
 	# ── 阶段 C：掠夺者白天驻守与掉落 ──────────────────────
 	# 把玩家与一名掠夺者传送到村庄平整区中央，保证脚下地形确定。
-	player.global_position = Vector3(24.5, base_y + 1.1, 26.5)
+	player.global_position = Vector3(49.5, base_y + 1.1, 53.5)
 	player.velocity = Vector3.ZERO
 	if not pillagers.is_empty():
 		var guard := pillagers[0]
@@ -117,7 +124,7 @@ func _run() -> void:
 		_check(player.health == hp_before, "白天掠夺者贴近玩家 6m 不攻击（驻守）")
 		_check(moved < 2.0, "白天掠夺者原地驻守不追击（位移 %.2f m）" % moved)
 		# 送回塔门位置再击杀，掉落物远离玩家，避免被拾取干扰断言。
-		guard.global_position = Vector3(37.5, base_y + 1.0, 19.5)
+		guard.global_position = Vector3(75.5, base_y + 1.0, 40.5)
 		var drops := await _kill_and_collect(guard)
 		_check(drops.has(ItemTypes.TOTEM), "击杀掠夺者掉落不死图腾")
 		_check(drops.has(ItemTypes.EMERALD), "击杀掠夺者掉落绿宝石×2")
@@ -149,7 +156,7 @@ func _run() -> void:
 	# 必须等待物理帧让瞬移后的碰撞体同步（同帧射线查的是旧物理位置）。
 	var trader := _find_villager(main_scene)
 	if trader != null:
-		trader.global_position = Vector3(24.5, base_y + 1.0, 24.0)
+		trader.global_position = Vector3(49.5, base_y + 1.0, 51.0)
 		trader.velocity = Vector3.ZERO
 		trader._wander_dir = Vector3.ZERO
 		trader._wander_timer = 99.0
@@ -175,10 +182,14 @@ func _run() -> void:
 	_check(not hud._can_trade(poor), "绿宝石不足时交易不可用")
 	_check(hud._can_trade(ItemTypes.TRADES[0]), "绿宝石充足时交易可用")
 
-	# 酿灶台方块可放置并读回。
-	world.set_block(Vector3i(12, 37, 12), BlockTypes.Block.BREWING)
+	# 酿灶台方块可放置并读回（用玩家旁的格子，远离玩家会被流式卸载）。
+	var brew_cell := Vector3i(
+		int(player.global_position.x) + 2,
+		int(player.global_position.y) + 3,
+		int(player.global_position.z))
+	world.set_block(brew_cell, BlockTypes.Block.BREWING)
 	_check(
-		world.get_block(Vector3i(12, 37, 12)) == BlockTypes.Block.BREWING,
+		world.get_block(brew_cell) == BlockTypes.Block.BREWING,
 		"酿灶台方块可放置读回",
 	)
 

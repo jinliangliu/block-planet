@@ -19,6 +19,8 @@ static func spawn(parent: Node, world_pos: Vector3, face_toward: Vector3 = Vecto
 
 
 func _ready() -> void:
+	# 体素 0.5m 化：墓碑整体 ×2 保持相对比例（纯装饰无碰撞）。
+	scale = Vector3.ONE * 2.0
 	# 碑身：上窄下宽的两段灰石，近似圆顶墓碑的剪影。
 	var stone := Color(0.62, 0.62, 0.60)
 	var stone_dark := Color(0.50, 0.50, 0.49)

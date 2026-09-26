@@ -37,7 +37,8 @@ func _run() -> void:
 		if child is Tombstone:
 			tomb_found = true
 			var tomb_pos: Vector3 = (child as Node3D).global_position
-			_check(tomb_pos.distance_to(death_pos) < 1.5,
+			# 墓碑立在身前 1.6 m（0.5m 体素化后身位 ×2），留 0.4 m 余量。
+			_check(tomb_pos.distance_to(death_pos) < 2.0,
 				"墓碑立在死亡地点（距离 %.2f m）" % tomb_pos.distance_to(death_pos))
 			break
 	_check(tomb_found, "死亡后场景中出现墓碑")

@@ -20,7 +20,8 @@ func setup(player: Player, id: int, amount: int) -> void:
 func _ready() -> void:
 	var mesh := MeshInstance3D.new()
 	var box := BoxMesh.new()
-	box.size = Vector3(0.28, 0.28, 0.28)
+	# 体素 0.5m 化：视觉与吸附半径 ×2，相对玩家/方块的比例不变。
+	box.size = Vector3(0.56, 0.56, 0.56)
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = _color()
 	mesh.mesh = box
@@ -37,7 +38,7 @@ func _process(delta: float) -> void:
 	rotate_y(delta * 2.0)
 	if _player == null or not is_instance_valid(_player):
 		return
-	if global_position.distance_to(_player.global_position) < 1.2:
+	if global_position.distance_to(_player.global_position) < 2.4:
 		if _player.inventory.add_item(item_id, count) == 0:
 			queue_free()
 

@@ -26,6 +26,13 @@ func _run() -> void:
 	var world: World = main_scene.get_node("World")
 	var player: Player = main_scene.get_node("Player")
 	var camera: Camera3D = player.get_node("Camera3D")
+	# 关闭地图选择器，拍摄游戏内实况（村庄/方块比例取证）。
+	var hud: HUD = main_scene.get_node("UI")
+	if hud._map_selector != null and hud._map_selector.is_open():
+		hud.close_map_selector()
+	GameState.needs_region_pick = false
+	for i in range(30):
+		await get_tree().process_frame
 	camera.rotation.x = -0.35
 	await RenderingServer.frame_post_draw
 
@@ -50,6 +57,19 @@ func _run() -> void:
 	third_image.save_png(_shot_path("render_probe_third.png"))
 	print("third_person_cam=", spring.get_node("Camera3D").global_position)
 	print("model_visible=", player.get_node("PlayerModel").visible)
+
+	# 村庄全景：升空俯瞰广场/民居/农田，验证 0.5m 体素下的布局与比例。
+	player.camera_distance = 0.0
+	player._apply_camera_mode()
+	var base_v := world.get_surface_height(49, 53) - 1
+	player.global_position = Vector3(49.5, float(base_v) + 11.0, 53.5)
+	player.velocity = Vector3.ZERO
+	var fp: Camera3D = player.get_node("Camera3D")
+	fp.rotation = Vector3(-0.6, 1.5708, 0.0)
+	for i in range(30):
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(_shot_path("render_probe_village.png"))
 
 	print("RENDER_PROBE_DONE")
 	get_tree().quit(0)

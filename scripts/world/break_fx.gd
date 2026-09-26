@@ -21,7 +21,7 @@ const HIT_LIFETIME := 0.35
 const LEAF_COUNT := 4
 const LEAF_LIFETIME := 0.9
 const CLEANUP_DELAY := 0.4
-const PARTICLE_SIZE := 0.09
+const PARTICLE_SIZE := 0.18
 
 
 func _ready() -> void:
@@ -45,8 +45,8 @@ static func burst(parent: Node, center: Vector3, color: Color, count: int, lifet
 	var particles := _make_particles(center, color, count, lifetime)
 	particles.direction = Vector3.UP
 	particles.spread = 80.0
-	particles.initial_velocity_min = 1.8
-	particles.initial_velocity_max = 3.6
+	particles.initial_velocity_min = 3.6
+	particles.initial_velocity_max = 7.2
 	parent.add_child(particles)
 	particles.emitting = true
 	_recycle_later(parent, particles, lifetime)
@@ -56,11 +56,11 @@ static func burst(parent: Node, center: Vector3, color: Color, count: int, lifet
 static func spawn_hit(parent: Node, point: Vector3, normal: Vector3, block_id: int) -> void:
 	if parent == null or not parent.is_inside_tree():
 		return
-	var particles := _make_particles(point + normal * 0.08, color_for_block(block_id), HIT_COUNT, HIT_LIFETIME)
+	var particles := _make_particles(point + normal * 0.16, color_for_block(block_id), HIT_COUNT, HIT_LIFETIME)
 	particles.direction = normal
 	particles.spread = 35.0
-	particles.initial_velocity_min = 1.0
-	particles.initial_velocity_max = 2.2
+	particles.initial_velocity_min = 2.0
+	particles.initial_velocity_max = 4.4
 	parent.add_child(particles)
 	particles.emitting = true
 	_recycle_later(parent, particles, HIT_LIFETIME)
@@ -73,8 +73,8 @@ static func leaf_fall(parent: Node, center: Vector3) -> void:
 	var particles := _make_particles(center, color_for_block(BlockTypes.Block.LEAVES), LEAF_COUNT, LEAF_LIFETIME)
 	particles.direction = Vector3.DOWN
 	particles.spread = 40.0
-	particles.initial_velocity_min = 0.5
-	particles.initial_velocity_max = 1.4
+	particles.initial_velocity_min = 1.0
+	particles.initial_velocity_max = 2.8
 	parent.add_child(particles)
 	particles.emitting = true
 	_recycle_later(parent, particles, LEAF_LIFETIME)
@@ -86,7 +86,7 @@ static func _make_particles(center: Vector3, color: Color, count: int, lifetime:
 	particles.lifetime = lifetime
 	particles.one_shot = true
 	particles.explosiveness = 1.0
-	particles.gravity = Vector3(0.0, -14.0, 0.0)
+	particles.gravity = Vector3(0.0, -28.0, 0.0)
 	particles.scale_amount_min = 0.7
 	particles.scale_amount_max = 1.3
 	particles.position = center

@@ -62,14 +62,14 @@ func _on_region_entered(region_id: int) -> void:
 
 ## 生成固定村庄与掠夺塔（含村民与掠夺者，挂载于本节点，不受昼夜清空管理）。
 ## 每个区域建 3 座村庄：出生点旁一座（亚洲出生锚定该村），东西南各远处一座。
-## 极地例外（D-028）：一望无际的冰海无人定居，不设村庄。
+## 村庄格数布局体素 0.5m 化后占地（格）×2，村庄间距同步 ×2。
 func _build_village() -> void:
 	if GameState.current_region in [RegionAtlas.ARCTIC, RegionAtlas.ANTARCTICA]:
 		return
 	for offset: Vector3i in [
 		Vector3i.ZERO,
-		Vector3i(64, 0, 8),
-		Vector3i(8, 0, 64),
+		Vector3i(128, 0, 16),
+		Vector3i(16, 0, 128),
 	]:
 		var builder := VillageBuilder.new()
 		builder.build(_world, _player, _day_night, self, offset)
@@ -85,11 +85,12 @@ func _build_village() -> void:
 func _find_spawn_position() -> Vector3:
 	var anchors: Array[Vector2i] = [Vector2i(8, 8)]
 	if GameState.current_region == RegionAtlas.ASIA:
+		# 村庄布局格数 ×2（体素 0.5m 化）：锚点同步 ×2。
 		anchors = [
-			Vector2i(21, 25),  # 民居①与广场之间的空场
-			Vector2i(22, 20),  # 广场北侧空地
-			Vector2i(21, 21),
-			Vector2i(14, 26),  # 村庄西缘
+			Vector2i(42, 50),  # 民居①与广场之间的空场
+			Vector2i(44, 40),  # 广场北侧空地
+			Vector2i(42, 42),
+			Vector2i(28, 52),  # 村庄西缘
 		]
 	for anchor: Vector2i in anchors:
 		var pos := _scan_spawn_column(anchor.x, anchor.y)
@@ -102,10 +103,12 @@ func _scan_spawn_column(x: int, z: int) -> Vector3:
 	var base_y := _world.get_surface_height(x, z)
 	for i in range(32):
 		var cell := Vector3i(x, base_y + i, z)
-		if (
-			_world.get_block(cell) == BlockTypes.Block.AIR
-			and _world.get_block(cell + Vector3i(0, 1, 0)) == BlockTypes.Block.AIR
-			and _world.get_block(cell + Vector3i(0, -1, 0)) != BlockTypes.Block.AIR
-		):
+		# 玩家 3.6 格高：需要连续四格空气 + 实心底。
+		var clear := true
+		for h in range(4):
+			if _world.get_block(cell + Vector3i(0, h, 0)) != BlockTypes.Block.AIR:
+				clear = false
+				break
+		if clear and _world.get_block(cell + Vector3i(0, -1, 0)) != BlockTypes.Block.AIR:
 			return Vector3(x + 0.5, float(base_y + i), z + 0.5)
 	return Vector3.ZERO

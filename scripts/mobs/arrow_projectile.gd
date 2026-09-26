@@ -5,13 +5,13 @@ class_name ArrowProjectile
 ## 不依赖 World 引用与物理体，纯视觉网格 + 逻辑检测。
 ## 两种来源：骷髅射向玩家（HOSTILE），玩家蓄力射向生物（PLAYER_SHOT）。
 
-const SPEED := 14.0
-const GRAVITY := 4.0
+const SPEED := 28.0
+const GRAVITY := 8.0
 const LIFETIME := 3.0
-const HIT_RADIUS := 0.7
+const HIT_RADIUS := 1.4
 ## 玩家射击的速度区间（蓄力比例 0..1 映射）。
-const PLAYER_SPEED_MIN := 9.0
-const PLAYER_SPEED_MAX := 18.0
+const PLAYER_SPEED_MIN := 18.0
+const PLAYER_SPEED_MAX := 36.0
 
 enum Mode { HOSTILE, PLAYER_SHOT }
 
@@ -44,7 +44,7 @@ func setup_player_shot(shooter: Node3D, dir: Vector3, charge: float, damage: int
 func _ready() -> void:
 	var mesh := MeshInstance3D.new()
 	var box := BoxMesh.new()
-	box.size = Vector3(0.05, 0.05, 0.45)
+	box.size = Vector3(0.2, 0.2, 1.8)
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.55, 0.40, 0.22)
 	mesh.mesh = box
@@ -91,6 +91,6 @@ func _physics_process(delta: float) -> void:
 
 	# 兜底：极少数穿透情况下按距离判定。
 	if _mode == Mode.HOSTILE and _player != null and is_instance_valid(_player):
-		if global_position.distance_to(_player.global_position + Vector3(0.0, 0.9, 0.0)) < HIT_RADIUS:
+		if global_position.distance_to(_player.global_position + Vector3(0.0, 1.8, 0.0)) < HIT_RADIUS:
 			_player.take_damage(_damage, Player.REASON_ARROW)
 			queue_free()

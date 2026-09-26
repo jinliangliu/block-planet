@@ -5,18 +5,20 @@ extends RefCounted
 ## 生成流程：探测基准高度 → 强制加载覆盖区块 → 整平地基 →
 ## 延迟批量写方块 → 统一重建网格 → 放置村民与掠夺者（挂载于 parent，不受昼夜清空管理）。
 
-const REGION_MIN := Vector3i(13, 0, 16)
-const REGION_MAX := Vector3i(41, 0, 40)
-const TOWER_CENTER := Vector3i(37, 0, 22)
+# 体素 0.5m 化（D-030）：所有布局格数 ×2，占地米数与原来一致——
+# 玩家 1.8m ≈ 3.6 格，房屋/门洞随之加高加大。
+const REGION_MIN := Vector3i(26, 0, 32)
+const REGION_MAX := Vector3i(82, 0, 80)
+const TOWER_CENTER := Vector3i(74, 0, 44)
 const HOUSE_POSITIONS: Array[Vector3i] = [
-	Vector3i(15, 0, 18),
-	Vector3i(15, 0, 30),
-	Vector3i(27, 0, 30),
+	Vector3i(30, 0, 36),
+	Vector3i(30, 0, 60),
+	Vector3i(54, 0, 60),
 ]
-const PLAZA_ORIGIN := Vector3i(22, 0, 24)
-# 农田西北角：6×6 区域，位于民居东侧、掠夺塔与广场之间的空地（无重叠）。
-const FARM_ORIGIN := Vector3i(34, 0, 27)
-const FARM_SIZE := 6
+const PLAZA_ORIGIN := Vector3i(44, 0, 48)
+# 农田西北角：12×12 区域，位于民居东侧、掠夺塔与广场之间的空地（无重叠）。
+const FARM_ORIGIN := Vector3i(68, 0, 54)
+const FARM_SIZE := 12
 
 var base_y := 30
 ## 村庄原点偏移：同一区域可建多座村庄（主场景传不同 origin），
@@ -68,59 +70,62 @@ func _probe_base_y() -> void:
 func _flatten() -> void:
 	for x in range(_min_cell().x, _max_cell().x + 1):
 		for z in range(_min_cell().z, _max_cell().z + 1):
-			for y in range(base_y - 4, base_y + 12):
+			for y in range(base_y - 4, base_y + 24):
 				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.AIR)
 			for y in range(base_y - 3, base_y):
 				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.DIRT)
 			_world.set_block_deferred(Vector3i(x, base_y, z), BlockTypes.Block.GRASS)
 
 
-## 民居：6×6 圆石外墙、木质平顶、北门 1×2 门洞、玻璃窗。
+## 民居：12×12 圆石外墙、木质平顶、北门 4×4 门洞（玩家 3.6 格高）、玻璃窗。
 func _build_house(o: Vector3i) -> void:
 	o += origin
-	for x in range(6):
-		for z in range(6):
-			var edge := x == 0 or x == 5 or z == 0 or z == 5
+	for x in range(12):
+		for z in range(12):
+			var edge := x == 0 or x == 11 or z == 0 or z == 11
 			if edge:
-				_world.set_block_deferred(Vector3i(o.x + x, base_y + 1, o.z + z), BlockTypes.Block.COBBLESTONE)
-				_world.set_block_deferred(Vector3i(o.x + x, base_y + 2, o.z + z), BlockTypes.Block.COBBLESTONE)
-			_world.set_block_deferred(Vector3i(o.x + x, base_y + 3, o.z + z), BlockTypes.Block.WOOD)
-	# 门洞（北侧中央）与窗。
-	_world.set_block_deferred(Vector3i(o.x + 2, base_y + 1, o.z), BlockTypes.Block.AIR)
-	_world.set_block_deferred(Vector3i(o.x + 2, base_y + 2, o.z), BlockTypes.Block.AIR)
-	for gz: int in [2, 3]:
-		_world.set_block_deferred(Vector3i(o.x, base_y + 2, o.z + gz), BlockTypes.Block.GLASS)
-		_world.set_block_deferred(Vector3i(o.x + 5, base_y + 2, o.z + gz), BlockTypes.Block.GLASS)
-	_world.set_block_deferred(Vector3i(o.x + 4, base_y + 2, o.z), BlockTypes.Block.GLASS)
+				for h in range(1, 5):
+					_world.set_block_deferred(Vector3i(o.x + x, base_y + h, o.z + z), BlockTypes.Block.COBBLESTONE)
+			_world.set_block_deferred(Vector3i(o.x + x, base_y + 5, o.z + z), BlockTypes.Block.WOOD)
+	# 门洞（北侧中央 4 宽 × 4 高）与窗。
+	for dx in range(4, 8):
+		for h in range(1, 5):
+			_world.set_block_deferred(Vector3i(o.x + dx, base_y + h, o.z), BlockTypes.Block.AIR)
+	for gz: int in [3, 4, 7, 8]:
+		_world.set_block_deferred(Vector3i(o.x, base_y + 3, o.z + gz), BlockTypes.Block.GLASS)
+		_world.set_block_deferred(Vector3i(o.x + 11, base_y + 3, o.z + gz), BlockTypes.Block.GLASS)
+	for dx: int in [8, 9]:
+		_world.set_block_deferred(Vector3i(o.x + dx, base_y + 3, o.z), BlockTypes.Block.GLASS)
 
 
-## 广场：5×5 圆石地面，东侧立一座酿灶台。
+## 广场：10×10 圆石地面，东侧立一座酿灶台。
 func _build_plaza(o: Vector3i) -> void:
 	o += origin
-	for x in range(5):
-		for z in range(5):
+	for x in range(10):
+		for z in range(10):
 			_world.set_block_deferred(Vector3i(o.x + x, base_y, o.z + z), BlockTypes.Block.COBBLESTONE)
-	_world.set_block_deferred(Vector3i(o.x + 5, base_y + 1, o.z + 2), BlockTypes.Block.BREWING)
+	_world.set_block_deferred(Vector3i(o.x + 10, base_y + 1, o.z + 4), BlockTypes.Block.BREWING)
 
 
-## 掠夺塔：3×3 圆石塔体高 8、木质 5×5 顶平台、四角护栏与旗帜，南侧门洞。
+## 掠夺塔：5×5 圆石塔体高 16、木质 9×9 顶平台、四角护栏与旗帜，南侧门洞 4×4。
 func _build_tower() -> void:
 	var c := TOWER_CENTER + origin
-	for x in range(c.x - 1, c.x + 2):
-		for z in range(c.z - 1, c.z + 2):
-			for y in range(base_y + 1, base_y + 9):
-				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.COBBLESTONE)
-	_world.set_block_deferred(Vector3i(c.x, base_y + 1, c.z - 1), BlockTypes.Block.AIR)
-	_world.set_block_deferred(Vector3i(c.x, base_y + 2, c.z - 1), BlockTypes.Block.AIR)
 	for x in range(c.x - 2, c.x + 3):
 		for z in range(c.z - 2, c.z + 3):
-			_world.set_block_deferred(Vector3i(x, base_y + 9, z), BlockTypes.Block.WOOD)
-	for cx: int in [c.x - 2, c.x + 2]:
-		for cz: int in [c.z - 2, c.z + 2]:
-			_world.set_block_deferred(Vector3i(cx, base_y + 10, cz), BlockTypes.Block.WOOD)
+			for y in range(base_y + 1, base_y + 17):
+				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.COBBLESTONE)
+	for dx in range(-1, 3):
+		for h in range(1, 5):
+			_world.set_block_deferred(Vector3i(c.x + dx, base_y + h, c.z - 2), BlockTypes.Block.AIR)
+	for x in range(c.x - 4, c.x + 5):
+		for z in range(c.z - 4, c.z + 5):
+			_world.set_block_deferred(Vector3i(x, base_y + 17, z), BlockTypes.Block.WOOD)
+	for cx: int in [c.x - 4, c.x + 4]:
+		for cz: int in [c.z - 4, c.z + 4]:
+			_world.set_block_deferred(Vector3i(cx, base_y + 18, cz), BlockTypes.Block.WOOD)
 	# 旗帜：西北角立杆 + 树叶旗面。
-	_world.set_block_deferred(Vector3i(c.x - 2, base_y + 11, c.z - 2), BlockTypes.Block.WOOD)
-	_world.set_block_deferred(Vector3i(c.x - 2, base_y + 12, c.z - 2), BlockTypes.Block.LEAVES)
+	_world.set_block_deferred(Vector3i(c.x - 4, base_y + 19, c.z - 4), BlockTypes.Block.WOOD)
+	_world.set_block_deferred(Vector3i(c.x - 4, base_y + 20, c.z - 4), BlockTypes.Block.LEAVES)
 
 
 ## 农田：6×6 耕地，中间一列灌水，其余格种作物——小麦为主，
@@ -153,14 +158,14 @@ func _farm_crop(x: int, z: int) -> int:
 
 
 func _spawn_npcs() -> void:
-	# 村民：广场一只 + 三座民居内各一只。
-	_spawn_mob(Mob.MobType.VILLAGER, Vector3(24.5, base_y + 1.0, 26.5) + Vector3(origin))
-	_spawn_mob(Mob.MobType.VILLAGER, Vector3(17.5, base_y + 1.0, 20.5) + Vector3(origin))
-	_spawn_mob(Mob.MobType.VILLAGER, Vector3(17.5, base_y + 1.0, 32.5) + Vector3(origin))
-	_spawn_mob(Mob.MobType.VILLAGER, Vector3(29.5, base_y + 1.0, 32.5) + Vector3(origin))
+	# 村民：广场一只 + 三座民居内各一只（格坐标随布局 ×2）。
+	_spawn_mob(Mob.MobType.VILLAGER, Vector3(49.5, base_y + 1.0, 52.5) + Vector3(origin))
+	_spawn_mob(Mob.MobType.VILLAGER, Vector3(35.5, base_y + 1.0, 40.5) + Vector3(origin))
+	_spawn_mob(Mob.MobType.VILLAGER, Vector3(35.5, base_y + 1.0, 65.5) + Vector3(origin))
+	_spawn_mob(Mob.MobType.VILLAGER, Vector3(59.5, base_y + 1.0, 65.5) + Vector3(origin))
 	# 掠夺者：塔门守卫 + 塔顶守卫。
-	_spawn_mob(Mob.MobType.PILLAGER, Vector3(37.5, base_y + 1.0, 19.5) + Vector3(origin))
-	_spawn_mob(Mob.MobType.PILLAGER, Vector3(37.5, base_y + 10.0, 22.5) + Vector3(origin))
+	_spawn_mob(Mob.MobType.PILLAGER, Vector3(75.5, base_y + 1.0, 40.5) + Vector3(origin))
+	_spawn_mob(Mob.MobType.PILLAGER, Vector3(75.5, base_y + 18.0, 44.5) + Vector3(origin))
 
 
 func _spawn_mob(type: Mob.MobType, pos: Vector3) -> void:

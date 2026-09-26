@@ -81,8 +81,14 @@ func _run() -> void:
 	_check(chicken_found, "击杀鸡掉落生鸡肉")
 
 	# 羊毛可放置：作为方块可读回且在硬度表中。
-	world.set_block(Vector3i(12, 37, 12), BlockTypes.Block.WOOL)
-	_check(world.get_block(Vector3i(12, 37, 12)) == BlockTypes.Block.WOOL, "羊毛方块可放置并读回")
+	# （0.5m 化后出生点锚定村庄，硬编码 (12,37,12) 远离玩家会被流式卸载——
+	# 改用玩家头顶旁的格子，保证区块常驻。）
+	var wool_cell := Vector3i(
+		int(player.global_position.x) + 2,
+		int(player.global_position.y) + 3,
+		int(player.global_position.z))
+	world.set_block(wool_cell, BlockTypes.Block.WOOL)
+	_check(world.get_block(wool_cell) == BlockTypes.Block.WOOL, "羊毛方块可放置并读回")
 	_check(BlockTypes.HARDNESS.has(BlockTypes.Block.WOOL), "羊毛在硬度表中（可徒手破坏）")
 	_check(ItemTypes.is_placeable(BlockTypes.Block.WOOL), "羊毛判定为可放置物品")
 	_check(not ItemTypes.is_placeable(ItemTypes.RAW_BEEF), "生牛排不可放置")

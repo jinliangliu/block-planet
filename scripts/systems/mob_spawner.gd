@@ -302,18 +302,23 @@ func _is_ground_block(id: int) -> bool:
 	return id == surface or id == surface_low
 
 
-## 从噪声地表高度起向上扫描，找到连续两格空气且脚下为实心方块的位置。
+## 从噪声地表高度起向上扫描，找到连续四格空气且脚下为实心方块的位置。
 ## 噪声高度不含树木与玩家建筑，直接使用会卡进树干或房屋。
+## 玩家与生物体素 0.5m 化后身高 ≈3.6 格，落点需 4 格净空。
 func _find_ground_y(wx: int, wz: int) -> int:
 	var y := _world.get_surface_height(wx, wz)
 	for i in range(GROUND_SCAN_STEPS):
-		if y >= World.CHUNK_SIZE.y - 2:
+		if y >= World.CHUNK_SIZE.y - 4:
 			return -1
-		var at := _world.get_block(Vector3i(wx, y, wz))
-		var above := _world.get_block(Vector3i(wx, y + 1, wz))
 		var below := _world.get_block(Vector3i(wx, y - 1, wz))
 		var below_solid := below != BlockTypes.Block.AIR and below != BlockTypes.Block.WATER
-		if at == BlockTypes.Block.AIR and above == BlockTypes.Block.AIR and below_solid:
+		var clear := true
+		for h in range(4):
+			var id := _world.get_block(Vector3i(wx, y + h, wz))
+			if id != BlockTypes.Block.AIR and not BlockTypes.is_water_plant(id):
+				clear = false
+				break
+		if clear and below_solid:
 			return y
 		y += 1
 	return -1

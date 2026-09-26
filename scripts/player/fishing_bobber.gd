@@ -5,7 +5,9 @@ class_name FishingBobber
 ## 由 Player 创建与回收，自身不判断钓况——咬钩时机由 Player 的垂钓状态机掌管。
 
 const BOB_SPEED := 3.4
-const BOB_AMPLITUDE := 0.06
+# 体素 0.5m 化：浮标本体与浮动幅度 ×2，钓线为全局拉线不动。
+const VISUAL_SCALE := 2.0
+const BOB_AMPLITUDE := 0.12
 const LINE_THICKNESS := 0.012
 ## 浮标与竿尖（相机）距离过远时视为脱线。
 const LINE_MAX := 40.0
@@ -25,8 +27,8 @@ func setup(player: Player) -> void:
 func _ready() -> void:
 	_body = MeshInstance3D.new()
 	var sphere := SphereMesh.new()
-	sphere.radius = 0.09
-	sphere.height = 0.18
+	sphere.radius = 0.18
+	sphere.height = 0.36
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.92, 0.30, 0.26)
 	_body.mesh = sphere
@@ -35,13 +37,13 @@ func _ready() -> void:
 	# 上半白、下半红的标准浮标配色。
 	var cap := MeshInstance3D.new()
 	var cap_mesh := SphereMesh.new()
-	cap_mesh.radius = 0.089
-	cap_mesh.height = 0.1
+	cap_mesh.radius = 0.178
+	cap_mesh.height = 0.2
 	var cap_mat := StandardMaterial3D.new()
 	cap_mat.albedo_color = Color(0.95, 0.95, 0.93)
 	cap.mesh = cap_mesh
 	cap.material_override = cap_mat
-	cap.position = Vector3(0.0, 0.045, 0.0)
+	cap.position = Vector3(0.0, 0.09, 0.0)
 	add_child(cap)
 
 	_line = MeshInstance3D.new()
@@ -68,7 +70,7 @@ func is_biting() -> bool:
 
 func _process(delta: float) -> void:
 	_phase += delta * (BOB_SPEED * (2.6 if _biting else 1.0))
-	var sink := -0.12 if _biting else 0.0
+	var sink := -0.24 if _biting else 0.0
 	var offset := sin(_phase) * (BOB_AMPLITUDE * (2.4 if _biting else 1.0))
 	_body.position.y = offset + sink
 	_update_line()
@@ -86,6 +88,6 @@ func _update_line() -> void:
 		_line.visible = false
 		return
 	_line.visible = true
-	_line.global_position = (from + to) * 0.5 + Vector3(0.0, 0.12, 0.0)
+	_line.global_position = (from + to) * 0.5 + Vector3(0.0, 0.24, 0.0)
 	_line.look_at(to, Vector3.UP)
 	_line.scale = Vector3(1.0, 1.0, length)

@@ -266,18 +266,35 @@ func _run() -> void:
 
 	# ── 阶段 G：村庄农田与面包链路 ──────────────────────────
 	var farm_o := VillageBuilder.FARM_ORIGIN
+	# 体素 0.5m 化后农田（farm_o+12²）距出生点约 26 格，早于旧布局的近距；
+	# 前置阶段耗时期间远处区块可能被流式卸载——先强制加载（村庄改动有
+	# 卸载留存，重载后方块原样还原），否则 get_block 全部读到 AIR。
+	world.ensure_chunks_in_region(
+		Vector3i(farm_o.x - 8, 0, farm_o.z - 2),
+		Vector3i(farm_o.x + VillageBuilder.FARM_SIZE + 8, base_y + 2, farm_o.z + VillageBuilder.FARM_SIZE + 8),
+	)
+	# 0.5m 化后农田远离旧测试锚点（44 格 > 卸载半径）：ensure 只保一帧，
+	# 下一物理帧流式卸载会把区块再次卸掉（倒树铺地的木头就写进了已卸载区块）。
+	# 玩家必须实际挪到农田旁，后续断言与倒树落地才在常驻区块上进行。
+	player.global_position = Vector3(
+		float(farm_o.x) + float(VillageBuilder.FARM_SIZE) * 0.5,
+		float(base_y) + 1.1,
+		float(farm_o.z) + 2.5,
+	)
+	player.velocity = Vector3.ZERO
 	_check(world.get_block(Vector3i(farm_o.x, base_y, farm_o.z)) == BlockTypes.Block.FARMLAND,
 		"农田地块为耕地")
-	_check(world.get_block(Vector3i(farm_o.x + 3, base_y, farm_o.z + 3)) == BlockTypes.Block.WATER,
+	var farm_water_x := VillageBuilder.FARM_SIZE / 2
+	_check(world.get_block(Vector3i(farm_o.x + farm_water_x, base_y, farm_o.z)) == BlockTypes.Block.WATER,
 		"农田中央一列为水")
-	_check(world.get_block(Vector3i(farm_o.x + 3, base_y + 1, farm_o.z + 3)) == BlockTypes.Block.AIR,
+	_check(world.get_block(Vector3i(farm_o.x + farm_water_x, base_y + 1, farm_o.z)) == BlockTypes.Block.AIR,
 		"水列上方不种作物")
 
 	# 农田混种：扫整片田，统计四种作物齐全（小麦为主 + 三种新蔬菜）。
 	var crop_seen := {}
-	for x in range(6):
-		for z in range(6):
-			if x == 3:
+	for x in range(VillageBuilder.FARM_SIZE):
+		for z in range(VillageBuilder.FARM_SIZE):
+			if x == farm_water_x:
 				continue
 			var b := world.get_block(Vector3i(farm_o.x + x, base_y + 1, farm_o.z + z))
 			if b in [BlockTypes.Block.WHEAT_CROP, BlockTypes.Block.CARROT_CROP,
@@ -287,9 +304,9 @@ func _run() -> void:
 
 	# 找一株小麦收割，验证面包链路（新蔬菜掉落自身，见 BlockTypes.drop_for）。
 	var crop_cell := Vector3i.ZERO
-	for x in range(6):
-		for z in range(6):
-			if x == 3:
+	for x in range(VillageBuilder.FARM_SIZE):
+		for z in range(VillageBuilder.FARM_SIZE):
+			if x == farm_water_x:
 				continue
 			var p := Vector3i(farm_o.x + x, base_y + 1, farm_o.z + z)
 			if world.get_block(p) == BlockTypes.Block.WHEAT_CROP:
@@ -307,7 +324,8 @@ func _run() -> void:
 
 	# ── 树叶随树干砍尽而落下消失 ──
 	# 手工搭一棵最小树：4 格树干 + 顶端 5 片树叶，验证衰减判据与清除效果。
-	var tree_b := Vector3i(farm_o.x + 6, base_y + 2, farm_o.z + 6)
+	# （0.5m 化后农田 12×12：+6 落在水列上，挪到农田东侧空地搭树。）
+	var tree_b := Vector3i(farm_o.x + VillageBuilder.FARM_SIZE + 4, base_y + 2, farm_o.z + 2)
 	for i in range(4):
 		world.set_block(tree_b + Vector3i(0, i, 0), BlockTypes.Block.WOOD)
 	var tree_leaves: Array[Vector3i] = [
@@ -395,7 +413,8 @@ func _run() -> void:
 	_check(still_falling == 0, "落地后演出节点自行回收（残留 %d 个）" % still_falling)
 
 	# 手搭的木柱（上方没有树冠）不该被当成树推倒。
-	var post_b := Vector3i(farm_o.x + 18, base_y + 1, farm_o.z + 6)
+	# 放在村庄整平区内（无天然树，±4 树冠判据不会被野生树冠误触发）。
+	var post_b := Vector3i(farm_o.x - 6, base_y + 1, farm_o.z + 2)
 	for i in range(3):
 		world.set_block(post_b + Vector3i(0, i, 0), BlockTypes.Block.WOOD)
 	player._finish_break(post_b, BlockTypes.Block.WOOD)
@@ -702,7 +721,8 @@ func _run() -> void:
 		await get_tree().physics_frame
 	var bed_pos := _water_spawn_position(world, pond_cell, true)
 	var live_crab := _spawn_mob(main_scene, Mob.MobType.CRAB, player, day_night, bed_pos)
-	for i in range(70):
+	# 0.5m 化后水阻力/浮力常数随米制 ×2，贴底收敛变慢——多等一倍帧数再断言。
+	for i in range(150):
 		await get_tree().physics_frame
 	# 断言值里带上高度与垂直速度：这条失败过（蟹悬在水中不落地），
 	# 光看 true/false 无从判断是「没下沉」还是「浮起来了」，把过程量打出来省一轮排查。
@@ -1371,7 +1391,8 @@ func _run() -> void:
 	_check(egg.stage == 1 and egg.stage_name() == "小鸡", "跨过一个游戏日后鸡蛋孵出小鸡")
 	_check(_grown_events == 1, "成长事件已广播一次（供成就计数）")
 	_check(
-		egg.stage_scale() < adult_hen.stage_scale() and egg._visual_root.scale.x < 0.99,
+		egg.stage_scale() < adult_hen.stage_scale() \
+			and egg._visual_root.scale.x < adult_hen.stage_scale() * 2.0,
 		"幼体外观按阶段缩放（%.2f）" % egg.stage_scale(),
 	)
 	_check(egg._visual_root.get_child_count() > 0, "阶段切换后外观已重建")

@@ -4,15 +4,17 @@ class_name Player
 ## 同时支持桌面（键盘 + 鼠标）与移动端（虚拟摇杆 + 触屏视角）。
 ## 键盘动作由 InputActions 运行时注册到 InputMap（见 scripts/core/input_actions.gd）。
 
-const GRAVITY := 24.0
-const JUMP_VELOCITY := 8.0
-const WALK_SPEED := 5.5
-const SPRINT_SPEED := 9.0
-const FLY_SPEED := 12.0
+## 体素 0.5m 化（D-030）：一格 = 0.5 米。玩家 1.8m ≈ 3.6 格，方块相对玩家
+## 缩小一倍。所有米制常量（速度/重力/距离）×2，格数体系（地形/SEA_LEVEL）不变。
+const GRAVITY := 48.0
+const JUMP_VELOCITY := 16.0
+const WALK_SPEED := 11.0
+const SPRINT_SPEED := 18.0
+const FLY_SPEED := 24.0
 const MOUSE_SENSITIVITY := 0.002
 const TOUCH_LOOK_SENSITIVITY := 0.004
 const PITCH_LIMIT := 1.55
-const REACH_DISTANCE := 8.0
+const REACH_DISTANCE := 16.0
 const MAX_HEALTH := 20
 const MAX_HUNGER := 20
 ## 饥饿消耗：站着不动满饥饿可撑 1000 秒（白天 600 秒，约 1.7 个白天）。
@@ -27,8 +29,8 @@ const STARVATION_DAMAGE_INTERVAL := 5.0
 const HURT_INVULN_TIME := 0.5
 ## 死亡停顿：原地立 R.I.P 墓碑的时长，倒计时结束才从出生点复活。
 const DEATH_PAUSE := 2.2
-# 落地速度阈值：sqrt(2 * GRAVITY * 3) ≈ 12 m/s，对应约 3 格内免伤。
-const FALL_DAMAGE_THRESHOLD := 12.0
+# 落地速度阈值：sqrt(2 * GRAVITY * 6) ≈ 24 m/s，对应约 6 格内免伤。
+const FALL_DAMAGE_THRESHOLD := 24.0
 const FALL_DAMAGE_SCALE := 0.5
 ## 蓄力射箭：按住右键满蓄 BOW_MAX_CHARGE 秒，伤害与初速随蓄力提升。
 const BOW_MIN_CHARGE := 0.15
@@ -38,7 +40,7 @@ const FISH_IDLE := 0
 const FISH_WAITING := 1
 const FISH_BITING := 2
 ## 垂钓：抛竿最远距离、等待咬钩的时间区间与咬钩窗口。
-const FISH_CAST_RANGE := 14.0
+const FISH_CAST_RANGE := 28.0
 const FISH_WAIT_MIN := 2.0
 const FISH_WAIT_MAX := 5.0
 const FISH_BITE_WINDOW := 1.6
@@ -46,15 +48,15 @@ const FISH_BITE_WINDOW := 1.6
 const ATTACK_DAMAGE := 1
 const ATTACK_COOLDOWN_MS := 500
 const DOUBLE_TAP_FLY_MS := 300
-const CAM_STEP := 0.9
-const CAM_DISTANCE_MAX := 4.5
-const FIRST_PERSON_MAX_DISTANCE := 0.05
+const CAM_STEP := 1.8
+const CAM_DISTANCE_MAX := 9.0
+const FIRST_PERSON_MAX_DISTANCE := 0.1
 const SWING_INTERVAL := 0.3
 # 防卡死：脚部与头部格均为实心且持续超过宽限帧数，判定嵌入地形并瞬间重生脱困。
 # 宽限 3 帧过滤传送/高速掠过的单帧误判，体感仍接近瞬间。
 const STUCK_GRACE_FRAMES := 3
-# 鱼群陪伴回血：身边 4m 内有鱼时每 5 秒回 1 点血（生命值不满才生效）。
-const FISH_HEAL_RADIUS := 4.0
+# 鱼群陪伴回血：身边 8 格内有鱼时每 5 秒回 1 点血（生命值不满才生效）。
+const FISH_HEAL_RADIUS := 8.0
 const FISH_HEAL_INTERVAL := 5.0
 # 饮用水恢复：解渴（饥饿）+ 少量生命。
 const DRINK_HUNGER := 4.0
@@ -407,15 +409,18 @@ func _force_unstuck() -> void:
 		global_position = _safe_respawn_position()
 
 
-## 出生点被堵时沿 Y 向上搜索"两格空气 + 实心底"的安全落点，
-## 防止重生后立即再次卡死形成循环。
+## 出生点被堵时沿 Y 向上搜索"四格空气 + 实心底"的安全落点，
+## 防止重生后立即再次卡死形成循环。（玩家 3.6 格高，需 4 格净空）
 func _safe_respawn_position() -> Vector3:
 	var cell := Vector3i(spawn_position.floor())
 	for _i in range(64):
-		var feet_free := not BlockTypes.is_solid(_world.get_block(cell))
-		var head_free := not BlockTypes.is_solid(_world.get_block(cell + Vector3i(0, 1, 0)))
+		var clear := true
+		for h in range(4):
+			if BlockTypes.is_solid(_world.get_block(cell + Vector3i(0, h, 0))):
+				clear = false
+				break
 		var grounded := BlockTypes.is_solid(_world.get_block(cell + Vector3i(0, -1, 0)))
-		if feet_free and head_free and grounded:
+		if clear and grounded:
 			return Vector3(cell) + Vector3(0.5, 0.1, 0.5)
 		cell.y += 1
 	return spawn_position
@@ -774,7 +779,7 @@ func _raycast_target() -> Dictionary:
 
 func _overlaps_player(cell: Vector3i) -> bool:
 	var cell_aabb := AABB(Vector3(cell), Vector3.ONE)
-	var player_aabb := AABB(global_position - Vector3(0.4, 0.0, 0.4), Vector3(0.8, 1.8, 0.8))
+	var player_aabb := AABB(global_position - Vector3(0.8, 0.0, 0.8), Vector3(1.6, 3.6, 1.6))
 	return cell_aabb.intersects(player_aabb)
 
 
@@ -881,12 +886,12 @@ func _begin_death() -> void:
 	velocity = Vector3.ZERO
 	var tomb_parent := get_parent()
 	if tomb_parent != null:
-		# 墓碑立在身前 0.8 米（与尸体错开，路人一眼可见；朝向取水平面投影）。
+		# 墓碑立在身前 1.6 米（与尸体错开，路人一眼可见；朝向取水平面投影）。
 		var facing := -global_transform.basis.z
 		facing.y = 0.0
 		var front := facing.normalized() if facing.length_squared() > 0.0001 \
 			else Vector3(0.0, 0.0, -1.0)
-		Tombstone.spawn(tomb_parent, global_position + front * 0.8, global_position)
+		Tombstone.spawn(tomb_parent, global_position + front * 1.6, global_position)
 	get_tree().create_timer(DEATH_PAUSE).timeout.connect(_finish_death)
 
 

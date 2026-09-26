@@ -11,8 +11,8 @@ extends Node3D
 ## ease-in 曲线，视觉上就是「倒下」，落点则由传入的方向唯一决定。
 
 const FALL_TIME := 0.72
-const TRUNK_THICK := 0.72
-const CANOPY_SIZE := Vector3(2.4, 1.7, 2.4)
+const TRUNK_THICK := 1.44
+const CANOPY_SIZE := Vector3(4.8, 3.4, 4.8)
 
 var _axis := Vector3(1.0, 0.0, 0.0)
 var _on_landed: Callable
@@ -44,7 +44,7 @@ func _setup(log_count: int, dir: Vector3, on_landed: Callable) -> void:
 	else:
 		flat = Vector3(0.0, 0.0, signf(flat.z))
 	_axis = Vector3.UP.cross(flat).normalized()
-	_landing_point = position + flat * (float(log_count) * 0.7 + 0.5)
+	_landing_point = position + flat * (float(log_count) * 0.35 + 1.0)
 
 	# 树干：一段长方体，底端正好落在砍口上（绕自身原点旋转即绕砍口倒下）。
 	var trunk := _mesh(BoxMesh.new(), BreakFx.color_for_block(BlockTypes.Block.WOOD))
@@ -75,8 +75,8 @@ func _set_fall(t: float) -> void:
 func _landed() -> void:
 	# 落地扬起的两撮叶屑：树冠砸下来的那两下。
 	for i in 2:
-		var at := _landing_point + Vector3(0.0, 0.35, 0.0) \
-			+ Vector3(float(i) - 0.5, 0.0, 0.0) * 0.6
+		var at := _landing_point + Vector3(0.0, 0.7, 0.0) \
+			+ Vector3(float(i) - 0.5, 0.0, 0.0) * 1.2
 		BreakFx.leaf_fall(get_parent(), at)
 	if _on_landed.is_valid():
 		_on_landed.call()

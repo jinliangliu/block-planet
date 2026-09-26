@@ -4,7 +4,7 @@ extends Node3D
 ## 选中工具显示"手柄 + 锤头"组合（木/石按 tier 着色）。
 ## 每帧轮询玩家选中物品，变化时重建模型；swing() 播放一次挥动动画。
 
-const BLOCK_SIZE := 0.26
+const BLOCK_SIZE := 0.52
 const ARM_COLOR := Color(0.87, 0.66, 0.51)
 const HANDLE_COLOR := Color(0.47, 0.33, 0.19)
 
@@ -71,8 +71,8 @@ func _rebuild(item: int) -> void:
 
 
 func _build_arm() -> void:
-	var mesh_instance := _make_box(Vector3(0.12, 0.12, 0.4), _flat_material(ARM_COLOR))
-	mesh_instance.position = Vector3(0.27, -0.22, -0.38)
+	var mesh_instance := _make_box(Vector3(0.24, 0.24, 0.8), _flat_material(ARM_COLOR))
+	mesh_instance.position = Vector3(0.54, -0.44, -0.76)
 	mesh_instance.rotation_degrees = Vector3(-18.0, -12.0, 6.0)
 	_root.add_child(mesh_instance)
 
@@ -90,7 +90,7 @@ func _build_block(item: int) -> void:
 	)
 
 	var mesh_instance := _make_box(Vector3.ONE * BLOCK_SIZE, _block_material)
-	mesh_instance.position = Vector3(0.3, -0.26, -0.5)
+	mesh_instance.position = Vector3(0.6, -0.52, -1.0)
 	mesh_instance.rotation_degrees = Vector3(4.0, 28.0, 0.0)
 	_root.add_child(mesh_instance)
 
@@ -99,7 +99,7 @@ func _build_block(item: int) -> void:
 func _build_plain_item(item: int) -> void:
 	var color: Color = ItemTypes.ITEM_COLORS.get(item, Color.WHITE)
 	var mesh_instance := _make_box(Vector3.ONE * (BLOCK_SIZE * 0.6), _flat_material(color))
-	mesh_instance.position = Vector3(0.3, -0.24, -0.5)
+	mesh_instance.position = Vector3(0.6, -0.48, -1.0)
 	mesh_instance.rotation_degrees = Vector3(6.0, 24.0, 0.0)
 	_root.add_child(mesh_instance)
 
@@ -107,14 +107,14 @@ func _build_plain_item(item: int) -> void:
 func _build_tool(item: int) -> void:
 	var rot := Vector3(12.0, 0.0, -18.0)
 
-	var handle := _make_box(Vector3(0.055, 0.42, 0.055), _flat_material(HANDLE_COLOR))
-	handle.position = Vector3(0.3, -0.2, -0.48)
+	var handle := _make_box(Vector3(0.11, 0.84, 0.11), _flat_material(HANDLE_COLOR))
+	handle.position = Vector3(0.6, -0.4, -0.96)
 	handle.rotation_degrees = rot
 	_root.add_child(handle)
 
 	# 头部颜色与格子微缩图同源（木/石/青铜/铁/银/金由 ItemTypes 统一决定）。
-	var head := _make_box(Vector3(0.2, 0.1, 0.09), _flat_material(ItemTypes.item_color(item)))
-	head.position = Vector3(0.32, 0.02, -0.48)
+	var head := _make_box(Vector3(0.4, 0.2, 0.18), _flat_material(ItemTypes.item_color(item)))
+	head.position = Vector3(0.64, 0.04, -0.96)
 	head.rotation_degrees = rot
 	_root.add_child(head)
 

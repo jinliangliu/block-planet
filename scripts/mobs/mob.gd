@@ -11,7 +11,11 @@ class_name Mob
 ## 每过一个游戏日推进一阶段（DayNightCycle.day_changed 驱动），
 ## 幼体不可狩猎，长大后才会有完整掉落。
 
-const GRAVITY := 24.0
+## 体素 0.5m 化（D-030）：一格 = 0.5 米。米制量（速度/距离/尺寸）×2，
+## 格数体系不变。视觉模型整体经 METRIC_SCALE 放大。
+const METRIC_SCALE := 2.0
+
+const GRAVITY := 48.0
 ## 被动生物受击后的逃跑时长（秒）。
 const FLEE_TIME := 3.0
 ## 会反击的被动生物被击中后的追击时长（秒）。
@@ -22,22 +26,22 @@ const WANDER_WALK_MAX := 3.5
 const WANDER_IDLE_MIN := 1.5
 const WANDER_IDLE_MAX := 4.0
 ## 骷髅与玩家保持的射击距离：更近后撤、更远逼近。
-const SKELETON_STANDOFF_MIN := 4.0
-const SKELETON_STANDOFF_MAX := 9.0
+const SKELETON_STANDOFF_MIN := 8.0
+const SKELETON_STANDOFF_MAX := 18.0
 ## 鱼虾游动节奏与活动半径（围绕出生点，避免游上岸）。
-const SWIM_WALK_MIN := 2.0
-const SWIM_WALK_MAX := 4.5
-const SWIM_RADIUS := 6.0
+const SWIM_WALK_MIN := 4.0
+const SWIM_WALK_MAX := 9.0
+const SWIM_RADIUS := 12.0
 ## 鱼的好奇半径：玩家进入后鱼会游过来绕着转，不再各自乱游。
-const FISH_CURIOUS_RADIUS := 7.0
+const FISH_CURIOUS_RADIUS := 14.0
 ## 鱼与玩家保持的距离：贴太近会吓跑（只绕圈，不贴脸）。
-const FISH_KEEP_DISTANCE := 1.8
+const FISH_KEEP_DISTANCE := 3.6
 ## 蜻蜓/蝴蝶悬停半径与上下浮动参数。
-const FLY_RADIUS := 5.0
+const FLY_RADIUS := 10.0
 const FLY_BOB_SPEED := 2.6
-const FLY_BOB_AMPLITUDE := 0.6
+const FLY_BOB_AMPLITUDE := 1.2
 ## 青蛙起跳初速与两次起跳的间隔（秒）。
-const HOP_SPEED := 5.2
+const HOP_SPEED := 10.4
 const HOP_INTERVAL_MIN := 1.2
 const HOP_INTERVAL_MAX := 2.6
 
@@ -571,14 +575,14 @@ func _shoot_arrow() -> void:
 	if get_parent() == null:
 		return
 	var arrow := ArrowProjectile.new()
-	var target := player.global_position + Vector3(0.0, 0.9, 0.0)
+	var target := player.global_position + Vector3(0.0, 1.8, 0.0)
 	arrow.setup(player, (target - _chest_position()).normalized(), self)
 	get_parent().add_child(arrow)
 	arrow.global_position = _chest_position()
 
 
 func _chest_position() -> Vector3:
-	return global_position + Vector3(0.0, 0.9, 0.0)
+	return global_position + Vector3(0.0, 1.8, 0.0)
 
 
 ## 被动行为：反击优先（北极熊/蟹），其次受击逃跑；否则按计时器在
@@ -770,8 +774,8 @@ func _has_line_of_sight() -> bool:
 	if player == null:
 		return false
 	var space := get_world_3d().direct_space_state
-	var from := global_position + Vector3(0.0, 0.6, 0.0)
-	var to := player.global_position + Vector3(0.0, 0.9, 0.0)
+	var from := global_position + Vector3(0.0, 1.2, 0.0)
+	var to := player.global_position + Vector3(0.0, 1.8, 0.0)
 	var query := PhysicsRayQueryParameters3D.create(from, to)
 	query.exclude = [get_rid()]
 	var hit := space.intersect_ray(query)
@@ -953,6 +957,10 @@ func _apply_type_stats() -> void:
 			drop_item = BlockTypes.Block.WOOD
 			drop_count = 1
 	# 记录成体基准值，阶段倍率在此之上换算。
+	# 体素 0.5m 化（D-030）：速度与攻击距离是米制 → ×2（格数不变）。
+	speed *= METRIC_SCALE
+	attack_range *= METRIC_SCALE
+	# 记录成体基准值，阶段倍率在此之上换算。
 	_base_health = health
 	_base_speed = speed
 	_base_attack_damage = attack_damage
@@ -1014,7 +1022,7 @@ func _nametag_height() -> float:
 			base = 1.15
 		MobType.BALD_EAGLE:
 			base = 1.2
-	return base * maxf(0.55, stage_scale())
+	return base * maxf(0.55, stage_scale()) * METRIC_SCALE
 
 
 func _update_nametag() -> void:
@@ -1081,7 +1089,8 @@ func _build_unregistered() -> void:
 
 
 func _build_visual() -> void:
-	_visual_root.scale = Vector3.ONE * stage_scale()
+	# 视觉模型整体 ×2（体素 0.5m 化）：生物相对方块的比例保持原样。
+	_visual_root.scale = Vector3.ONE * stage_scale() * METRIC_SCALE
 	var art := String(stage_data().get("art", ""))
 	if not art.is_empty():
 		_build_stage_art(art)
@@ -1545,10 +1554,11 @@ func _build_collision() -> void:
 
 
 ## 碰撞体随阶段缩放：小小身体配小小的碰撞胶囊，避免幼体被空气挡住。
+## 体素 0.5m 化（D-030）：整体再乘 METRIC_SCALE，与放大的视觉模型同步。
 func _apply_collision_scale() -> void:
 	if _collision == null:
 		return
-	_collision.scale = Vector3.ONE * maxf(0.45, stage_scale())
+	_collision.scale = Vector3.ONE * maxf(0.45, stage_scale()) * METRIC_SCALE
 
 
 func _type_color() -> Color:
