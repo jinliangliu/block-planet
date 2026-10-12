@@ -149,9 +149,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_rotate_view(Vector2(event.relative.x, event.relative.y) * MOUSE_SENSITIVITY)
 
-	# 滚轮缩放视角：拉近回第一人称，拉远经弹簧臂切第三人称（可看到角色形体）。
-	# 驾驶中相机距离固定为追尾视角，滚轮不生效。
-	if event is InputEventMouseButton and event.pressed and _aircraft == null:
+	# 滚轮缩放视角：拉近回第一人称（驾驶中即座舱视角），拉远切第三人称追尾。
+	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			camera_distance = maxf(0.0, camera_distance - CAM_STEP)
 			_apply_camera_mode()
@@ -1126,6 +1125,11 @@ func _apply_camera_mode() -> void:
 	_third_camera.current = not first_person
 	_held_item.visible = first_person
 	_model.set_third_person(not first_person)
+	# 驾驶中飞行员坐在舱内不显示：set_third_person(true) 会把模型重新置可见，
+	# 而驾驶期间（滚轮切视角）仍可能走到这里，必须保持隐藏，否则人物会「站」在机身上。
+	if _aircraft != null:
+		_model.visible = false
+		_held_item.visible = false
 	_spring_arm.spring_length = camera_distance
 
 

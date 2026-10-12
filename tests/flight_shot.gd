@@ -1,6 +1,7 @@
 extends Node
-## 飞行器外观取证：在一条平整跑道上放一架飞机，第三人称 + 近景两张截图，
-## 用于核对机模与玩家/方块的尺寸比例。需窗口运行，勿加 --headless。
+## 飞行器外观/驾驶舱取证：在一条平整跑道上放一架飞机，出四张截图——
+## ① 第三人称全景 ② 近景 ③ 坐进驾驶舱后的第一人称（座舱视角）④ 追尾视角。
+## 用于核对机模比例、座椅位与相机高度是否自洽。需窗口运行，勿加 --headless。
 ## 运行：Godot_v4.6.3-stable_win64_console.exe --path . res://tests/flight_shot.tscn
 
 const SHOT_DIR := "res://tmp"
@@ -12,6 +13,8 @@ const STRIP_CANDIDATES := [
 ]
 const STRIP_WIDTH := 10
 const STRIP_LENGTH := 64
+
+var _craft: Aircraft
 
 
 func _shot_path(file_name: String) -> String:
@@ -44,7 +47,7 @@ func _run() -> void:
 	# 跑道中央放一架飞机，机头朝 +Z（与跑道同向）。
 	var craft_pos := Vector3(
 		float(origin.x) + 5.0, surface, float(origin.y) + 32.0)
-	Aircraft.spawn(main_scene, craft_pos, PI)
+	_craft = Aircraft.spawn(main_scene, craft_pos, PI)
 
 	# 玩家站到飞机侧前方，第三人称看全机（相机距离拉到上限 9）。
 	player.set_physics_process(false)
@@ -73,6 +76,39 @@ func _run() -> void:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shot_path("flight_shot_close.png"))
+
+	# ── 登机：核对座椅位与相机高度 ──────────────────────────
+	# 必须恢复物理：玩家每帧在 _physics_process 里被贴到座舱位，物理停着就不会动。
+	player.set_physics_process(true)
+	player.ride_aircraft(_craft)
+	for i in range(10):
+		await get_tree().physics_frame
+	var cam: Camera3D = player.get_node("Camera3D")
+	print("craft_origin=", _craft.global_position)
+	print("seat(玩家原点=脚底)=", player.global_position,
+		"  相对机体=", player.global_position - _craft.global_position)
+	print("第一人称相机世界位=", cam.global_position,
+		"  相对机体=", cam.global_position - _craft.global_position)
+	print("机模最高点(垂尾顶)=", _craft.global_position.y + 1.425)
+
+	# ③ 座舱视角：第一人称、视线水平（看机头前方）。
+	player.camera_distance = 0.0
+	player._apply_camera_mode()
+	spring.rotation.x = 0.0
+	player.get_node("Camera3D").rotation = Vector3.ZERO
+	for i in range(20):
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(_shot_path("flight_shot_cockpit.png"))
+
+	# ④ 追尾视角：驾驶时的默认相机（camera_distance = CAM_DISTANCE_MAX）。
+	player.camera_distance = Player.CAM_DISTANCE_MAX
+	player._apply_camera_mode()
+	spring.rotation.x = -0.12
+	for i in range(20):
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(_shot_path("flight_shot_chase.png"))
 
 	print("FLIGHT_SHOT_DONE strip_y=%d" % strip_y)
 	get_tree().quit(0)
