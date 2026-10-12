@@ -1028,7 +1028,7 @@ func _run() -> void:
 	Progress._quiz_correct_since_reward = 0
 
 	_check(QuestData.quests().size() == 8, "新手任务链共 8 环")
-	_check(QuestData.achievements().size() == 25, "成就共 25 枚（现 %d 枚）" % QuestData.achievements().size())
+	_check(QuestData.achievements().size() == 28, "成就共 28 枚（现 %d 枚）" % QuestData.achievements().size())
 	var first_q := QuestData.quests()[0]
 	var second_q := QuestData.quests()[1]
 	_check(Progress.is_visible(first_q) and not Progress.is_visible(second_q),

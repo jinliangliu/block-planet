@@ -30,6 +30,12 @@ func _ready() -> void:
 		_player.inventory = GameState.carried_inventory
 		GameState.carried_inventory = null
 
+	# 探索模式开局送一架飞机：该模式的主题就是「自由观察世界」，
+	# 飞行是第一玩法而非要先凑齐铁锭的附属品。每局只送一次
+	# （GameState 里的一次性标记），换图/重载不重复发。
+	if GameState.is_explore() and GameState.claim_explore_aircraft():
+		_player.inventory.add_item(ItemTypes.AIRCRAFT, 1)
+
 	_world.set_player(_player)
 	_player.day_night_ref = _day_night
 	# 村庄先于出生点生成：亚洲出生点锚定在村庄整平区内，扫描时读到的

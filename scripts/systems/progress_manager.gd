@@ -30,6 +30,9 @@ func _ready() -> void:
 	Events.player_died.connect(_on_player_died)
 	Events.region_entered.connect(_on_region_entered)
 	Events.mob_grown.connect(_on_mob_grown)
+	Events.aircraft_took_off.connect(_on_aircraft_took_off)
+	Events.aircraft_altitude.connect(_on_aircraft_altitude)
+	Events.aircraft_distance.connect(_on_aircraft_distance)
 	_reevaluate()
 
 
@@ -178,6 +181,21 @@ func _on_mob_grown(mob_type: int, stage: int) -> void:
 	notify("grown_any")
 	if stage >= 1:
 		notify("grown_stage_%d" % stage)
+
+
+## 飞行器起飞一次（「展翅高飞」）。
+func _on_aircraft_took_off() -> void:
+	notify("flew")
+
+
+## 飞行器到达新的离地高度里程碑（每 20 m 一档，「冲上云霄」盯 60 m 档）。
+func _on_aircraft_altitude(altitude: float) -> void:
+	notify("flew_alt_%d" % int(altitude))
+
+
+## 飞行器累计飞行距离每满 100 m 一段（「空中漫游」累计 1000 m）。
+func _on_aircraft_distance(meters: float) -> void:
+	notify("flew_distance", int(meters))
 
 
 func _save() -> void:

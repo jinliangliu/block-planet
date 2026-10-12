@@ -15,6 +15,15 @@ signal player_mode_changed(flying: bool)
 ## 玩家登机 / 下机后广播，HUD 据此显隐飞行仪表。
 signal aircraft_ride_changed(riding: bool)
 
+## 飞行器机轮离地（起飞）时广播，进度核心据此累计首飞。
+signal aircraft_took_off
+
+## 飞行器到达新的离地高度里程碑（每 20 m 一次）时广播。
+signal aircraft_altitude(altitude: float)
+
+## 飞行器累计飞行距离每满 100 m 广播一次（参数为该段里程）。
+signal aircraft_distance(meters: float)
+
 ## 右键命中村民或酿灶台时发出，HUD 监听后打开交易面板。
 signal request_trade
 

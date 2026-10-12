@@ -549,6 +549,9 @@ func ride_aircraft(craft: Aircraft) -> void:
 	velocity = Vector3.ZERO
 	_fall_speed = 0.0
 	_clear_fishing()
+	# 骑乘者与机身互不碰撞：座舱位落在机体碰撞盒内部，否则两个 CharacterBody3D
+	# 互相深穿透，物理分离会在一帧内把飞机弹飞并触发撞击解体（登机即坠机）。
+	add_collision_exception_with(craft)
 	# 弹簧臂排除机体自身，否则追尾相机会被机身顶到座舱里。
 	_spring_arm.add_excluded_object(craft.get_rid())
 	camera_distance = CAM_DISTANCE_MAX_RIDING
@@ -568,6 +571,7 @@ func exit_aircraft(damage: int = 0) -> void:
 	var craft := _aircraft
 	_aircraft = null
 	if is_instance_valid(craft):
+		remove_collision_exception_with(craft)
 		craft.set_piloted(false)
 		_spring_arm.remove_excluded_object(craft.get_rid())
 		# 从机身左侧跳下（机体坐标 +X 为右翼）：跨出碰撞盒半宽 3.3 再留余量，

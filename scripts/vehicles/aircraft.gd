@@ -57,6 +57,16 @@ const THROTTLE_RATE := 0.55
 ## 骑乘者受伤（解体时抛出）。
 const CRASH_DAMAGE := 6
 
+# ── 飞行里程统计（探索模式成就的数据源） ─────────────────────
+## 离地高度测量：向下射线长度（m）。世界高度上限 64 格 ≈ 32 m，400 m 足够。
+const AGL_RAY_LENGTH := 400.0
+## 测高刷新间隔（秒）：射线不必每帧打，5 Hz 够仪表与里程碑用。
+const AGL_INTERVAL := 0.2
+## 离地高度里程碑步长（m）：每越过一档广播一次。
+const ALT_MILESTONE_STEP := 20.0
+## 累计飞行距离里程碑步长（m）。
+const DIST_MILESTONE_STEP := 100.0
+
 @export var use_player_input := true
 
 var controls := AircraftFlight.Controls.new()
@@ -72,6 +82,17 @@ var _stick := Vector2.ZERO
 var _readings_timer := 0.0
 var _stall_state := false
 var _collider: CollisionShape3D
+## 离地高度（m，AGL）：机身原点距下方地形面的高度，测高射线刷新。
+## HUD「离地」读数与高度里程碑共用；无命中（飞出世界边缘）时退回 position.y。
+var _altitude_agl := 0.0
+var _agl_timer := 0.0
+## 上一帧是否着地（起飞边沿检测）。
+var _was_on_floor := true
+## 本次飞行已达成的离地高度里程碑与里程里程碑（m）。
+var _alt_milestone := 0.0
+var _dist_milestone := 0.0
+## 累计空中飞行距离（m）。
+var _flight_distance := 0.0
 
 
 ## 在世界里落下一架飞行器：机轮贴地、机头朝 heading。
@@ -114,7 +135,13 @@ func launch(forward_speed: float, climb_speed: float = 0.0) -> void:
 
 ## 每帧读数快照（HUD 仪表与探针共用）。
 func snapshot() -> Dictionary:
-	return AircraftFlight.snapshot(_state)
+	var data := AircraftFlight.snapshot(_state)
+	# 节点级补充字段：离地高度（纯逻辑层不持有世界引用，测高在节点做）。
+	data["altitude_agl"] = _altitude_agl
+	# 油门读数取「飞行员指令」(controls) 而非滞后一帧的集成状态 (state)，
+	# 让油门条实时跟手；其余气动读数（空速/失速）仍取自物理状态。
+	data["throttle"] = controls.throttle
+	return data
 
 
 func is_wrecked() -> bool:
@@ -184,8 +211,55 @@ func _physics_process(delta: float) -> void:
 		_model.spin_propeller(controls.throttle, delta)
 		_model.deflect_controls(controls.roll, controls.pitch)
 
+	_update_flight_tracking(delta, on_ground)
 	_check_failure(impact)
 	_emit_readings(delta)
+
+
+## 飞行里程统计：起飞边沿、离地高度里程碑、累计里程，广播给进度核心
+## （探索模式「展翅高飞 / 冲上云霄 / 空中漫游」三枚成就的数据源）。
+func _update_flight_tracking(delta: float, on_ground: bool) -> void:
+	if not on_ground and _was_on_floor:
+		# 起飞：本次飞行的里程碑从零起算（落地下次再飞可重新达成）。
+		Events.aircraft_took_off.emit()
+		_alt_milestone = 0.0
+		_dist_milestone = 0.0
+	_was_on_floor = on_ground
+
+	if on_ground:
+		_altitude_agl = 0.0
+		return
+
+	# 累计空中里程：每满 100 m 广播一段。
+	_flight_distance += _state.velocity.length() * delta
+	while _flight_distance >= _dist_milestone + DIST_MILESTONE_STEP:
+		_dist_milestone += DIST_MILESTONE_STEP
+		Events.aircraft_distance.emit(DIST_MILESTONE_STEP)
+
+	# 测高节流：5 Hz 足够仪表与里程碑，省得每帧打射线。
+	_agl_timer += delta
+	if _agl_timer < AGL_INTERVAL:
+		return
+	_agl_timer = 0.0
+	_altitude_agl = _raycast_altitude_agl()
+	while _altitude_agl >= _alt_milestone + ALT_MILESTONE_STEP:
+		_alt_milestone += ALT_MILESTONE_STEP
+		Events.aircraft_altitude.emit(_alt_milestone)
+
+
+## 离地高度：自机身原点向下打一道射线，命中地形面即距地高度
+## （扣掉机轮离地净空，停放时读数为 0）。未命中退回世界坐标 y——
+## 飞出世界边缘时没有地形可测，给个单调递增的值也好过没有。
+func _raycast_altitude_agl() -> float:
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		global_position, global_position + Vector3.DOWN * AGL_RAY_LENGTH)
+	query.exclude = [get_rid()]
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		return global_position.y
+	var hit_pos: Vector3 = hit["position"]
+	return maxf(hit_pos.distance_to(global_position) - GROUND_CLEARANCE, 0.0)
 
 
 ## 读数与失速边沿广播（读数节流到 10 Hz，避免每帧刷 HUD）。

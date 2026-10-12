@@ -22,6 +22,9 @@ var needs_region_pick := true
 ## 换图时暂存的玩家背包：Main 在重载场景前置入，新实例取出后清空，
 ## 避免切换地图丢光工具与材料。
 var carried_inventory: Inventory = null
+## 探索模式开局赠送是否已发放（每局一次）：切换进探索模式即时补发，
+## 重载场景/切换区域不重复。见 Main._ready 与 HUD 模式切换处理。
+var explore_aircraft_given := false
 
 
 func is_creative() -> bool:
@@ -60,7 +63,7 @@ func mode_hint() -> String:
 	if is_creative():
 		return "无限资源、无敌、可飞行，自由搭建"
 	if is_explore():
-		return "保留生存机制但不生成敌对生物，可飞行观察"
+		return "保留生存机制但不生成敌对生物，送一架飞机自由观察"
 	return "有生命与饥饿，夜里要提防敌对生物"
 
 
@@ -75,6 +78,16 @@ func set_region(region_id: int) -> void:
 	current_region = clampi(region_id, 0, RegionAtlas.COUNT - 1)
 	needs_region_pick = false
 	region_changed.emit(current_region)
+
+
+## 领取探索模式的开局赠送：首次返回 true（调用方当场发放一架飞机），
+## 之后一律 false。放在单例里是为了「重载场景」与「即时切模式」两条
+## 进入路径共用同一个一次性标记，不会重复发、也不会漏发。
+func claim_explore_aircraft() -> bool:
+	if explore_aircraft_given:
+		return false
+	explore_aircraft_given = true
+	return true
 
 
 func region_title() -> String:

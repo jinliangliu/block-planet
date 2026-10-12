@@ -88,6 +88,7 @@ static func quiz_bank() -> Array[Dictionary]:
 		{"q": "狩猎奶牛用哪种工具更有效？", "options": ["斧头", "鱼竿", "镰刀"], "answer": 0},
 		{"q": "收割小麦用哪种工具收成更多？", "options": ["镰刀", "镐子", "铁锹"], "answer": 0},
 		{"q": "弓射出的箭要消耗什么？", "options": ["箭", "绿宝石", "面包"], "answer": 0},
+		{"q": "想驾驶飞机，靠近后按哪个键登机？", "options": ["F 键", "E 键", "T 键"], "answer": 0},
 	]
 
 
@@ -296,11 +297,30 @@ static func _build() -> void:
 			"goal": {"type": "count", "key": "grown_%d" % Mob.MobType.FROG, "count": 1},
 			"reward": {"item": 209, "count": 2},
 		},
-		# 保护动物（M8.2 / M8.3）
-		{
-			"id": "a_protect_1", "category": Category.EXPLORE, "prerequisite": "",
-			"title": "动物守护者", "desc": "了解 3 种受保护的动物，并且没有伤害它们。",
-			"goal": {"type": "count", "key": "protected_blocked", "count": 3},
-			"reward": {"item": 204, "count": 3},
-		},
-	]
+	# 保护动物（M8.2 / M8.3）
+	{
+		"id": "a_protect_1", "category": Category.EXPLORE, "prerequisite": "",
+		"title": "动物守护者", "desc": "了解 3 种受保护的动物，并且没有伤害它们。",
+		"goal": {"type": "count", "key": "protected_blocked", "count": 3},
+		"reward": {"item": 204, "count": 3},
+	},
+	# 飞行（D-031：探索模式的第一玩法）
+	{
+		"id": "a_fly_first", "category": Category.EXPLORE, "prerequisite": "",
+		"title": "展翅高飞", "desc": "造一架飞机，驾驶它第一次离开地面。",
+		"goal": {"type": "count", "key": "flew", "count": 1},
+		"reward": {"item": 204, "count": 2},
+	},
+	{
+		"id": "a_fly_altitude", "category": Category.EXPLORE, "prerequisite": "",
+		"title": "冲上云霄", "desc": "驾驶飞机爬到离地 60 米以上，俯瞰整片大地。",
+		"goal": {"type": "count", "key": "flew_alt_60", "count": 1},
+		"reward": {"item": 204, "count": 3},
+	},
+	{
+		"id": "a_fly_distance", "category": Category.EXPLORE, "prerequisite": "",
+		"title": "空中漫游", "desc": "累计在空中飞行 1000 米，来一次长途观光。",
+		"goal": {"type": "count", "key": "flew_distance", "count": 1000},
+		"reward": {"item": 205, "count": 1},
+	},
+]

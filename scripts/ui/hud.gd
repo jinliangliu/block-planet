@@ -512,7 +512,9 @@ func _refresh_flight_panel() -> void:
 	]
 	_flight_speed.add_theme_color_override(
 		"font_color", Color(1.0, 0.42, 0.36) if warning else Color(1.0, 1.0, 1.0, 0.95))
-	_flight_altitude.text = "高度  %d m" % int(reading["altitude"])
+	# 离地高度（AGL）而非世界坐标 y：停放时读 0，越过山头时读数随地形起伏，
+	# 这才是「会不会撞地」的直接依据；绝对高度留待气动与探针使用。
+	_flight_altitude.text = "离地  %d m" % int(reading["altitude_agl"])
 	_flight_throttle.text = "油门  %s %d%%" % [
 		_throttle_bar(float(reading["throttle"])), int(float(reading["throttle"]) * 100.0)
 	]
@@ -2280,6 +2282,11 @@ func _on_mode_changed(_mode: int) -> void:
 		_fly_button.visible = GameState.can_fly()
 	if _descend_button:
 		_descend_button.visible = GameState.can_fly()
+	# 中途切进探索模式：补发开局赠送的那架飞机（一次性标记防重复）。
+	if GameState.is_explore() and GameState.claim_explore_aircraft() \
+			and _player != null and _player.inventory != null:
+		_player.inventory.add_item(ItemTypes.AIRCRAFT, 1)
+		_show_toast("🎁 探索模式礼物：一架轻型飞机，找块平地右键放下它")
 	_refresh_hotbar()
 	_refresh_stats()
 
