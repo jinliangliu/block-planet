@@ -50,6 +50,11 @@ const ATTACK_COOLDOWN_MS := 500
 const DOUBLE_TAP_FLY_MS := 300
 const CAM_STEP := 1.8
 const CAM_DISTANCE_MAX := 9.0
+## 驾驶时的追尾距离上限：机模放大后（翼展 24 格）9 格距离会被机身糊满屏。
+const CAM_DISTANCE_MAX_RIDING := 20.0
+## 驾驶时的默认追尾俯仰：抬高相机越过垂尾（垂尾顶 4.28 格，眼位只有 2.75），
+## 否则追尾视角正对着自己的尾翼。
+const CHASE_PITCH_RIDING := -0.22
 const FIRST_PERSON_MAX_DISTANCE := 0.1
 const SWING_INTERVAL := 0.3
 # 防卡死：脚部与头部格均为实心且持续超过宽限帧数，判定嵌入地形并瞬间重生脱困。
@@ -150,13 +155,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			_rotate_view(Vector2(event.relative.x, event.relative.y) * MOUSE_SENSITIVITY)
 
 	# 滚轮缩放视角：拉近回第一人称（驾驶中即座舱视角），拉远切第三人称追尾。
+	# 驾驶中上限放宽到 CAM_DISTANCE_MAX_RIDING——机身大，9 格距离会糊满屏。
 	if event is InputEventMouseButton and event.pressed:
+		var max_distance := CAM_DISTANCE_MAX_RIDING if _aircraft != null else CAM_DISTANCE_MAX
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			camera_distance = maxf(0.0, camera_distance - CAM_STEP)
 			_apply_camera_mode()
 			return
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			camera_distance = minf(CAM_DISTANCE_MAX, camera_distance + CAM_STEP)
+			camera_distance = minf(max_distance, camera_distance + CAM_STEP)
 			_apply_camera_mode()
 			return
 
@@ -544,7 +551,9 @@ func ride_aircraft(craft: Aircraft) -> void:
 	_clear_fishing()
 	# 弹簧臂排除机体自身，否则追尾相机会被机身顶到座舱里。
 	_spring_arm.add_excluded_object(craft.get_rid())
-	camera_distance = CAM_DISTANCE_MAX
+	camera_distance = CAM_DISTANCE_MAX_RIDING
+	# 驾驶中鼠标让位给操纵杆，弹簧臂俯仰不再由视角驱动——设一个越过垂尾的默认值。
+	_spring_arm.rotation.x = CHASE_PITCH_RIDING
 	_apply_camera_mode()
 	_model.visible = false
 	_held_item.visible = false
@@ -561,12 +570,15 @@ func exit_aircraft(damage: int = 0) -> void:
 	if is_instance_valid(craft):
 		craft.set_piloted(false)
 		_spring_arm.remove_excluded_object(craft.get_rid())
-		# 从机身左侧跳下（机体坐标 +X 为右翼）。
+		# 从机身左侧跳下（机体坐标 +X 为右翼）：跨出碰撞盒半宽 3.3 再留余量，
+		# 否则出生在机体碰撞盒内会被挤出去。
 		global_position = craft.global_position \
-			- craft.global_transform.basis.x * 2.6 + Vector3(0.0, 1.0, 0.0)
+			- craft.global_transform.basis.x * 5.0 + Vector3(0.0, 1.0, 0.0)
 	velocity = Vector3.ZERO
 	_fall_speed = 0.0
 	camera_distance = 0.0
+	# 弹簧臂俯仰恢复与第一人称相机一致（登机时曾设成越尾仰角）。
+	_spring_arm.rotation.x = _camera.rotation.x
 	# 第一人称下 PlayerModel 由 set_third_person(false) 自行隐藏，勿再强行置可见。
 	_apply_camera_mode()
 	if damage > 0:

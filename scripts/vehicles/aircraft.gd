@@ -6,8 +6,8 @@ extends CharacterBody3D
 ## 机身碰撞与地面支撑、轮胎抓地、撞击解体、乘员座位、信号广播。
 ## 机型表现见 AircraftModel（纯代码生成的机模）。
 ##
-## 世界尺度：1 格 = 0.5 m（D-030）。机身约 6 格长、翼展 8 格（≈ 3 m × 4 m
-## 的单座轻型机），起飞需要一段平地或跑道。
+## 世界尺度：1 格 = 0.5 m（D-030）。机身约 17 格长、翼展 24 格（≈ 8.5 m × 12 m
+## 的轻型单发机），比村庄民居（12×12 格）大一圈，起飞需要一段平地或跑道。
 ##
 ## 驾驶输入（use_player_input = true 且 piloted 时）：
 ##   鼠标 → 操纵杆（俯仰 / 滚转，松手缓慢回中）
@@ -24,12 +24,14 @@ signal crashed(reason: String)
 
 ## 机身原点（重心）距地面的高度：与 AircraftModel.GROUND_CLEARANCE 一致。
 const GROUND_CLEARANCE := AircraftModel.GROUND_CLEARANCE
-## 碰撞盒：横向只包住机身（2.2 × 1.6 × 5.2 格 ≈ 1.1 × 0.8 × 2.6 m），
-## 翼展不参与碰撞，否则机身会一路刮蹭树冠与屋檐。
-const COLLIDER_SIZE := Vector3(2.2, 1.6, 5.2)
-const COLLIDER_CENTER := Vector3(0.0, -0.05, 0.0)
-## 飞行员眼位（机体坐标）：座舱在机翼前方、机身上方。
-const SEAT_OFFSET := Vector3(0.0, 0.45, -0.5)
+## 碰撞盒：横向只包住机身（6.6 × 4.8 × 15.6 格 ≈ 3.3 × 2.4 × 7.8 m），
+## 翼展（24 格）不参与碰撞，否则机身会一路刮蹭树冠与屋檐。
+## 底面必须恰在 −GROUND_CLEARANCE：中心 y = −0.15 × 3，半高 2.4。
+const COLLIDER_SIZE := Vector3(2.2, 1.6, 5.2) * AircraftModel.MODEL_SCALE
+const COLLIDER_CENTER := Vector3(0.0, -0.05, 0.0) * AircraftModel.MODEL_SCALE
+## 飞行员原点（脚底）在机体坐标里的位置：脚踩机舱地板、眼位（+1.4）落进
+## 座舱罩内（罩顶 2.99，眼位 2.75）——第一人称才是「坐在舱里」而非骑在机背。
+const SEAT_OFFSET := Vector3(0.0, 1.35, -2.8)
 
 ## 撞击判定：单帧速度损失超过此值视为撞毁（含硬着陆与撞墙）。
 const CRASH_IMPACT_DV := 7.0

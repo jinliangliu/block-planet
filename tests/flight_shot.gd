@@ -49,29 +49,29 @@ func _run() -> void:
 		float(origin.x) + 5.0, surface, float(origin.y) + 32.0)
 	_craft = Aircraft.spawn(main_scene, craft_pos, PI)
 
-	# 玩家站到飞机侧前方，第三人称看全机（相机距离拉到上限 9）。
+	# 全景：站在跑道铺面上、机头前方（净空只清了跑道本宽，站旁边会被树挡住），
+	# 第一人称避免玩家入镜，拍完整机。
 	player.set_physics_process(false)
 	player.global_position = Vector3(
-		float(origin.x) + 11.0, surface, float(origin.y) + 26.0)
+		float(origin.x) + 5.0, surface, float(origin.y) + 8.0)
 	var dir := craft_pos - player.global_position
 	player.rotation.y = atan2(-dir.x, -dir.z)
-	player.camera_distance = Player.CAM_DISTANCE_MAX
+	player.camera_distance = 0.0
 	player._apply_camera_mode()
 	for i in range(30):
 		await get_tree().physics_frame
-	var spring: SpringArm3D = player.get_node("SpringArm3D")
-	spring.rotation.x = -0.16
 	for i in range(20):
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shot_path("flight_shot_wide.png"))
 
-	# 近景：走到机身旁，第一人称看清座舱/机翼/起落架。
+	# 近景：站在机尾后方铺面上，第三人称中距——玩家与飞机同框作比例参照。
 	player.global_position = Vector3(
-		float(origin.x) + 7.5, surface, float(origin.y) + 28.5)
-	player.camera_distance = 0.0
+		float(origin.x) + 7.5, surface, float(origin.y) + 47.0)
+	dir = craft_pos - player.global_position
+	player.rotation.y = atan2(-dir.x, -dir.z)
+	player.camera_distance = 5.0
 	player._apply_camera_mode()
-	spring.rotation.x = -0.1
 	for i in range(20):
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
@@ -89,9 +89,10 @@ func _run() -> void:
 		"  相对机体=", player.global_position - _craft.global_position)
 	print("第一人称相机世界位=", cam.global_position,
 		"  相对机体=", cam.global_position - _craft.global_position)
-	print("机模最高点(垂尾顶)=", _craft.global_position.y + 1.425)
+	print("机模最高点(垂尾顶)=", _craft.global_position.y + 1.425 * AircraftModel.MODEL_SCALE)
 
 	# ③ 座舱视角：第一人称、视线水平（看机头前方）。
+	var spring: SpringArm3D = player.get_node("SpringArm3D")
 	player.camera_distance = 0.0
 	player._apply_camera_mode()
 	spring.rotation.x = 0.0
@@ -101,10 +102,10 @@ func _run() -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shot_path("flight_shot_cockpit.png"))
 
-	# ④ 追尾视角：驾驶时的默认相机（camera_distance = CAM_DISTANCE_MAX）。
-	player.camera_distance = Player.CAM_DISTANCE_MAX
+	# ④ 追尾视角：驾驶时的默认相机（距离与俯仰都是驾驶专用默认值）。
+	player.camera_distance = Player.CAM_DISTANCE_MAX_RIDING
 	player._apply_camera_mode()
-	spring.rotation.x = -0.12
+	spring.rotation.x = Player.CHASE_PITCH_RIDING
 	for i in range(20):
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
@@ -144,7 +145,8 @@ func _build_strip(world: World, origin: Vector2i) -> int:
 	for x in range(origin.x, origin.x + STRIP_WIDTH + 1):
 		for z in range(origin.y, origin.y + STRIP_LENGTH + 1):
 			world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.COBBLESTONE)
-			for h in range(1, 7):
+			# 净空 9 格：垂尾顶在跑道面上 6.8 格，须整体清出。
+			for h in range(1, 10):
 				world.set_block_deferred(Vector3i(x, y + h, z), BlockTypes.Block.AIR)
 	world.rebuild_chunks_in_region(Vector3i(origin.x, 0, origin.y), max_cell)
 	return y

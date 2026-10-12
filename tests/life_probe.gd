@@ -188,8 +188,16 @@ func _run() -> void:
 	hud._on_box_slot_pressed(0)
 	_check(player.inventory.count_item(BlockTypes.Block.WOOD) == 10, "点击箱格后木头×10 转入背包")
 	_check(box.count_item(BlockTypes.Block.WOOD) == 0, "箱内对应格清空")
-	# 点击背包格 0：整叠存回箱子。
-	hud._on_box_player_slot_pressed(0)
+	# 点击装着木头的那个背包格：整叠存回箱子。
+	# 落点格由 add_item 决定——前序阶段拾取的物品可能占住第 0 格，把木头挤到
+	# 别的格（本轮实测偶发），写死 0 会间歇性失败，按内容定位。
+	var wood_slot := -1
+	for i in range(player.inventory.slots.size()):
+		if int(player.inventory.slots[i]["item"]) == BlockTypes.Block.WOOD:
+			wood_slot = i
+			break
+	_check(wood_slot >= 0, "背包里找到刚转入的木头（第 %d 格）" % wood_slot)
+	hud._on_box_player_slot_pressed(wood_slot)
 	_check(box.count_item(BlockTypes.Block.WOOD) == 10, "点击背包格后木头×10 存回箱子")
 	_check(player.inventory.count_item(BlockTypes.Block.WOOD) == 0, "背包对应格清空")
 	hud.set_box_open(false)

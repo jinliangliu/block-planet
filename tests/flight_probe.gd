@@ -66,8 +66,11 @@ func _run() -> void:
 		await get_tree().physics_frame
 
 	var surface := float(strip_y + 1)
-	var start := Vector3(float(origin.x) + 2.5, surface + Aircraft.GROUND_CLEARANCE + 0.1,
-		float(origin.y) + 3.5)
+	# 起飞点（地面点）：place() 内部会再加 GROUND_CLEARANCE，这里只给地表高度。
+	# 机身放大后碰撞盒长 15.6 格、宽 6.6 格，故横向取跑道中线、
+	# 纵向留出机尾到跑道起点的余量，保证整机都在铺面上。
+	var start := Vector3(float(origin.x) + 5.0, surface + 0.1,
+		float(origin.y) + 10.0)
 
 	# ── B 段：停放 ───────────────────────────────────────
 	var craft := Aircraft.spawn(main_scene, start, RUNWAY_HEADING)
@@ -77,7 +80,8 @@ func _run() -> void:
 	await _frames(40)
 	_check(not craft.is_wrecked(), "停放 40 帧未解体")
 	var parked_y := craft.global_position.y
-	_check(absf(parked_y - (surface + Aircraft.GROUND_CLEARANCE)) < 0.45,
+	_check(absf(parked_y - (surface + Aircraft.GROUND_CLEARANCE))
+			< Aircraft.GROUND_CLEARANCE * 0.5,
 		"机轮贴地停放（离地高度 %.2f，期望 %.2f）"
 			% [parked_y - surface, Aircraft.GROUND_CLEARANCE])
 	_check(craft.snapshot()["airspeed"] < 0.5, "无油门时保持静止")
@@ -101,7 +105,7 @@ func _run() -> void:
 	_check(lifted_frame > 0, "满油门滑跑 + 拉杆后离地（第 %d 帧）" % lifted_frame)
 	_check(not craft.is_wrecked(), "起飞过程未解体")
 	craft.controls.pitch = 0.0
-	var roll_distance := craft.global_position.z - (float(origin.y) + 3.5)
+	var roll_distance := craft.global_position.z - start.z
 	_check(roll_distance > 2.0 and roll_distance < float(STRIP_LENGTH),
 		"滑跑距离落在跑道内（%.1f m）" % roll_distance)
 	var liftoff := craft.snapshot()
@@ -256,7 +260,8 @@ func _build_strip(world: World, origin: Vector2i) -> int:
 	for x in range(origin.x, origin.x + STRIP_WIDTH + 1):
 		for z in range(origin.y, origin.y + STRIP_LENGTH + 1):
 			world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.COBBLESTONE)
-			for h in range(1, 6):
+			# 净空 9 格：垂尾顶在跑道面上 6.8 格，须整体清出。
+			for h in range(1, 10):
 				world.set_block_deferred(Vector3i(x, y + h, z), BlockTypes.Block.AIR)
 	world.rebuild_chunks_in_region(Vector3i(origin.x, 0, origin.y), max_cell)
 	return y
