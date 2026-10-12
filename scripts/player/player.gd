@@ -92,6 +92,7 @@ const REASON_STARVE := "饥饿"
 const REASON_FALL := "摔落"
 const REASON_ARROW := "箭矢"
 const REASON_STUCK := "卡住"
+const REASON_CRASH := "坠机"
 
 var health := MAX_HEALTH
 var hunger := float(MAX_HUNGER)
@@ -120,6 +121,8 @@ var _fish_heal_timer := 0.0
 var day_night_ref: DayNightCycle = null
 ## 防卡死累计脱困次数（探针/调试用）。
 var stuck_rescues := 0
+## 正在驾驶的飞行器（null 表示徒步）。驾驶期间玩家物理冻结，位置每帧贴到座舱位。
+var _aircraft: Aircraft = null
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _held_item: HeldItem = $Camera3D/HeldItem
@@ -140,10 +143,15 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		_rotate_view(Vector2(event.relative.x, event.relative.y) * MOUSE_SENSITIVITY)
+		if _aircraft != null:
+			# 驾驶中鼠标是操纵杆：左右滚转、上下俯仰。
+			_aircraft.add_mouse_motion(event.relative)
+		else:
+			_rotate_view(Vector2(event.relative.x, event.relative.y) * MOUSE_SENSITIVITY)
 
 	# 滚轮缩放视角：拉近回第一人称，拉远经弹簧臂切第三人称（可看到角色形体）。
-	if event is InputEventMouseButton and event.pressed:
+	# 驾驶中相机距离固定为追尾视角，滚轮不生效。
+	if event is InputEventMouseButton and event.pressed and _aircraft == null:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			camera_distance = maxf(0.0, camera_distance - CAM_STEP)
 			_apply_camera_mode()
@@ -153,7 +161,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_apply_camera_mode()
 			return
 
-	if event is InputEventMouseButton and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseButton and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
+			and _aircraft == null:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				start_break_or_attack()
@@ -169,8 +178,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		for i in range(Inventory.HOTBAR_SIZE):
 			if event.is_action_pressed("slot_%d" % (i + 1)):
 				select_slot(i)
-		if event.is_action_pressed("jump"):
+		if event.is_action_pressed("jump") and _aircraft == null:
 			_handle_jump_tap()
+		# F：驾驶中下机；徒步时登上附近的飞行器。
+		if event.is_action_pressed("aircraft_exit") and not _dead:
+			_toggle_aircraft()
 
 	if event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = (
@@ -193,6 +205,9 @@ func _handle_jump_tap() -> void:
 
 func _process(delta: float) -> void:
 	if _dead:
+		return
+	# 驾驶飞行器期间不破坏方块、不拉弓、不垂钓。
+	if _aircraft != null:
 		return
 	_update_breaking(delta)
 	_update_bow(delta)
@@ -225,6 +240,8 @@ func _end_use() -> void:
 ## 使用选中物品：手持食物且饥饿未满时优先食用，
 ## 其次与村民/酿灶台交互（打开交易面板），最后放置方块。
 func _use_selected() -> void:
+	if _use_aircraft_kit():
+		return
 	if _use_bucket():
 		return
 	if _eat_selected():
@@ -232,6 +249,33 @@ func _use_selected() -> void:
 	if _interact_village():
 		return
 	_place_target()
+
+
+## 手持飞机：在身前平地上放下一架可驾驶的飞行器（生存模式消耗 1 个）。
+func _use_aircraft_kit() -> bool:
+	if get_selected_item() != ItemTypes.AIRCRAFT or _world == null:
+		return false
+	var forward := -global_transform.basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = Vector3(1.0, 0.0, 0.0)
+	var at := global_position + forward.normalized() * 5.0
+	var cell := Vector3i(at.floor())
+	var surface := _world.get_surface_height(cell.x, cell.z)
+	# 机轮要落在实心面上：脚下那格不是实心（水面/空中）就拒绝，避免放出一架掉下去的飞机。
+	if not BlockTypes.is_solid(_world.get_block(Vector3i(cell.x, surface - 1, cell.z))):
+		Events.notice.emit("前方不是平地，飞机放不稳。")
+		return true
+	Aircraft.spawn(
+		get_parent(),
+		Vector3(float(cell.x) + 0.5, float(surface), float(cell.z) + 0.5),
+		rotation.y,
+	)
+	if GameState.is_survival():
+		inventory.remove_item(active_inventory_slot(), 1)
+	Events.notice.emit("✈️ 飞机放好了，走到跟前按 F 登机。")
+	_held_item.swing()
+	return true
 
 
 ## 木桶/水桶逻辑：空桶对准水面装水；水桶右键饮水（解渴 + 少量回血）。
@@ -341,6 +385,13 @@ func _physics_process(delta: float) -> void:
 	# 死亡停顿：冻结一切（不移动、不掉血、不防卡死），等墓碑倒计时结束复活。
 	if _dead:
 		velocity = Vector3.ZERO
+		return
+
+	# 驾驶飞行器：机体自己跑物理（Aircraft._physics_process），玩家只被贴到座舱位，
+	# 相机随弹簧臂跟随机体姿态。生存结算与防卡死在驾驶期间一并跳过。
+	if _aircraft != null:
+		velocity = Vector3.ZERO
+		global_transform = _aircraft.seat_transform()
 		return
 
 	var jump_pressed := virtual_jump
@@ -475,6 +526,89 @@ func _on_game_mode_changed(_mode: int) -> void:
 	# 创造→生存时选中位可能落在工具区（超出 9 格快捷栏），收回有效范围。
 	if selected_slot >= Inventory.HOTBAR_SIZE:
 		select_slot(0)
+
+
+## ── 驾驶飞行器 ──────────────────────────────────────────
+## 上机：驾驶期间玩家物理冻结、位置每帧贴到座舱位，相机随弹簧臂跟随机体姿态。
+## 徒步飞行（创造/探索）与驾驶互斥：驾驶时不再走 _fly_velocity。
+func ride_aircraft(craft: Aircraft) -> void:
+	if craft == null or craft.is_wrecked() or _dead:
+		return
+	if _aircraft == craft:
+		return
+	if _aircraft != null:
+		exit_aircraft()
+	_aircraft = craft
+	craft.set_piloted(true, self)
+	velocity = Vector3.ZERO
+	_fall_speed = 0.0
+	_clear_fishing()
+	# 弹簧臂排除机体自身，否则追尾相机会被机身顶到座舱里。
+	_spring_arm.add_excluded_object(craft.get_rid())
+	camera_distance = CAM_DISTANCE_MAX
+	_apply_camera_mode()
+	_model.visible = false
+	_held_item.visible = false
+	Events.aircraft_ride_changed.emit(true)
+	Events.notice.emit("✈️ 登机：W/S 油门，鼠标操纵杆，A/D 方向舵，空格刹车，F 下机。")
+
+
+## 下机：落到机身侧面。damage > 0 表示坠机抛出（照常扣血）。
+func exit_aircraft(damage: int = 0) -> void:
+	if _aircraft == null:
+		return
+	var craft := _aircraft
+	_aircraft = null
+	if is_instance_valid(craft):
+		craft.set_piloted(false)
+		_spring_arm.remove_excluded_object(craft.get_rid())
+		# 从机身左侧跳下（机体坐标 +X 为右翼）。
+		global_position = craft.global_position \
+			- craft.global_transform.basis.x * 2.6 + Vector3(0.0, 1.0, 0.0)
+	velocity = Vector3.ZERO
+	_fall_speed = 0.0
+	camera_distance = 0.0
+	# 第一人称下 PlayerModel 由 set_third_person(false) 自行隐藏，勿再强行置可见。
+	_apply_camera_mode()
+	if damage > 0:
+		_damage(damage, REASON_CRASH)
+	Events.aircraft_ride_changed.emit(false)
+
+
+## 当前驾驶的飞行器（null 表示徒步）；HUD 飞行仪表据此显隐。
+func aircraft() -> Aircraft:
+	return _aircraft
+
+
+func is_riding() -> bool:
+	return _aircraft != null
+
+
+## F 键：驾驶中下机；徒步时登上附近的飞行器。
+func _toggle_aircraft() -> void:
+	if _aircraft != null:
+		exit_aircraft()
+		return
+	var craft := nearest_aircraft()
+	if craft == null:
+		Events.notice.emit("附近没有飞行器——手持飞机右键，在平地上放一架。")
+		return
+	ride_aircraft(craft)
+
+
+## 最近的可用飞行器：未解体、无人驾驶，且在本机 4 m 内。
+func nearest_aircraft() -> Aircraft:
+	var best: Aircraft = null
+	var best_distance := 4.0
+	for node in get_tree().get_nodes_in_group("aircraft"):
+		var craft := node as Aircraft
+		if craft == null or craft.is_wrecked() or craft.piloted:
+			continue
+		var distance := global_position.distance_to(craft.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = craft
+	return best
 
 
 func get_selected_item() -> int:
@@ -884,6 +1018,9 @@ func _begin_death() -> void:
 		return
 	_dead = true
 	velocity = Vector3.ZERO
+	# 驾驶中死亡：先把飞机交还（否则复活后会立刻被贴回座舱）。
+	if _aircraft != null:
+		exit_aircraft()
 	var tomb_parent := get_parent()
 	if tomb_parent != null:
 		# 墓碑立在身前 1.6 米（与尸体错开，路人一眼可见；朝向取水平面投影）。

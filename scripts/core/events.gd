@@ -12,6 +12,9 @@ signal block_placed(block_id: int, cell: Vector3i)
 ## 玩家飞行状态切换后广播（创造与探索模式都具备的能力）。
 signal player_mode_changed(flying: bool)
 
+## 玩家登机 / 下机后广播，HUD 据此显隐飞行仪表。
+signal aircraft_ride_changed(riding: bool)
+
 ## 右键命中村民或酿灶台时发出，HUD 监听后打开交易面板。
 signal request_trade
 

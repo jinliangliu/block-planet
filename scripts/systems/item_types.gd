@@ -79,6 +79,8 @@ const WATER_BUCKET := 226
 const CARROT := 227
 const POTATO := 228
 const RADISH := 229
+## 飞行器：手持右键在身前平地上放下一架，走近按 F 登机驾驶（见 Aircraft）。
+const AIRCRAFT := 230
 
 const TOOL_TYPE := {
 	WOOD_PICKAXE: "pickaxe",
@@ -259,6 +261,8 @@ const RECIPES := [
 	{"result": BlockTypes.Block.BED, "ingredients": {BlockTypes.Block.WOOL: 2, BlockTypes.Block.WOOD: 3}},
 	# 水桶：对着水右键装水，喝水回复体力。
 	{"result": BUCKET, "count": 1, "ingredients": {BlockTypes.Block.WOOD: 3}},
+	# 飞行器：铁架子 + 木头骨架 + 线织蒙皮，成品直接放下一架能开的飞机。
+	{"result": AIRCRAFT, "ingredients": {IRON_INGOT: 4, BlockTypes.Block.WOOD: 6, STRING: 2}},
 	{"result": BlockTypes.Block.SMELTER, "ingredients": {BlockTypes.Block.COBBLESTONE: 8}},
 ]
 
@@ -344,6 +348,7 @@ const ITEM_NAMES := {
 	CARROT: "胡萝卜",
 	POTATO: "土豆",
 	RADISH: "白萝卜",
+	AIRCRAFT: "轻型飞机",
 }
 
 const ITEM_SHORT_NAMES := {
@@ -377,6 +382,7 @@ const ITEM_SHORT_NAMES := {
 	CARROT: "萝卜",
 	POTATO: "土豆",
 	RADISH: "萝",
+	AIRCRAFT: "飞机",
 }
 
 # 非方块物品在掉落物/手持模型上使用的平涂颜色。
@@ -411,6 +417,7 @@ const ITEM_COLORS := {
 	CARROT: Color(0.90, 0.55, 0.20),
 	POTATO: Color(0.80, 0.66, 0.38),
 	RADISH: Color(0.92, 0.93, 0.86),
+	AIRCRAFT: Color(0.87, 0.89, 0.92),
 }
 
 # 工具微缩图/3D 预览用的按材质着色（木/石/青铜/铁/银/金）。
@@ -487,6 +494,7 @@ const ITEM_DESCRIPTIONS := {
 	CARROT: "可以生吃，也可以种在耕地上。",
 	POTATO: "饱腹感比胡萝卜强，也能种回地里。",
 	RADISH: "清脆的白萝卜，可食用可种植。",
+	AIRCRAFT: "手持右键在身前的平地上放下一架。走近按 F 登机：W/S 油门，鼠标操纵杆，A/D 方向舵，空格刹车，再按 F 下机。",
 }
 
 # 村民交易配方：cost 为绿宝石数量，result/count 为产出。
@@ -567,6 +575,7 @@ const CREATIVE_HOTBAR: Array[int] = [
 	WOOD_BOW,
 	WOOD_FISHING_ROD,
 	BUCKET,
+	AIRCRAFT,
 ]
 
 

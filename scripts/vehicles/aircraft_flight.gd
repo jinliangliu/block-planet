@@ -1,0 +1,292 @@
+class_name AircraftFlight
+extends RefCounted
+## 轻型飞机的简化真实气动模型（纯逻辑，不触碰场景树，可在无头探针里直接驱动）。
+##
+## 设计参考 Tater's Flight Sim（Three.js 飞行模拟器）的做法：定步长积分、
+## 参数按机型标定。本作是儿童向体素世界，故只保留「看得懂、打得准」的核心：
+## 升力随攻角线性上升、越过临界攻角失速掉升力、诱导阻力随升力平方增长、
+## 空气密度随高度衰减、操纵权限随动压下降（低速时杆变软）。
+##
+## 世界尺度：1 格 = 0.5 m（D-030），模型内部一律用「米」= 游戏米制，
+## 不再做格↔米换算——玩家步速 11 m/s，本机失速 18 m/s、巡航 30 m/s，
+## 相对玩家 1.6~3 倍，手感符合「比跑快一点、还能看清风景」。
+##
+## 标定（ISA 海平面、240 kg 灌木丛短距起降机）：
+##   失速速度      √(2mg / ρS·CLmax) ≈ 13 m/s（47 km/h）
+##   抬轮离地      机轮限位 12° → CL≈1.05，约 16 m/s 离地（真机同样是 1.2 Vs 左右）
+##   巡航         35 m/s 平飞需推力 ≈ 815 N，即半油门
+##   最大平飞速度   约 50 m/s（满油门推力 = 阻力），低于 VNE 55，只有俯冲才超速
+##   起飞滑跑       T/W = 6.9 m/s²，净加速 6.3 m/s²，拉杆后约 2 秒 / 18 m 离地
+##   海平面爬升率   低速段过剩推力约 1000 N，爬升率 10 m/s 量级
+##   升阻比         L/Dmax ≈ 8（固定起落架 + 撑杆的高阻力构型，符合真机量级）
+## 注意：地面姿态被机轮限在 12° 以内，静止时机翼攻角近零——
+## 必须像真飞行员那样「到抬轮速度后拉杆」，飞机才会离地（探针 C 段即验此）。
+## 运行验证：tests/flight_probe.tscn
+
+const GRAVITY := 9.80665
+const SEA_LEVEL_DENSITY := 1.225
+## 大气标高：密度随高度指数衰减（8500 m 处约为海平面 37%）。
+const DENSITY_SCALE_HEIGHT := 8500.0
+const MPS_TO_KMH := 3.6
+
+# ── 机型标定：轻型单发上单翼短距起降机 ──────────────────────
+const MASS := 240.0
+const WING_AREA := 14.0
+## 升力线斜率（1/rad）：3D 机翼的实测值低于二维翼型的 2π，取 5.0。
+const CL_ALPHA := 5.0
+const CL_MAX := 1.6
+## 临界攻角 0.32 rad ≈ 18°（= CLmax / CLα，两参数自洽）；超过即失速。
+const STALL_ALPHA := 0.32
+const STALL_WARN_ALPHA := 0.27
+## 零升阻力系数与诱导阻力因子（诱导阻力 = k·CL²）。
+## CD0 取 0.075：固定起落架 + 翼间撑杆的构型阻力偏大（真机同类约 0.06~0.09），
+## 顺带把满油门平飞速度压到 50 m/s 以内——体素世界里够快，又不至于一眨眼飞过村庄。
+const CD0 := 0.075
+const INDUCED_K := 0.052
+## 侧滑引起的附加阻力（每弧度侧滑角）。
+const SIDESLIP_DRAG := 0.35
+## 推重比 0.56：短距起降机的量级，让 40 余格平地就能拉起。
+const THRUST_MAX := 1650.0
+## 螺旋桨推力随密度衰减的指数（螺旋桨比喷气机更依赖空气密度）。
+const THRUST_DENSITY_EXPONENT := 0.7
+## 不可超越速度（结构极限，超出即解体）。平飞够不到，只有俯冲能超。
+const VNE := 55.0
+## 触地垂直速度上限（m/s），超出即解体。
+const TOUCHDOWN_LIMIT := 6.0
+
+# ── 操纵 ────────────────────────────────────────────────────
+const ROLL_RATE_MAX := 2.2
+const PITCH_RATE_MAX := 1.1
+const YAW_RATE_MAX := 0.55
+## 操纵面对杆量的响应时间常数倒数（1/s）：越大越跟手。
+const RATE_RESPONSE := 4.5
+## 动压基准（Pa）：操纵权限以此为 1，低于此值杆效按比例下降。
+## 30 m/s 时动压 551 Pa 已满权限；临近失速（15 m/s）只剩约 0.55，杆变软。
+const CONTROL_Q_REF := 250.0
+const CONTROL_AUTHORITY_MIN := 0.12
+## 侧滑回中的风标稳定性（每弧度侧滑角的偏航角速度）。
+const YAW_STABILITY := 1.1
+## 转弯协调：坡度自然带出偏航角速度，不踩舵也能转出协调转弯。
+const TURN_COORDINATION_RATE := 0.5
+## 俯仰角限制（rad），约 ±83°：不限制就拉成后空翻。
+const PITCH_LIMIT := 1.45
+# ── 地面 ────────────────────────────────────────────────────
+## 地面姿态机轮限位：滚转被摆平、俯仰最多抬到约 12°（可抬头离地，不能翻跟头）。
+const GROUND_PITCH_MAX := 0.21
+const GROUND_LEVEL_RATE := 6.0
+
+
+## 飞行状态：位置/速度/姿态 + 机体三轴角速度。纯数据，不持有节点。
+class State extends RefCounted:
+	var position := Vector3.ZERO
+	var velocity := Vector3.ZERO
+	## 机体基：+X 右翼、+Y 机背、-Z 机头（Godot 约定）。
+	var basis := Basis.IDENTITY
+	var roll_rate := 0.0
+	var pitch_rate := 0.0
+	var yaw_rate := 0.0
+	## 结算读数（HUD 与探针共用同一份来源）。
+	var airspeed := 0.0
+	var alpha := 0.0
+	var load_factor := 1.0
+	var stalled := false
+	var stall_warning := false
+	var overspeed := false
+	var throttle := 0.0
+
+
+## 操纵输入：杆量 −1..1，油门 0..1。
+class Controls extends RefCounted:
+	var throttle := 0.0
+	## 俯仰杆：+1 拉杆（机头向上）。
+	var pitch := 0.0
+	## 副翼：+1 右滚。
+	var roll := 0.0
+	## 方向舵（地面即前轮转向）：+1 右偏航。
+	var yaw := 0.0
+	## 机轮刹车（仅地面生效）。
+	var brake := false
+
+
+static func make_state(at: Vector3, heading: float = 0.0) -> State:
+	var state := State.new()
+	state.position = at
+	state.basis = Basis.from_euler(Vector3(0.0, heading, 0.0))
+	return state
+
+
+## 空气密度（kg/m³）：等温指数大气，够用且单调。
+static func air_density(altitude: float) -> float:
+	return SEA_LEVEL_DENSITY * exp(-maxf(altitude, 0.0) / DENSITY_SCALE_HEIGHT)
+
+
+## 失速速度（m/s）：升力恰好等于重力的速度。
+static func stall_speed(density: float = SEA_LEVEL_DENSITY) -> float:
+	var denom := density * WING_AREA * CL_MAX
+	if denom <= 0.0:
+		return 0.0
+	return sqrt(2.0 * MASS * GRAVITY / denom)
+
+
+## 升力系数曲线：线性段到临界攻角，之后升力平缓下滑（简化的失速平台）。
+static func lift_coefficient(alpha: float) -> float:
+	var magnitude := absf(alpha)
+	if magnitude <= STALL_ALPHA:
+		return clampf(CL_ALPHA * alpha, -CL_MAX, CL_MAX)
+	# 失速后：从 CLmax 起按更陡的斜率下滑，保留 35% 残余升力。
+	# 残余升力不为零是为了避免「一失速就直接坠地」——真机也是抖振后逐渐掉头，
+	# 儿童向更要留出改出的余地。
+	var over := magnitude - STALL_ALPHA
+	return signf(alpha) * maxf(CL_MAX * 0.35, CL_MAX - over * 2.4)
+
+
+## 动压 q = ½ρV²（Pa）。
+static func dynamic_pressure(state: State) -> float:
+	var speed := state.velocity.length()
+	return 0.5 * air_density(state.position.y) * speed * speed
+
+
+## 攻角（rad）：机体速度矢量与机头方向在对称面内的夹角，机头高于航迹为正。
+static func angle_of_attack(state: State) -> float:
+	var speed := state.velocity.length()
+	if speed < 1.0:
+		return 0.0
+	var v_b := state.basis.inverse() * state.velocity
+	var forward_speed := maxf(-v_b.z, 0.5)
+	return clampf(atan2(-v_b.y, forward_speed), -0.6, 0.6)
+
+
+## 侧滑角（rad）：机体横向速度分量，右滑为正。
+static func sideslip(state: State) -> float:
+	var speed := state.velocity.length()
+	if speed < 1.0:
+		return 0.0
+	var v_b := state.basis.inverse() * state.velocity
+	return asin(clampf(v_b.x / speed, -1.0, 1.0))
+
+
+## 气动力 + 推力合成加速度（m/s²）。lift 与 drag 都按动压 × 机翼面积结算。
+static func acceleration(state: State, controls: Controls) -> Vector3:
+	var speed := state.velocity.length()
+	var q_dyn := dynamic_pressure(state)
+	var alpha := angle_of_attack(state)
+	var beta := sideslip(state)
+	var cl := lift_coefficient(alpha)
+	var cd := CD0 + INDUCED_K * cl * cl + absf(beta) * SIDESLIP_DRAG
+	var q_area := q_dyn * WING_AREA
+
+	# 升力垂直于速度、位于机体的对称面内（机背方向去掉速度分量）。
+	# 该式同时给出两种效果：攻角产生的升力，以及滚转时机翼倾斜把升力掰向侧向
+	# ——这正是「压坡度就会转弯」的来源，不需要额外转弯公式。
+	var velocity_dir := state.velocity / speed if speed > 0.001 else -state.basis.z
+	var lift_dir := state.basis.y - velocity_dir * state.basis.y.dot(velocity_dir)
+	if lift_dir.length_squared() < 0.0001:
+		lift_dir = state.basis.y
+	lift_dir = lift_dir.normalized()
+
+	var lift := lift_dir * (q_area * cl)
+	var drag := -velocity_dir * (q_area * cd)
+	var thrust_dir := -state.basis.z
+	var thrust := thrust_dir * (
+		controls.throttle * THRUST_MAX
+		* pow(air_density(state.position.y) / SEA_LEVEL_DENSITY, THRUST_DENSITY_EXPONENT)
+	)
+	var gravity := Vector3.DOWN * (MASS * GRAVITY)
+	return (lift + drag + thrust + gravity) / MASS
+
+
+## 推进一帧：先按杆量更新机体角速度与姿态，再积分速度与位置，最后刷新读数。
+static func integrate(state: State, controls: Controls, delta: float, on_ground: bool) -> void:
+	var q_dyn := dynamic_pressure(state)
+	var authority := clampf(
+		q_dyn / CONTROL_Q_REF, CONTROL_AUTHORITY_MIN, 1.0) if not on_ground else 1.0
+	_update_rates(state, controls, delta, authority, on_ground)
+	_integrate_attitude(state, delta, on_ground)
+	state.throttle = controls.throttle
+
+	# 地面：气动照常结算（这才有先加速攒升力、再抬前轮离地的过程），
+	# 但垂直分量交给机轮支撑——由节点在 move_and_slide 之后抹平。
+	state.velocity += acceleration(state, controls) * delta
+	state.position += state.velocity * delta
+	_refresh_readings(state)
+
+
+static func _update_rates(
+	state: State, controls: Controls, delta: float, authority: float, on_ground: bool
+) -> void:
+	var blend := clampf(RATE_RESPONSE * delta, 0.0, 1.0)
+	var beta := sideslip(state)
+	# 风标稳定性：机头自动朝向来流（侧滑越大气越强）。地面由机轮主导，抑制之。
+	var weathervane := beta * YAW_STABILITY * authority if not on_ground else 0.0
+	# 转弯协调：坡度带出偏航。机翼右翼抬高（左坡度）对应左转。
+	var bank_sin := clampf(state.basis.x.y, -1.0, 1.0)
+	var coordination := -bank_sin * TURN_COORDINATION_RATE * authority \
+		if not on_ground else 0.0
+
+	var target_roll := controls.roll * ROLL_RATE_MAX * authority
+	var target_pitch := controls.pitch * PITCH_RATE_MAX * authority
+	var target_yaw := controls.yaw * YAW_RATE_MAX * authority - weathervane + coordination
+
+	# 接近俯仰限位时先收杆，避免积分越界后姿态解算出现奇异（机头朝上为正）。
+	# 地面用机轮限位（12°）而非空中限位（83°）：不然拉杆会把机头抬到 19° 卡在
+	# 机轮上，攻角越过临界角、滑跑全程被标成「失速」。
+	var pitch_limit := GROUND_PITCH_MAX if on_ground else PITCH_LIMIT
+	var pitch_sin := (-state.basis.z).y
+	if (pitch_sin > sin(pitch_limit) and target_pitch > 0.0) \
+			or (pitch_sin < -sin(pitch_limit) and target_pitch < 0.0):
+		target_pitch = 0.0
+
+	state.roll_rate += (target_roll - state.roll_rate) * blend
+	state.pitch_rate += (target_pitch - state.pitch_rate) * blend
+	state.yaw_rate += (target_yaw - state.yaw_rate) * blend
+
+
+static func _integrate_attitude(state: State, delta: float, on_ground: bool) -> void:
+	# 机体轴旋转（右手法则，结论已用绕轴矩阵逐个验过）：
+	#   roll  绕机体 +Z（机尾方向）正转会把右翼抬起来 → 右滚取负号；
+	#   pitch 绕机体 +X 正转把机头抬起来 → **直接取正号**（此处曾误加负号，
+	#         于是「拉杆」变成压机头，飞机在跑道上永远抬不起前轮）；
+	#   yaw   绕机体 +Y 正转把机头转向左 → 右偏航取负号。
+	var spin := Basis(Vector3(0.0, 0.0, 1.0), -state.roll_rate * delta) \
+		* Basis(Vector3(1.0, 0.0, 0.0), state.pitch_rate * delta) \
+		* Basis(Vector3(0.0, 1.0, 0.0), -state.yaw_rate * delta)
+	var basis := (state.basis * spin).orthonormalized()
+
+	if on_ground:
+		# 机轮限位：滚转被摆平、俯仰最多抬到 GROUND_PITCH_MAX。
+		var forward := -basis.z
+		var heading := atan2(-forward.x, -forward.z)
+		var pitch := clampf(asin(clampf(forward.y, -1.0, 1.0)), 0.0, GROUND_PITCH_MAX)
+		var leveled := Basis.from_euler(Vector3(pitch, heading, 0.0))
+		basis = basis.slerp(leveled, clampf(GROUND_LEVEL_RATE * delta, 0.0, 1.0))
+		state.roll_rate = 0.0
+	state.basis = basis
+
+
+static func _refresh_readings(state: State) -> void:
+	var speed := state.velocity.length()
+	var alpha := angle_of_attack(state)
+	state.airspeed = speed
+	state.alpha = alpha
+	state.stalled = absf(alpha) > STALL_ALPHA and speed > 3.0
+	state.stall_warning = absf(alpha) > STALL_WARN_ALPHA and speed > 3.0
+	state.overspeed = speed > VNE
+	# 载荷系数：升力 / 重力。失速后升力掉下去，读数自然回落。
+	var cl := lift_coefficient(alpha)
+	state.load_factor = (dynamic_pressure(state) * WING_AREA * absf(cl)) / (MASS * GRAVITY)
+
+
+## 一帧读数快照：HUD 仪表与探针断言共用同一套字段名。
+static func snapshot(state: State) -> Dictionary:
+	return {
+		"airspeed": state.airspeed,
+		"kmh": state.airspeed * MPS_TO_KMH,
+		"stall_speed": stall_speed(air_density(state.position.y)),
+		"altitude": state.position.y,
+		"alpha_deg": rad_to_deg(state.alpha),
+		"load_factor": state.load_factor,
+		"throttle": state.throttle,
+		"stalled": state.stalled,
+		"stall_warning": state.stall_warning,
+		"overspeed": state.overspeed,
+	}

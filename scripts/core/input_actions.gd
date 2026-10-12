@@ -18,6 +18,14 @@ const ACTIONS := {
 	"toggle_manual": [KEY_F1],
 	"toggle_bestiary": [KEY_F2],
 	"toggle_quests": [KEY_J],
+	# 飞行器驾驶：鼠标给操纵杆（俯仰/滚转），方向键为键盘替代；
+	# W/S 复用 move_forward/back（油门），A/D 复用 move_left/right（方向舵），
+	# 空格复用 jump（机轮刹车），F 上机/下机。
+	"aircraft_pitch_up": [KEY_UP],
+	"aircraft_pitch_down": [KEY_DOWN],
+	"aircraft_roll_left": [KEY_LEFT],
+	"aircraft_roll_right": [KEY_RIGHT],
+	"aircraft_exit": [KEY_F],
 }
 
 const SLOT_ACTION_COUNT := 9

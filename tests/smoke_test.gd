@@ -23,12 +23,19 @@ func _run() -> void:
 	var player: Player = main_scene.get_node("Player")
 	Events.player_mode_changed.connect(_on_flying_signal)
 
-	# 1) 地形已生成：地表方块为实心。
-	var surface_y := world.get_surface_height(8, 8) - 1
-	_check(
-		world.get_block(Vector3i(8, surface_y, 8)) != BlockTypes.Block.AIR,
-		"玩家出生区域存在地形"
-	)
+	# 1) 地形已生成：玩家脚下的方块为实心。
+	# 出生点已不是固定的 (8,8)——亚洲出生锚定村庄整平区（见 main.gd
+	# _find_spawn_position），而世界按玩家位置流式加载。故以玩家实际所在列为准，
+	# 并轮询等待区块生成（固定帧等待在机器繁忙时会不足）。
+	var on_ground := false
+	for i in range(600):
+		var feet := Vector3i(player.global_position.floor())
+		if world.get_block(Vector3i(feet.x, feet.y - 1, feet.z)) != BlockTypes.Block.AIR:
+			on_ground = true
+			break
+		await get_tree().process_frame
+	_check(on_ground, "玩家出生区域存在地形（出生列 %s）"
+		% Vector3i(player.global_position.floor()))
 
 	# 2) 放置方块并立即读取。
 	var target := Vector3i(20, 40, 20)

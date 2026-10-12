@@ -85,6 +85,12 @@ var _descend_button: Button
 var _break_bar: ProgressBar
 var _charge_bar: ProgressBar
 var _look_touch := -1
+## 飞行仪表：仅驾驶飞行器时显示（见 Aircraft.snapshot 的读数来源）。
+var _flight_panel: PanelContainer
+var _flight_speed: Label
+var _flight_altitude: Label
+var _flight_throttle: Label
+var _flight_stall: Label
 
 
 func setup(player: Player) -> void:
@@ -105,6 +111,8 @@ func setup(player: Player) -> void:
 	Events.notice.connect(_on_notice)
 	# 死亡 RIP 覆盖层：与玩家的墓碑停顿同步浮现与消隐。
 	Events.player_died.connect(_on_player_died)
+	# 登机 / 下机：飞行仪表随驾驶状态显隐（读数本身每帧轮询）。
+	Events.aircraft_ride_changed.connect(_on_aircraft_ride_changed)
 	_build()
 	_on_mode_changed(GameState.mode)
 
@@ -145,6 +153,7 @@ func _build() -> void:
 	_build_quest_panel(root)
 	_build_toast(root)
 	_build_death_overlay(root)
+	_build_flight_panel(root)
 	_connect_progress()
 	_build_map_name(root)
 	_build_map_selector(root)
@@ -210,6 +219,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if _tip_panel != null and _tip_panel.visible and _tip_mesh != null:
 		_tip_mesh.rotation.y += _delta * 1.5
+	_refresh_flight_panel()
 	if _player == null or _break_bar == null:
 		return
 	var breaking := _player.is_breaking()
@@ -436,6 +446,86 @@ func _build_hotbar(root: Control) -> void:
 
 ## 左上角状态面板：姓名 + 红色爱心生命（5 颗心，每颗 4 点）+ 饥饿文本。
 ## 右上角小地图外框正下方依次是模式徽章与时间行，同宽居中成一条竖列。
+## 飞行仪表：屏幕顶部居中的一块小面板，只在驾驶飞行器时出现。
+## 读数全部来自 Aircraft.snapshot()——HUD 与探针共用同一份来源，不会各算一套。
+func _build_flight_panel(root: Control) -> void:
+	var panel := PanelContainer.new()
+	panel.visible = false
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.anchor_left = 0.5
+	panel.anchor_right = 0.5
+	panel.offset_left = -118.0
+	panel.offset_right = 118.0
+	panel.offset_top = 16.0
+	root.add_child(panel)
+	_flight_panel = panel
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.07, 0.10, 0.60)
+	style.border_color = Color(0.86, 0.91, 0.97, 0.25)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(8)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	panel.add_child(box)
+
+	var title := Label.new()
+	title.text = "✈️ 轻型飞机"
+	title.add_theme_font_size_override("font_size", 15)
+	title.add_theme_color_override("font_color", Color(0.80, 0.90, 1.0))
+	box.add_child(title)
+
+	_flight_speed = _flight_line(box, Color(1.0, 1.0, 1.0, 0.95))
+	_flight_altitude = _flight_line(box, Color(1.0, 1.0, 1.0, 0.95))
+	_flight_throttle = _flight_line(box, Color(1.0, 0.84, 0.45))
+	_flight_stall = _flight_line(box, Color(1.0, 0.42, 0.36))
+	_flight_stall.visible = false
+
+
+func _flight_line(box: VBoxContainer, color: Color) -> Label:
+	var label := Label.new()
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", color)
+	box.add_child(label)
+	return label
+
+
+func _on_aircraft_ride_changed(_riding: bool) -> void:
+	_refresh_flight_panel()
+
+
+func _refresh_flight_panel() -> void:
+	if _flight_panel == null:
+		return
+	var craft: Aircraft = _player.aircraft() if _player != null else null
+	if craft == null or craft.is_wrecked():
+		_flight_panel.visible = false
+		return
+	_flight_panel.visible = true
+	var reading := craft.snapshot()
+	var warning := bool(reading["stall_warning"])
+	_flight_speed.text = "空速  %d km/h   失速 %d" % [
+		int(reading["kmh"]), int(float(reading["stall_speed"]) * AircraftFlight.MPS_TO_KMH)
+	]
+	_flight_speed.add_theme_color_override(
+		"font_color", Color(1.0, 0.42, 0.36) if warning else Color(1.0, 1.0, 1.0, 0.95))
+	_flight_altitude.text = "高度  %d m" % int(reading["altitude"])
+	_flight_throttle.text = "油门  %s %d%%" % [
+		_throttle_bar(float(reading["throttle"])), int(float(reading["throttle"]) * 100.0)
+	]
+	_flight_stall.visible = warning
+	_flight_stall.text = "⚠️ 失速！推杆加速" if bool(reading["stalled"]) else "⚠️ 接近失速"
+
+
+## 油门条：10 格实心/空心，比纯数字更快读出推杆位置。
+func _throttle_bar(value: float) -> String:
+	var filled := clampi(int(round(clampf(value, 0.0, 1.0) * 10.0)), 0, 10)
+	return "█".repeat(filled) + "░".repeat(10 - filled)
+
+
 func _build_stats(root: Control) -> void:
 	var box := VBoxContainer.new()
 	box.position = Vector2(16, 16)

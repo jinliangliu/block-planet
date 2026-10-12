@@ -2038,7 +2038,7 @@ func _run() -> void:
 				item_wrong.append("材料 %d" % item_id)
 				break
 	_check(
-		ItemTypes.TOOL_TYPE.size() == 26 and ItemTypes.ITEM_NAMES.size() == 30 and item_wrong.is_empty(),
+		ItemTypes.TOOL_TYPE.size() == 26 and ItemTypes.ITEM_NAMES.size() == 31 and item_wrong.is_empty(),
 		"工具 26 件四表齐、材料 %d 种三表齐（错项：%s）" % [
 			ItemTypes.ITEM_NAMES.size(), _join_or_none(item_wrong)
 		],
