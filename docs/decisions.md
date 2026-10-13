@@ -765,6 +765,27 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
 - 教训（探针判据）：脚本编译失败时 Godot 仍可能打印 `_OK` 标记（探针 stub 继续跑），
   **验收必须同时确认零 SCRIPT ERROR 与 PASS 计数**，不能只看 OK 行。
 
+#### Phase 5-a · 辅助稳定 + 难度选项 — 已完成
+- 新增 `scripts/core/flight_settings.gd`（`FlightSettings`）：难度三档
+  （休闲/标准/硬核）与辅助稳定三档（关闭/半开/全开）。难度预设只决定辅助
+  默认值，玩家可单独覆盖；持久化 `user://settings.json`（缺失/损坏退回默认
+  标准+半开）。类级单例 `current()` 供飞机节点每帧读增益表。
+- `AircraftFlight.integrate/_update_rates` 增补可选 `assist` 增益参数：**仅在
+  松杆（三轴杆量≈0）且未失速时接管**，把坡度（+bank·roll_level）配平回水平并
+  阻尼偏航（yaw_damp）压荷兰滚；玩家一压杆辅助立刻完全让位。**留空字典即无辅助、
+  逐帧行为与重构前一致**（flight_probe 46 项断言守护）。
+- 刻意**不做俯仰自动配平**：它会与爬升/失速这类正常俯仰机动对抗——实测导致
+  `flight_hud_shot` 的「满拉杆逼失速」告警回归失败（巡航段杆量≈0 时辅助持续压
+  机头，改变了进入失速段前的姿态/能量）。滚转配平 + 偏航阻尼才是街机飞行辅助的
+  标准形态与儿童价值所在，且绝不与俯仰机动对抗。
+- 符号陷阱：坡度配平项取 +bank（正系数），须按 `_integrate_attitude` 的机体轴
+  约定实测校准（写成负的会把 30° 坡度越推越翻到 55°）；另注意现有模型固有「偏
+  航-坡度耦合」——关闭档带坡度飞行 2s 也会缓慢掉约 9° 坡度，探针据此断言「辅助
+  档显著强于关闭档」而非假设关闭档纹丝不动。
+- 验证：`tests/flight_settings_probe.tscn` 22 项全 PASS（FLIGHT_SETTINGS_OK）：
+  默认/难度预设/增益表/to_dict/from_dict/save 往返/损坏文件退回/坡度配平/辅助
+  不干预俯仰。回归：flight_probe 46 项、smoke_test、flight_hud_shot fails=0。
+
 ---
 
 ## 附：待定/开放问题

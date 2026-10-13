@@ -244,7 +244,9 @@ func _physics_process(delta: float) -> void:
 
 	_prepare_input(delta)
 	var on_ground := is_on_floor()
-	AircraftFlight.integrate(_state, controls, delta, on_ground)
+	# 辅助稳定增益（FlightSettings 单例）；无设置/关闭档即纯气动模型。
+	var assist := FlightSettings.current().gains()
+	AircraftFlight.integrate(_state, controls, delta, on_ground, assist)
 	if on_ground:
 		_apply_ground_forces(delta)
 

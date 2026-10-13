@@ -250,11 +250,13 @@ static func acceleration(state: State, controls: Controls) -> Vector3:
 
 
 ## 推进一帧：先按杆量更新机体角速度与姿态，再积分速度与位置，最后刷新读数。
-static func integrate(state: State, controls: Controls, delta: float, on_ground: bool) -> void:
+## assist 为辅助增益表（FlightSettings.gains）；留空字典表示「无辅助」，逐帧行为
+## 与重构前完全一致——既有 flight_probe 断言守护，不在此分支被改动。
+static func integrate(state: State, controls: Controls, delta: float, on_ground: bool, assist: Dictionary = {}) -> void:
 	var q_dyn := dynamic_pressure(state)
 	var authority := clampf(
 		q_dyn / CONTROL_Q_REF, CONTROL_AUTHORITY_MIN, 1.0) if not on_ground else 1.0
-	_update_rates(state, controls, delta, authority, on_ground)
+	_update_rates(state, controls, delta, authority, on_ground, assist)
 	_integrate_attitude(state, delta, on_ground)
 	state.throttle = controls.throttle
 
@@ -266,7 +268,8 @@ static func integrate(state: State, controls: Controls, delta: float, on_ground:
 
 
 static func _update_rates(
-	state: State, controls: Controls, delta: float, authority: float, on_ground: bool
+	state: State, controls: Controls, delta: float, authority: float, on_ground: bool,
+	assist: Dictionary = {}
 ) -> void:
 	var blend := clampf(RATE_RESPONSE * delta, 0.0, 1.0)
 	var beta := sideslip(state)
@@ -280,6 +283,21 @@ static func _update_rates(
 	var target_roll := controls.roll * ROLL_RATE_MAX * authority
 	var target_pitch := controls.pitch * PITCH_RATE_MAX * authority
 	var target_yaw := controls.yaw * YAW_RATE_MAX * authority - weathervane + coordination
+
+	# 辅助稳定（仅空中、且 assist 非空时生效）：**只在松杆时接管**——玩家一旦
+	# 主动压杆，辅助立刻完全让位。放手时把坡度配平回水平（+bank·roll_level）
+	# 并阻尼偏航摆动（yaw_damp）压住荷兰滚——儿童向的温和手感，硬核档（增益全
+	# 0）即纯模型。刻意不做俯仰自动配平：那会与爬升/失速这类正常俯仰机动对抗，
+	# 且会把「满拉杆逼失速」这类主动改出搅乱（flight_hud_shot 回归抓到此点）。
+	if not on_ground and not assist.is_empty():
+		var stick_free := absf(controls.roll) < 0.05 \
+			and absf(controls.pitch) < 0.05 and absf(controls.yaw) < 0.05
+		if stick_free and not state.stalled:
+			var roll_level: float = float(assist.get("roll_level", 0.0))
+			var yaw_damp: float = float(assist.get("yaw_damp", 0.0))
+			var bank := asin(clampf(state.basis.x.y, -1.0, 1.0))
+			target_roll += bank * roll_level * authority
+			target_yaw += -state.yaw_rate * yaw_damp * authority
 
 	# 接近俯仰限位时先收杆，避免积分越界后姿态解算出现奇异（机头朝上为正）。
 	# 地面用机轮限位（12°）而非空中限位（83°）：不然拉杆会把机头抬到 19° 卡在
