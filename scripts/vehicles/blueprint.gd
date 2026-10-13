@@ -46,11 +46,14 @@ func thrust_vector() -> Dictionary:
 func to_dict() -> Dictionary:
 	var part_dicts: Array = []
 	for p in parts:
-		part_dicts.append({
+		var d := {
 			"id": p.data.id,
 			"cell": [p.cell.x, p.cell.y, p.cell.z],
 			"rot": p.rot,
-		})
+		}
+		if p.is_mirrored():
+			d["msrc"] = [p.mirror_src.x, p.mirror_src.y, p.mirror_src.z]
+		part_dicts.append(d)
 	return {"title": title, "parts": part_dicts}
 
 static func from_dict(d: Dictionary) -> Blueprint:
@@ -62,7 +65,11 @@ static func from_dict(d: Dictionary) -> Blueprint:
 			continue
 		var c: Array = pd["cell"]
 		var cell := Vector3i(int(c[0]), int(c[1]), int(c[2]))
-		bp.parts.append(PlacedPart.make(data, cell, int(pd["rot"])))
+		var part := PlacedPart.make(data, cell, int(pd["rot"]))
+		var ms: Array = pd.get("msrc", [])
+		if ms.size() == 3:
+			part.mirror_src = Vector3i(int(ms[0]), int(ms[1]), int(ms[2]))
+		bp.parts.append(part)
 	return bp
 
 func save(path: String) -> void:

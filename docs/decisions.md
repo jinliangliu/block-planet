@@ -719,6 +719,22 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
   蓝图 spawn + Phase 3a 任务产出奖励 + Phase 3c 奖励解锁新零件。解锁状态接入建造编辑器
   零件面板（UI）留待编辑器交互期。
 
+#### Phase 4a · 工坊台建造界面（build_screen）— 已完成
+- 新增 `scripts/ui/build_screen.gd`（`BuildScreen extends Control`，`class_name` 注册）：
+  模态建造界面——SubViewport 3D 预览（平台网格 + 零件盒 + CG 可视化）、轨道相机、
+  零件面板（7 默认 + 2 进阶、进阶显示解锁价与购买）、信息面板（Σ质量/重心/连接合法性）、
+  放置/删除/旋转/轴对称切换、蓝图 `user://` 存取、F 键试飞（经 `from_loadout` 生成并登机）。
+- 修复真实缺陷（4a 验证中暴露）：`PlacedPart` 原无镜像链接、旋转后 `remove_at/rotate_at`
+  的 `_mirror_anchor` 重算失效（span 随 rot 变）→ 放置时显式记录 `mirror_link`，链接按
+  锚格索引、旋转不失效；`Blueprint.to_dict/from_dict` 同步持久化链接。`build_probe` 增补
+  「旋转后带镜像删除一次移除 2 件」回归断言。
+- 修复 `BuildScreen` 生命周期缺陷：继承 `Control` 后默认 `visible=true`，`open()` 守卫
+  直接早退 → `_ready` 置 `visible=false`（否则真实游戏里界面常驻遮挡全屏）。
+- 接线：`Player.input_locked`（模态时冻结玩家输入）、`InputActions.toggle_build`（V 键）、
+  `Main` 实例化 `build_screen` 并处理 `flight_requested(blueprint)` → `Aircraft.from_loadout`。
+- 验证：`tests/build_screen_probe.tscn` 26 项断言全 PASS（BUILD_SCREEN_PROBE_OK）：
+  开/关、默认蓝图加载、放置/旋转/镜像改动、save→load 往返一致、试飞入口存在。
+
 ---
 
 ## 附：待定/开放问题

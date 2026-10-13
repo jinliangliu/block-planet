@@ -120,6 +120,8 @@ var _stuck_frames := 0
 var _hurt_invuln := 0.0
 ## 死亡停顿中：原地立墓碑，倒计时结束后才从出生点复活。
 var _dead := false
+## 模态界面（工坊台建造等）打开：冻结玩家输入与物理，界面关闭时解除。
+var input_locked := false
 ## 鱼群陪伴回血的计时器。
 var _fish_heal_timer := 0.0
 ## 昼夜循环引用：睡觉跳过夜晚用（由 main 装配时注入）。
@@ -147,6 +149,9 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# 模态界面（工坊台建造等）打开期间玩家不响应任何输入。
+	if input_locked:
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if _aircraft != null:
 			# 驾驶中鼠标是操纵杆：左右滚转、上下俯仰。
@@ -390,6 +395,11 @@ func _eat_selected() -> bool:
 func _physics_process(delta: float) -> void:
 	# 死亡停顿：冻结一切（不移动、不掉血、不防卡死），等墓碑倒计时结束复活。
 	if _dead:
+		velocity = Vector3.ZERO
+		return
+
+	# 模态界面（工坊台建造等）打开：冻结玩家一切输入与物理，交由界面自理。
+	if input_locked:
 		velocity = Vector3.ZERO
 		return
 

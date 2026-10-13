@@ -12,6 +12,7 @@ extends Node3D
 @onready var _day_night: DayNightCycle = $DayNightCycle
 @onready var _mob_spawner: MobSpawner = $MobSpawner
 @onready var _env: Environment = ($WorldEnvironment as WorldEnvironment).environment
+var _build_screen: BuildScreen
 
 
 func _ready() -> void:
@@ -53,6 +54,12 @@ func _ready() -> void:
 	_player.died.connect(func(): Events.player_died.emit())
 	Events.region_entered.connect(_on_region_entered)
 
+	# 工坊台建造界面（V 键，D-032 Phase 4a）：蓝图编辑 → 试飞闭环。
+	_build_screen = BuildScreen.new()
+	$UI.add_child(_build_screen)
+	_build_screen.setup(_player)
+	_build_screen.test_fly_requested.connect(_on_test_fly_requested)
+
 	# 首次进入游戏先选地图；之后随时可用 M 键重新选择。
 	# 无头环境（探针 / CI）不自动弹出：模态界面会冻结玩家，阻塞自动化流程。
 	if GameState.needs_region_pick and DisplayServer.get_name() != "headless":
@@ -64,6 +71,26 @@ func _on_region_entered(region_id: int) -> void:
 	GameState.carried_inventory = _player.inventory
 	GameState.set_region(region_id)
 	get_tree().reload_current_scene()
+
+
+## 试飞请求（工坊台 F）：把蓝图飞机放到玩家身前实心面上，直接登机——
+## 「造飞机 → 试飞」闭环的最后一跳。机身/气动框由蓝图零件聚合决定。
+func _on_test_fly_requested(bp: Blueprint) -> void:
+	var forward := -_player.global_transform.basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = Vector3(1.0, 0.0, 0.0)
+	var at := _player.global_position + forward.normalized() * 10.0
+	var cell := Vector3i(at.floor())
+	var surface := _world.get_surface_height(cell.x, cell.z)
+	var craft := Aircraft.from_loadout(
+		self,
+		Vector3(float(cell.x) + 0.5, float(surface) + 0.1, float(cell.z) + 0.5),
+		_player.rotation.y,
+		bp,
+	)
+	_player.ride_aircraft(craft)
+	Events.notice.emit("🔧 蓝图飞机已放出，起飞！")
 
 
 ## 生成固定村庄与掠夺塔（含村民与掠夺者，挂载于本节点，不受昼夜清空管理）。

@@ -21,6 +21,7 @@ func _run() -> void:
 	_check_symmetry_mirror()
 	_check_save_load_roundtrip()
 	_check_remove_rotate()
+	_check_rotate_then_remove_mirror()
 	_check_visualizer()
 
 
@@ -122,6 +123,33 @@ func _check_remove_rotate() -> void:
 	var rot0 := e.blueprint.parts[0].rot
 	e.rotate_at(Vector3i(-1, 0, -9), false)
 	_check(e.blueprint.parts[0].rot == wrapi(rot0 + 1, 0, 4), "旋转一次 rot 步进 +1 mod 4")
+
+
+## 旋转后删镜像伴侣（Phase 4a 修）：旋转改变宽/深跨度，按锚格反推镜像
+## 关系会失效——镜像链接在放置时写死，删除/旋转按链接配对。
+func _check_rotate_then_remove_mirror() -> void:
+	var e := BuildEditor.new()
+	e.place(PartRegistry.by_id("wing"), Vector3i(2, 1, -2), 0, true)
+	_check(e.blueprint.parts.size() == 2, "旋转测试：镜像放置 2 件")
+	e.rotate_at(Vector3i(2, 1, -2), true)
+	var both_rotated := true
+	for p in e.blueprint.parts:
+		if p.rot != 1:
+			both_rotated = false
+	_check(both_rotated, "带镜像旋转时两侧同步步进")
+	e.remove_at(Vector3i(2, 1, -2), true)
+	_check(e.blueprint.parts.is_empty(),
+		"旋转后仍能按链接删光镜像伴侣（剩 %d 件）" % e.blueprint.parts.size())
+	# 反向：直接删镜像件，原装件连带删除。
+	e.clear()
+	e.place(PartRegistry.by_id("wing"), Vector3i(2, 1, -2), 0, true)
+	var twin_cell := Vector3i.ZERO
+	for p in e.blueprint.parts:
+		if p.is_mirrored():
+			twin_cell = p.cell
+	e.remove_at(twin_cell, true)
+	_check(e.blueprint.parts.is_empty(),
+		"删镜像件连带删除原装件（剩 %d 件）" % e.blueprint.parts.size())
 
 
 ## 可视化：根据蓝图生成重心/升力中心/推力线标记节点。
