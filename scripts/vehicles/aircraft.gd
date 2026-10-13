@@ -77,6 +77,8 @@ var rider: Player = null
 
 var _state := AircraftFlight.State.new()
 var _model: AircraftModel
+## 蓝图装配来源：非 null 时 _ready 据其零件生成体素块外观（替代整机机模）。
+var _blueprint: Blueprint = null
 var _wrecked := false
 var _stick := Vector2.ZERO
 var _readings_timer := 0.0
@@ -103,14 +105,18 @@ static func spawn(parent: Node, at: Vector3, heading: float = 0.0) -> Aircraft:
 	return craft
 
 
-## 用零件清单拼装一架飞机（Phase 1 装配入口；Phase 2 建造编辑器经此生成）。
-## 与 spawn() 同一路径，只把默认气动框换成零件清单的聚合结果——
-## 质量/翼面积/推力/重心等整机特性随之由这套零件决定。
-## （注：Phase 1 视觉仍用整机机模，零件逐块外观在 Phase 2 建造编辑器接入。）
+## 用蓝图拼装一架飞机（Phase 1 装配入口；Phase 2 建造编辑器经此生成可见机体）。
+## 与 spawn() 同一落位路径，只把默认气动框换成蓝图零件的聚合结果，并以零件
+## 体素块外观替代整机机模。默认 spawn() 仍走 ×3 代码机模，保持已验证手感。
+## （先 place() 再覆盖 airframe：place() 内部 make_state 会重建 State 并复位
+## 气动框，故聚合结果必须在 place() 之后写入。）
 static func from_loadout(
-	parent: Node, at: Vector3, heading: float, parts: Array[PlacedPart]) -> Aircraft:
-	var craft := spawn(parent, at, heading)
-	craft._state.airframe = AircraftFlight.Airframe.aggregate(parts)
+	parent: Node, at: Vector3, heading: float, blueprint: Blueprint) -> Aircraft:
+	var craft := Aircraft.new()
+	craft._blueprint = blueprint
+	parent.add_child(craft)              # _ready 读到 _blueprint → 建零件体素外观
+	craft.place(at, heading)             # 落位并建默认气动框
+	craft._state.airframe = blueprint.aggregate()  # 覆盖为零件聚合结果
 	return craft
 
 
@@ -122,10 +128,47 @@ func place(at: Vector3, heading: float = 0.0) -> void:
 	velocity = Vector3.ZERO
 
 
+## 按蓝图零件生成体素块外观（以机体重心为原点居中）。纯视觉、无碰撞，不改变飞行。
+func _build_part_visuals(bp: Blueprint) -> void:
+	var container := Node3D.new()
+	container.name = "PartMeshes"
+	add_child(container)
+	var com := bp.center_of_gravity()
+	for p in bp.parts:
+		var mi := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(p.data.size) * PartData.GRID_METERS
+		mi.mesh = box
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = _category_color(p.data.category)
+		mat.metallic = 0.1
+		mat.roughness = 0.7
+		mi.material_override = mat
+		mi.position = p.local_pos() - com
+		mi.rotation_degrees = Vector3(0.0, float(p.rot) * 90.0, 0.0)
+		container.add_child(mi)
+
+
+## 零件类别 → 体素块配色（蓝本为儿童向、辨识度优先）。
+static func _category_color(cat: int) -> Color:
+	match cat:
+		PartData.Category.FUSELAGE:  return Color(0.75, 0.78, 0.82)
+		PartData.Category.WING:      return Color(0.30, 0.55, 0.85)
+		PartData.Category.TAIL:      return Color(0.45, 0.65, 0.90)
+		PartData.Category.ENGINE:    return Color(0.35, 0.35, 0.40)
+		PartData.Category.PROPELLER: return Color(0.20, 0.20, 0.22)
+		PartData.Category.GEAR:      return Color(0.55, 0.50, 0.30)
+		PartData.Category.FUEL_TANK: return Color(0.80, 0.55, 0.25)
+		_:                           return Color(0.70, 0.70, 0.70)
+
+
 func _ready() -> void:
 	add_to_group("aircraft")
-	_model = AircraftModel.new()
-	add_child(_model)
+	if _blueprint != null:
+		_build_part_visuals(_blueprint)
+	else:
+		_model = AircraftModel.new()
+		add_child(_model)
 	_collider = CollisionShape3D.new()
 	var shape := BoxShape3D.new()
 	shape.size = COLLIDER_SIZE

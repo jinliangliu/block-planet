@@ -694,10 +694,16 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
   （MISSION_PROBE_OK）。避坑：GDScript 4.6 闭包对捕获变量重赋值不向外传递，探针改用
   共享字典持有结果。
 
-#### Phase 3b · 试飞闭环（蓝图→飞机 spawn）— 待开工
-扩展 `Aircraft.from_loadout()`：按 `Blueprint` 的零件实例化可见体素块（机翼/机身/
-发动机/螺旋桨/起落架/油箱拼装外观），物理框已聚合；默认 spawn 仍走 ×3 代码机模保持
-手感。让 blueprint 驱动的飞机能飞、能完成 3a 任务。
+#### Phase 3b · 试飞闭环（蓝图→飞机 spawn）— 已完成
+- `Aircraft.from_loadout(parent, at, heading, blueprint)` 改为接收 `Blueprint`：先
+  `add_child`（_ready 读到 _blueprint → 建零件体素外观），再 `place()` 落位，最后用
+  `blueprint.aggregate()` 覆盖气动框。默认 `spawn()` 仍走 ×3 代码机模，手感不变。
+- `_ready` 分支：有 _blueprint → `_build_part_visuals()`（按零件 size×GRID_METERS 生成
+  BoxMesh，按类别上色，以重心为原点居中）；否则仍建代码机模。体素外观纯视觉、无碰撞，
+  不改变飞行。螺旋桨转动/舵面偏转仍由 `_model` 守卫（蓝图机暂不转桨，MVP 可接受）。
+- 验证：`flight_probe` 新增 G 段——默认套件蓝图经 from_loadout 造机，断言体素外观块数
+  = 零件数（7/7）、初始停在跑道、满油门可离地（第 276 帧，飞行特性与默认机一致）；
+  A 段新增「default_loadout 聚合 = 默认气动框」闭环一致性断言。
 
 #### Phase 3c · 绿宝石解锁新零件 — 待开工
 新增 `unlock_table.gd`（part_id → 绿宝石成本）+ 采购/解锁逻辑；默认套件外的新零件需

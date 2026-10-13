@@ -182,6 +182,32 @@ func _run() -> void:
 	_check(_crash_reasons.size() >= 1, "解体广播了 crashed（原因：%s）"
 		% (_crash_reasons[0] if _crash_reasons.size() > 0 else "无"))
 
+	# ── G 段：蓝图驱动飞机（试飞闭环验证）──────────────────
+	# 用默认套件蓝图经 from_loadout 造机：体素外观应被构建，且能像默认机一样离地。
+	var loadout_bp := Blueprint.new()
+	loadout_bp.parts = PartRegistry.default_loadout()
+	var loadout := Aircraft.from_loadout(
+		main_scene, start, RUNWAY_HEADING, loadout_bp)
+	loadout.drive_remotely()
+	loadout.crashed.connect(_on_crashed)
+	var pm := loadout.get_node_or_null("PartMeshes")
+	_check(pm != null and pm.get_child_count() == loadout_bp.parts.size(),
+		"蓝图飞机生成体素外观（%d 块 / 零件 %d）"
+		% [pm.get_child_count() if pm else 0, loadout_bp.parts.size()])
+	# 先落稳在跑道上（spawn 当帧 is_on_floor 尚未被 move_and_slide 置真）。
+	await _frames(30)
+	_check(loadout.is_on_floor(), "蓝图飞机初始停在跑道上")
+	loadout.controls.throttle = 1.0
+	var lo_lifted := -1
+	for i in range(600):
+		await get_tree().physics_frame
+		if not loadout.is_on_floor():
+			lo_lifted = i
+			break
+	_check(lo_lifted > 0, "蓝图飞机满油门可离地（第 %d 帧）" % lo_lifted)
+	_check(not loadout.is_wrecked(), "蓝图飞机起飞未解体")
+	loadout.queue_free()
+
 	_finish()
 
 
@@ -284,6 +310,16 @@ func _run_parts_checks() -> void:
 	_check(empty.mass == 0.0 and empty.wing_area == 0.0, "空零件聚合为零且不崩")
 	_check(AircraftFlight.stall_speed(AircraftFlight.SEA_LEVEL_DENSITY, empty) == 0.0,
 		"无升力面时失速速度定义为 0")
+
+	# 闭环一致性：默认套件聚合 = 默认气动框（from_loadout 据此飞得与默认机一致）。
+	var bp := Blueprint.new()
+	bp.parts = parts
+	var af2 := bp.aggregate()
+	var def := AircraftFlight.default_airframe()
+	_check(absf(af2.mass - def.mass) < 0.01
+		and absf(af2.wing_area - def.wing_area) < 0.01
+		and absf(af2.thrust_max - def.thrust_max) < 0.01,
+		"default_loadout 聚合 = 默认气动框（蓝图闭环一致性）")
 
 
 ## 挑地表最高点最低的候选区，留出尽可能多的净空高度（区块高度上限 64）。
