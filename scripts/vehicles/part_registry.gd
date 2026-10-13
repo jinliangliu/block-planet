@@ -102,6 +102,32 @@ static func all() -> Array[PartData]:
 	tank.fuel_capacity = 40.0
 	parts.append(tank)
 
+	# ── 进阶零件（默认套件之外，需花绿宝石解锁）──────────────
+	var turbine := PartData.new()
+	turbine.id = "turbine"
+	turbine.display = "涡轮发动机"
+	turbine.category = PartData.Category.ENGINE
+	turbine.size = Vector3i(3, 3, 3)
+	turbine.mass = 55.0
+	turbine.cost = 30          # 绿宝石解锁价
+	turbine.durability = 90.0
+	turbine.thrust = 2600.0     # 比默认发动机(1650)更强
+	turbine.fuel_burn = 0.035
+	parts.append(turbine)
+
+	var long_wing := PartData.new()
+	long_wing.id = "long_wing"
+	long_wing.display = "长航程机翼"
+	long_wing.category = PartData.Category.WING
+	long_wing.size = Vector3i(28, 1, 4)
+	long_wing.mass = 42.0
+	long_wing.cost = 20
+	long_wing.durability = 45.0
+	long_wing.is_lifting = true
+	long_wing.lift_area = 18.0   # 比默认机翼(12)更大，失速更慢
+	long_wing.ctrl_roll = 1.0
+	parts.append(long_wing)
+
 	return parts
 
 
