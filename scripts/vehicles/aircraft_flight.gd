@@ -7,20 +7,18 @@ extends RefCounted
 ## 升力随攻角线性上升、越过临界攻角失速掉升力、诱导阻力随升力平方增长、
 ## 空气密度随高度衰减、操纵权限随动压下降（低速时杆变软）。
 ##
-## 世界尺度：1 格 = 0.5 m（D-030），模型内部一律用「米」= 游戏米制，
-## 不再做格↔米换算——玩家步速 11 m/s，本机失速 18 m/s、巡航 30 m/s，
-## 相对玩家 1.6~3 倍，手感符合「比跑快一点、还能看清风景」。
+## 世界尺度：1 格 = 0.5 m（D-030），模型内部一律用「米」= 游戏米制。
 ##
-## 标定（ISA 海平面、240 kg 灌木丛短距起降机）：
-##   失速速度      √(2mg / ρS·CLmax) ≈ 13 m/s（47 km/h）
-##   抬轮离地      机轮限位 12° → CL≈1.05，约 16 m/s 离地（真机同样是 1.2 Vs 左右）
-##   巡航         35 m/s 平飞需推力 ≈ 815 N，即半油门
-##   最大平飞速度   约 50 m/s（满油门推力 = 阻力），低于 VNE 55，只有俯冲才超速
-##   起飞滑跑       T/W = 6.9 m/s²，净加速 6.3 m/s²，拉杆后约 2 秒 / 18 m 离地
-##   海平面爬升率   低速段过剩推力约 1000 N，爬升率 10 m/s 量级
-##   升阻比         L/Dmax ≈ 8（固定起落架 + 撑杆的高阻力构型，符合真机量级）
-## 注意：地面姿态被机轮限在 12° 以内，静止时机翼攻角近零——
-## 必须像真飞行员那样「到抬轮速度后拉杆」，飞机才会离地（探针 C 段即验此）。
+## 聚合化（D-032 探索模式重构）：整机不再是「一台烘焙好常数的飞机」，而是
+## **由零件拼装、物理特性按零件求和**。随零件变化的量——总质量、翼面积、
+## 推力、零升阻力、重心、升力中心——全部收进 Airframe（挂在 State 上），由
+## Airframe.aggregate(零件) 计算；翼型曲线、大气、操控品质等跨零件共享的量
+## 仍为静态常量。默认零件套件（PartRegistry.default_loadout）的聚合结果与
+## D-031 旧标定逐项一致，故飞行动作不变，目标值由 flight_probe 断言守护：
+##   失速速度 √(2mg / ρS·CLmax) ≈ 13 m/s（47 km/h）
+##   巡航 35 m/s 平飞需推力 ≈ 815 N（半油门）；最大平飞约 50 m/s（低于 VNE 55）
+##   起飞滑跑净加速约 6.3 m/s²，拉杆后约 2 秒 / 18 m 离地；升阻比 L/Dmax ≈ 8
+## 注意：地面姿态被机轮限在 12° 以内——必须「到抬轮速度后拉杆」才会离地。
 ## 运行验证：tests/flight_probe.tscn
 
 const GRAVITY := 9.80665
@@ -29,27 +27,25 @@ const SEA_LEVEL_DENSITY := 1.225
 const DENSITY_SCALE_HEIGHT := 8500.0
 const MPS_TO_KMH := 3.6
 
-# ── 机型标定：轻型单发上单翼短距起降机 ──────────────────────
-const MASS := 240.0
-const WING_AREA := 14.0
-## 升力线斜率（1/rad）：3D 机翼的实测值低于二维翼型的 2π，取 5.0。
+# ── 翼型 / 大气（跨零件共享，保持静态）──────────────────
+## 升力线斜率（1/rad）：3D 机翼实测值低于二维翼型 2π，取 5.0。
 const CL_ALPHA := 5.0
 const CL_MAX := 1.6
-## 临界攻角 0.32 rad ≈ 18°（= CLmax / CLα，两参数自洽）；超过即失速。
+## 临界攻角 0.32 rad ≈ 18°（= CLmax / CLα，自洽）；超过即失速。
 const STALL_ALPHA := 0.32
 const STALL_WARN_ALPHA := 0.27
-## 零升阻力系数与诱导阻力因子（诱导阻力 = k·CL²）。
-## CD0 取 0.075：固定起落架 + 翼间撑杆的构型阻力偏大（真机同类约 0.06~0.09），
-## 顺带把满油门平飞速度压到 50 m/s 以内——体素世界里够快，又不至于一眨眼飞过村庄。
-const CD0 := 0.075
+
+# ── 整机气动（旧为烘焙常量，现由 Airframe 从零件聚合）────
+## 零升阻力基值：聚合 cd0 = CD0_BASE + Σ零件 parasite_drag（默认套件 = 0.075）。
+const CD0_BASE := 0.06
+## 诱导阻力因子（诱导阻力 = k·CL²）。
 const INDUCED_K := 0.052
 ## 侧滑引起的附加阻力（每弧度侧滑角）。
 const SIDESLIP_DRAG := 0.35
-## 推重比 0.56：短距起降机的量级，让 40 余格平地就能拉起。
-const THRUST_MAX := 1650.0
 ## 螺旋桨推力随密度衰减的指数（螺旋桨比喷气机更依赖空气密度）。
 const THRUST_DENSITY_EXPONENT := 0.7
-## 不可超越速度（结构极限，超出即解体）。平飞够不到，只有俯冲能超。
+## 不可超越速度默认值（结构极限，超出即解体）。MVP 不随零件变化，
+## Airframe.vne 取此值；Phase 3 按机身/机翼结构强度取各零件下限。
 const VNE := 55.0
 ## 触地垂直速度上限（m/s），超出即解体。
 const TOUCHDOWN_LIMIT := 6.0
@@ -61,7 +57,6 @@ const YAW_RATE_MAX := 0.55
 ## 操纵面对杆量的响应时间常数倒数（1/s）：越大越跟手。
 const RATE_RESPONSE := 4.5
 ## 动压基准（Pa）：操纵权限以此为 1，低于此值杆效按比例下降。
-## 30 m/s 时动压 551 Pa 已满权限；临近失速（15 m/s）只剩约 0.55，杆变软。
 const CONTROL_Q_REF := 250.0
 const CONTROL_AUTHORITY_MIN := 0.12
 ## 侧滑回中的风标稳定性（每弧度侧滑角的偏航角速度）。
@@ -70,29 +65,10 @@ const YAW_STABILITY := 1.1
 const TURN_COORDINATION_RATE := 0.5
 ## 俯仰角限制（rad），约 ±83°：不限制就拉成后空翻。
 const PITCH_LIMIT := 1.45
-# ── 地面 ────────────────────────────────────────────────────
+# ── 地面 ───────────────────────────────────────────────────
 ## 地面姿态机轮限位：滚转被摆平、俯仰最多抬到约 12°（可抬头离地，不能翻跟头）。
 const GROUND_PITCH_MAX := 0.21
 const GROUND_LEVEL_RATE := 6.0
-
-
-## 飞行状态：位置/速度/姿态 + 机体三轴角速度。纯数据，不持有节点。
-class State extends RefCounted:
-	var position := Vector3.ZERO
-	var velocity := Vector3.ZERO
-	## 机体基：+X 右翼、+Y 机背、-Z 机头（Godot 约定）。
-	var basis := Basis.IDENTITY
-	var roll_rate := 0.0
-	var pitch_rate := 0.0
-	var yaw_rate := 0.0
-	## 结算读数（HUD 与探针共用同一份来源）。
-	var airspeed := 0.0
-	var alpha := 0.0
-	var load_factor := 1.0
-	var stalled := false
-	var stall_warning := false
-	var overspeed := false
-	var throttle := 0.0
 
 
 ## 操纵输入：杆量 −1..1，油门 0..1。
@@ -108,6 +84,81 @@ class Controls extends RefCounted:
 	var brake := false
 
 
+## 整机聚合特性：由零件拼装求和得到，挂在 State 上随飞机走。
+## mass / wing_area / thrust_max / cd0 随零件变化；com / lift_center 供
+## 建造编辑器可视化与结构分析；vne / induced_k / sideslip_drag 为 MVP 默认值。
+class Airframe extends RefCounted:
+	var mass := 0.0
+	var wing_area := 0.0
+	var thrust_max := 0.0
+	var vne := VNE
+	var cd0 := CD0_BASE
+	var induced_k := INDUCED_K
+	var sideslip_drag := SIDESLIP_DRAG
+	## 重心（机体局部坐标，米）：质量加权平均。
+	var com := Vector3.ZERO
+	## 升力中心（机体局部坐标，米）：升力面面积加权平均；无升力面时退回重心。
+	var lift_center := Vector3.ZERO
+
+	## 由零件清单聚合整机特性（Phase 1 核心：物理按零件求和）。
+	static func aggregate(parts: Array[PlacedPart]) -> Airframe:
+		var af := Airframe.new()
+		var mass_sum := 0.0
+		var area_sum := 0.0
+		var thrust_sum := 0.0
+		var cd0_sum := CD0_BASE
+		var com_weighted := Vector3.ZERO
+		var lift_weighted := Vector3.ZERO
+		for placed in parts:
+			var data: PartData = placed.data
+			var pos := placed.local_pos()
+			mass_sum += data.mass
+			thrust_sum += data.thrust
+			cd0_sum += data.parasite_drag
+			com_weighted += pos * data.mass
+			if data.is_lifting and data.lift_area > 0.0:
+				area_sum += data.lift_area
+				lift_weighted += pos * data.lift_area
+		af.mass = mass_sum
+		af.wing_area = area_sum
+		af.thrust_max = thrust_sum
+		af.cd0 = cd0_sum
+		if mass_sum > 0.0:
+			af.com = com_weighted / mass_sum
+		af.lift_center = lift_weighted / area_sum if area_sum > 0.0 else af.com
+		return af
+
+
+## 默认气动框：由 PartRegistry.default_loadout 聚合而来（单一数据源，
+## 保证「默认零件套件飞起来」与 D-031 标定一致）。
+static func default_airframe() -> Airframe:
+	return Airframe.aggregate(PartRegistry.default_loadout())
+
+
+## 飞行状态：位置/速度/姿态 + 机体三轴角速度 + 聚合气动框。纯数据，不持有节点。
+class State extends RefCounted:
+	var position := Vector3.ZERO
+	var velocity := Vector3.ZERO
+	## 机体基：+X 右翼、+Y 机背、-Z 机头（Godot 约定）。
+	var basis := Basis.IDENTITY
+	var roll_rate := 0.0
+	var pitch_rate := 0.0
+	var yaw_rate := 0.0
+	## 本机的聚合特性（零件拼装结果）；未指定时用默认套件。
+	var airframe: Airframe
+	## 结算读数（HUD 与探针共用同一份来源）。
+	var airspeed := 0.0
+	var alpha := 0.0
+	var load_factor := 1.0
+	var stalled := false
+	var stall_warning := false
+	var overspeed := false
+	var throttle := 0.0
+
+	func _init() -> void:
+		airframe = AircraftFlight.default_airframe()
+
+
 static func make_state(at: Vector3, heading: float = 0.0) -> State:
 	var state := State.new()
 	state.position = at
@@ -120,12 +171,12 @@ static func air_density(altitude: float) -> float:
 	return SEA_LEVEL_DENSITY * exp(-maxf(altitude, 0.0) / DENSITY_SCALE_HEIGHT)
 
 
-## 失速速度（m/s）：升力恰好等于重力的速度。
-static func stall_speed(density: float = SEA_LEVEL_DENSITY) -> float:
-	var denom := density * WING_AREA * CL_MAX
+## 失速速度（m/s）：升力恰好等于重力的速度，随整机质量/翼面积/空气密度变化。
+static func stall_speed(density: float, airframe: Airframe) -> float:
+	var denom := density * airframe.wing_area * CL_MAX
 	if denom <= 0.0:
 		return 0.0
-	return sqrt(2.0 * MASS * GRAVITY / denom)
+	return sqrt(2.0 * airframe.mass * GRAVITY / denom)
 
 
 ## 升力系数曲线：线性段到临界攻角，之后升力平缓下滑（简化的失速平台）。
@@ -165,15 +216,17 @@ static func sideslip(state: State) -> float:
 	return asin(clampf(v_b.x / speed, -1.0, 1.0))
 
 
-## 气动力 + 推力合成加速度（m/s²）。lift 与 drag 都按动压 × 机翼面积结算。
+## 气动力 + 推力合成加速度（m/s²）。lift 与 drag 都按动压 × 整机翼面积结算，
+## 各系数取自本机的 Airframe（零件聚合结果）。
 static func acceleration(state: State, controls: Controls) -> Vector3:
+	var af := state.airframe
 	var speed := state.velocity.length()
 	var q_dyn := dynamic_pressure(state)
 	var alpha := angle_of_attack(state)
 	var beta := sideslip(state)
 	var cl := lift_coefficient(alpha)
-	var cd := CD0 + INDUCED_K * cl * cl + absf(beta) * SIDESLIP_DRAG
-	var q_area := q_dyn * WING_AREA
+	var cd := af.cd0 + af.induced_k * cl * cl + absf(beta) * af.sideslip_drag
+	var q_area := q_dyn * af.wing_area
 
 	# 升力垂直于速度、位于机体的对称面内（机背方向去掉速度分量）。
 	# 该式同时给出两种效果：攻角产生的升力，以及滚转时机翼倾斜把升力掰向侧向
@@ -188,11 +241,12 @@ static func acceleration(state: State, controls: Controls) -> Vector3:
 	var drag := -velocity_dir * (q_area * cd)
 	var thrust_dir := -state.basis.z
 	var thrust := thrust_dir * (
-		controls.throttle * THRUST_MAX
+		controls.throttle * af.thrust_max
 		* pow(air_density(state.position.y) / SEA_LEVEL_DENSITY, THRUST_DENSITY_EXPONENT)
 	)
-	var gravity := Vector3.DOWN * (MASS * GRAVITY)
-	return (lift + drag + thrust + gravity) / MASS
+	var weight := Vector3.DOWN * (af.mass * GRAVITY)
+	var inv_mass := 1.0 / af.mass if af.mass > 0.0 else 0.0
+	return (lift + drag + thrust + weight) * inv_mass
 
 
 ## 推进一帧：先按杆量更新机体角速度与姿态，再积分速度与位置，最后刷新读数。
@@ -264,16 +318,19 @@ static func _integrate_attitude(state: State, delta: float, on_ground: bool) -> 
 
 
 static func _refresh_readings(state: State) -> void:
+	var af := state.airframe
 	var speed := state.velocity.length()
 	var alpha := angle_of_attack(state)
 	state.airspeed = speed
 	state.alpha = alpha
 	state.stalled = absf(alpha) > STALL_ALPHA and speed > 3.0
 	state.stall_warning = absf(alpha) > STALL_WARN_ALPHA and speed > 3.0
-	state.overspeed = speed > VNE
+	state.overspeed = speed > af.vne
 	# 载荷系数：升力 / 重力。失速后升力掉下去，读数自然回落。
 	var cl := lift_coefficient(alpha)
-	state.load_factor = (dynamic_pressure(state) * WING_AREA * absf(cl)) / (MASS * GRAVITY)
+	var weight := af.mass * GRAVITY
+	state.load_factor = (dynamic_pressure(state) * af.wing_area * absf(cl)) / weight \
+		if weight > 0.0 else 0.0
 
 
 ## 一帧读数快照：HUD 仪表与探针断言共用同一套字段名。
@@ -281,7 +338,7 @@ static func snapshot(state: State) -> Dictionary:
 	return {
 		"airspeed": state.airspeed,
 		"kmh": state.airspeed * MPS_TO_KMH,
-		"stall_speed": stall_speed(air_density(state.position.y)),
+		"stall_speed": stall_speed(air_density(state.position.y), state.airframe),
 		"altitude": state.position.y,
 		"alpha_deg": rad_to_deg(state.alpha),
 		"load_factor": state.load_factor,

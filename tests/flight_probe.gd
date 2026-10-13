@@ -50,6 +50,7 @@ func _run() -> void:
 	GameState.needs_region_pick = false
 
 	_run_flight_model_checks()
+	_run_parts_checks()
 
 	# ── 准备：高架测试跑道 ──────────────────────────────
 	var origin := _pick_strip_origin(world)
@@ -186,7 +187,8 @@ func _run() -> void:
 
 ## A 段：纯气动标定。不建场景、不跑物理，直接验算模型本身。
 func _run_flight_model_checks() -> void:
-	var vs := AircraftFlight.stall_speed()
+	var af := AircraftFlight.default_airframe()
+	var vs := AircraftFlight.stall_speed(AircraftFlight.SEA_LEVEL_DENSITY, af)
 	_check(vs > 12.0 and vs < 18.0, "海平面失速速度 12~18 m/s（实际 %.1f，合 %.0f km/h）"
 		% [vs, vs * AircraftFlight.MPS_TO_KMH])
 	_check(AircraftFlight.lift_coefficient(0.0) == 0.0, "零攻角不产生升力")
@@ -218,14 +220,70 @@ func _run_flight_model_checks() -> void:
 	var trim_speed := 30.0
 	level.velocity = Vector3(0.0, 0.0, -trim_speed)
 	var q_dyn := 0.5 * AircraftFlight.SEA_LEVEL_DENSITY * trim_speed * trim_speed
-	var cl_trim := (AircraftFlight.MASS * AircraftFlight.GRAVITY) \
-		/ (q_dyn * AircraftFlight.WING_AREA)
+	var cl_trim := (af.mass * AircraftFlight.GRAVITY) \
+		/ (q_dyn * af.wing_area)
 	var alpha_trim := cl_trim / AircraftFlight.CL_ALPHA
 	level.basis = Basis.from_euler(Vector3(alpha_trim, 0.0, 0.0))
 	AircraftFlight.integrate(level, AircraftFlight.Controls.new(), 1.0 / 60.0, false)
 	_check(absf(level.load_factor - 1.0) < 0.1,
 		"配平平飞时载荷系数 ≈ 1g（%.2f，配平攻角 %.1f°）"
 			% [level.load_factor, rad_to_deg(alpha_trim)])
+
+
+## Phase 1 聚合断言（D-032）：整机特性必须等于零件的求和，数据驱动不失真。
+func _run_parts_checks() -> void:
+	var parts := PartRegistry.default_loadout()
+	var agg := AircraftFlight.Airframe.aggregate(parts)
+	_check(absf(agg.mass - 240.0) < 0.01,
+		"聚合质量 = Σ零件质量（%.1f kg）" % agg.mass)
+	_check(absf(agg.wing_area - 14.0) < 0.01,
+		"聚合翼面积 = Σ升力面（%.1f m²）" % agg.wing_area)
+	_check(absf(agg.thrust_max - 1650.0) < 0.01,
+		"聚合推力 = Σ发动机（%.0f N）" % agg.thrust_max)
+	_check(absf(agg.cd0 - 0.075) < 0.001,
+		"聚合零升阻力 = 基值 + Σ寄生（%.3f）" % agg.cd0)
+
+	# 重心 = 各零件位置 × 质量的加权平均。
+	var com_expected := Vector3.ZERO
+	for p in parts:
+		com_expected += p.local_pos() * p.data.mass
+	com_expected /= agg.mass
+	_check(agg.com.distance_to(com_expected) < 0.001,
+		"重心 = 质量加权平均（%v）" % agg.com)
+
+	# 升力中心只由升力面决定：应异于重心（机翼在重心前上方、尾翼在后）。
+	_check(agg.lift_center.distance_to(agg.com) > 0.01,
+		"升力中心异于重心（升力中心 %v，重心 %v）" % [agg.lift_center, agg.com])
+
+	# 拆掉机翼：升力面减少 → 失速速度升高（翅膀越小越「飞不起来」）。
+	var no_wing: Array[PlacedPart] = []
+	for p in parts:
+		if p.data.category != PartData.Category.WING:
+			no_wing.append(p)
+	var no_wing_af := AircraftFlight.Airframe.aggregate(no_wing)
+	_check(no_wing_af.wing_area < agg.wing_area,
+		"拆掉机翼后升力面减少（%.1f < %.1f）" % [no_wing_af.wing_area, agg.wing_area])
+	var vs_full := AircraftFlight.stall_speed(AircraftFlight.SEA_LEVEL_DENSITY, agg)
+	var vs_no_wing := AircraftFlight.stall_speed(AircraftFlight.SEA_LEVEL_DENSITY, no_wing_af)
+	_check(vs_no_wing > vs_full,
+		"升力面越小失速速度越高（%.1f > %.1f m/s）" % [vs_no_wing, vs_full])
+
+	# 加装一只前机身油箱：总质量上升、重心向油箱（−Z 机头）偏移。
+	var heavier: Array[PlacedPart] = []
+	heavier.assign(parts)
+	heavier.append(PlacedPart.make(PartRegistry.by_id("fuel_tank"), Vector3i(-1, 0, -8)))
+	var heavy_af := AircraftFlight.Airframe.aggregate(heavier)
+	_check(heavy_af.mass > agg.mass,
+		"加装油箱后总质量上升（%.1f > %.1f）" % [heavy_af.mass, agg.mass])
+	_check(heavy_af.com.z < agg.com.z,
+		"前置油箱把重心拉向机头（%.3f < %.3f）" % [heavy_af.com.z, agg.com.z])
+
+	# 空零件不崩：无升力面时失速速度定义为 0（飞不起来但不除零）。
+	var none: Array[PlacedPart] = []
+	var empty := AircraftFlight.Airframe.aggregate(none)
+	_check(empty.mass == 0.0 and empty.wing_area == 0.0, "空零件聚合为零且不崩")
+	_check(AircraftFlight.stall_speed(AircraftFlight.SEA_LEVEL_DENSITY, empty) == 0.0,
+		"无升力面时失速速度定义为 0")
 
 
 ## 挑地表最高点最低的候选区，留出尽可能多的净空高度（区块高度上限 64）。

@@ -103,6 +103,17 @@ static func spawn(parent: Node, at: Vector3, heading: float = 0.0) -> Aircraft:
 	return craft
 
 
+## 用零件清单拼装一架飞机（Phase 1 装配入口；Phase 2 建造编辑器经此生成）。
+## 与 spawn() 同一路径，只把默认气动框换成零件清单的聚合结果——
+## 质量/翼面积/推力/重心等整机特性随之由这套零件决定。
+## （注：Phase 1 视觉仍用整机机模，零件逐块外观在 Phase 2 建造编辑器接入。）
+static func from_loadout(
+	parent: Node, at: Vector3, heading: float, parts: Array[PlacedPart]) -> Aircraft:
+	var craft := spawn(parent, at, heading)
+	craft._state.airframe = AircraftFlight.Airframe.aggregate(parts)
+	return craft
+
+
 ## 落位：把机轮放到地面上（at 为地面点）。
 func place(at: Vector3, heading: float = 0.0) -> void:
 	_state = AircraftFlight.make_state(
