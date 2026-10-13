@@ -73,6 +73,13 @@ func setup(player: Player) -> void:
 	_player = player
 
 
+## 注入 main 持有的持久化解锁实例（user://unlocks.json 读出的那个）——
+## 购买/解锁状态跨会话保留。未注入时退回面板自建的临时实例（探针场景）。
+func set_unlocks(unlocks: PartUnlocks) -> void:
+	if unlocks != null:
+		_unlocks = unlocks
+
+
 func _ready() -> void:
 	# 默认隐藏：V 键唤出。Control 默认 visible=true，必须先置否，
 	# 否则 open() 的 visible 守卫会早退、界面也会常驻遮挡游戏画面。
@@ -492,6 +499,7 @@ func _try_buy(id: String) -> void:
 		if _player != null:
 			_player.inventory.consume_item(ItemTypes.EMERALD, int(res.get("spent", 0)))
 		_selected_id = id
+		_unlocks.save()  # 购买即落盘：解锁跨会话保留
 		_set_status("已解锁 %s！" % data.display)
 	else:
 		var reason := String(res.get("reason", ""))

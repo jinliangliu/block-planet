@@ -13,6 +13,9 @@ extends Node3D
 @onready var _mob_spawner: MobSpawner = $MobSpawner
 @onready var _env: Environment = ($WorldEnvironment as WorldEnvironment).environment
 var _build_screen: BuildScreen
+## 零件解锁状态（跨会话持久化 user://unlocks.json）：main 持有唯一实例，
+## 注入 build_screen——任务赚的绿宝石买的零件，下次进游戏还在（D-032 Phase 4b-ii）。
+var _unlocks := PartUnlocks.load_or_new()
 
 
 func _ready() -> void:
@@ -58,6 +61,7 @@ func _ready() -> void:
 	_build_screen = BuildScreen.new()
 	$UI.add_child(_build_screen)
 	_build_screen.setup(_player)
+	_build_screen.set_unlocks(_unlocks)
 	_build_screen.test_fly_requested.connect(_on_test_fly_requested)
 
 	# 首次进入游戏先选地图；之后随时可用 M 键重新选择。

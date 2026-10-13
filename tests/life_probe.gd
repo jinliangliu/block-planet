@@ -2575,6 +2575,9 @@ func _spawn_mob(parent: Node, mob_type: Mob.MobType, player: Player, dn: DayNigh
 
 
 ## 击杀生物并收集 10 帧内其父节点下出现的掉落物 ID（去重），随后清理掉落物。
+## 掉落物若生成在玩家拾取半径（2.4m）内会被自动收入背包而从场景消失，
+## 因此同时把「背包内增量」计入结果——生物死亡前会随机游走，仅凭场景节点
+## 统计会偶发漏记（曾因牛落点随机漂移误报「成体牛不掉兽皮」）。
 func _kill_and_collect(parent: Node, mob: Mob) -> Array[int]:
 	var ids: Array[int] = []
 	if mob == null:
@@ -2582,6 +2585,10 @@ func _kill_and_collect(parent: Node, mob: Mob) -> Array[int]:
 	var holder := mob.get_parent()
 	if holder == null:
 		return ids
+	# 注意：mob 被击杀后会 queue_free，玩家引用必须在击杀前取出，
+	# 否则 10 帧后访问已释放实例会抛「previously freed」。
+	var target_player := mob.player
+	var before := _inventory_snapshot(target_player)
 	mob.take_damage(99)
 	for i in range(10):
 		await get_tree().process_frame
@@ -2591,7 +2598,24 @@ func _kill_and_collect(parent: Node, mob: Mob) -> Array[int]:
 				if not ids.has(drop.item_id):
 					ids.append(drop.item_id)
 				drop.queue_free()
+	var after := _inventory_snapshot(target_player)
+	for id: int in after.keys():
+		if int(after[id]) > int(before.get(id, 0)) and not ids.has(id):
+			ids.append(id)
 	return ids
+
+
+## 背包内各物品 ID 的总数快照（用于区分「场景里的掉落」与「已自动拾取」）。
+func _inventory_snapshot(player: Player) -> Dictionary:
+	var snap: Dictionary = {}
+	if player == null or not is_instance_valid(player) or player.inventory == null:
+		return snap
+	var inv := player.inventory
+	for i in range(inv.slots.size()):
+		var id := inv.get_item(i)
+		if id != BlockTypes.Block.AIR:
+			snap[id] = int(snap.get(id, 0)) + inv.get_count(i)
+	return snap
 
 
 ## 背包内所有槽位的数量之和（垂钓收益断言用）。

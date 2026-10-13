@@ -753,6 +753,18 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
   放弃原因正确/关闭信号。回归：mission_probe、build_screen_probe、smoke_test、
   life_probe（含加固）全 OK；flight_hud_shot fails=0。
 
+#### Phase 4b-ii · 解锁状态持久化 — 已完成
+- `PartUnlocks` 增补持久化层：`to_dict` / `from_dict` / `save(path)` /
+  `load_or_new(path)`（缺失/损坏文件安全退回「仅默认套件」），默认落盘
+  `user://unlocks.json`。
+- main 持有唯一实例（`_unlocks := PartUnlocks.load_or_new()`）并注入
+  `build_screen.set_unlocks()`；build_screen 购买成功即 `save()`——任务赚的绿宝石
+  买的零件跨会话保留，「改造」段的状态不再随重载丢失。
+- 验证：`tests/unlock_probe.tscn` 38 项全 PASS（新增 7 项持久化断言：写入成功/
+  读档后进阶零件与集合一致/已解锁价仍 0/无文件退默认/损坏文件安全退回）。
+- 教训（探针判据）：脚本编译失败时 Godot 仍可能打印 `_OK` 标记（探针 stub 继续跑），
+  **验收必须同时确认零 SCRIPT ERROR 与 PASS 计数**，不能只看 OK 行。
+
 ---
 
 ## 附：待定/开放问题

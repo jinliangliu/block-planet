@@ -80,3 +80,33 @@ func _run_unlock_checks() -> void:
 	var r5 := u.purchase("nonexistent", 99)
 	_check(not r5["ok"] and r5["reason"] == "unknown_part",
 		"未知零件购买安全失败")
+
+	# ── 持久化往返（Phase 4b-ii：user://unlocks.json）────────
+	var tmp_path := "user://test_unlocks_probe.json"
+	var abs_path := ProjectSettings.globalize_path(tmp_path)
+	DirAccess.remove_absolute(abs_path)  # 清掉上次残留，保证从零开始
+
+	_check(u.save(tmp_path), "解锁状态可写入 JSON")
+	var u2 := PartUnlocks.load_or_new(tmp_path)
+	_check(u2.is_unlocked("turbine") and u2.is_unlocked("long_wing"),
+		"读档后进阶零件仍解锁（turbine/long_wing）")
+	_check(u2.unlocked_ids() == u.unlocked_ids(),
+		"读档后解锁集合与存档一致（%d 项）" % u.unlocked_ids().size())
+	_check(u2.cost_of("turbine") == 0, "读档后已解锁价仍为 0")
+
+	# 缺失文件：安全退回「仅默认套件」。
+	var u3 := PartUnlocks.load_or_new("user://definitely_missing_unlocks.json")
+	_check(not u3.is_unlocked("turbine"), "无存档文件时进阶零件保持锁定")
+	_check(u3.is_unlocked(PartRegistry.default_loadout()[0].data.id),
+		"无存档文件时默认套件仍解锁")
+
+	# 损坏文件：解析失败也安全退回，不崩。
+	var bad_path := "user://test_unlocks_bad.json"
+	var bf := FileAccess.open(bad_path, FileAccess.WRITE)
+	bf.store_string("{ 这不是合法 JSON ]]")
+	bf.close()
+	var u4 := PartUnlocks.load_or_new(bad_path)
+	_check(not u4.is_unlocked("turbine"), "损坏存档安全退回默认解锁集")
+
+	DirAccess.remove_absolute(abs_path)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(bad_path))
