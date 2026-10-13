@@ -36,6 +36,7 @@ var _map_selector: MapSelector
 var _manual: ManualPanel
 var _bestiary: BestiaryUI
 var _quest_panel: QuestPanel
+var _mission_panel: MissionPanel
 var _inventory_panel: InventoryPanel
 var _toast_label: Label
 var _toast_tween: Tween
@@ -151,6 +152,7 @@ func _build() -> void:
 	_build_bestiary(root)
 	_build_inventory_panel(root)
 	_build_quest_panel(root)
+	_build_mission_panel(root)
 	_build_toast(root)
 	_build_death_overlay(root)
 	_build_flight_panel(root)
@@ -187,6 +189,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			close_quest_panel()
 			get_viewport().set_input_as_handled()
 		return
+	# 飞行任务面板同为模态窗口：ESC / K 关闭。
+	if _mission_panel != null and _mission_panel.is_open():
+		if event is InputEventKey and event.pressed and not event.echo \
+				and (event.keycode == KEY_ESCAPE or event.keycode == KEY_K):
+			close_mission_panel()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.is_action_pressed("toggle_craft"):
 			_toggle_craft_panel()
@@ -205,6 +214,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			open_bestiary()
 		elif event.is_action_pressed("toggle_quests"):
 			open_quest_panel()
+		elif event.is_action_pressed("toggle_missions"):
+			open_mission_panel()
 		elif event.keycode == KEY_ESCAPE and _box_overlay != null and _box_overlay.visible:
 			set_box_open(false)
 			get_viewport().set_input_as_handled()
@@ -2002,7 +2013,8 @@ func _any_overlay_open() -> bool:
 		or (_smelt_overlay != null and _smelt_overlay.visible) \
 		or (_manual != null and _manual.is_open()) \
 		or (_bestiary != null and _bestiary.is_open()) \
-		or (_quest_panel != null and _quest_panel.is_open())
+		or (_quest_panel != null and _quest_panel.is_open()) \
+		or (_mission_panel != null and _mission_panel.is_open())
 
 
 func open_manual() -> void:
@@ -2085,6 +2097,50 @@ func close_quest_panel() -> void:
 func _on_quest_panel_closed() -> void:
 	_set_player_frozen(false)
 	_on_manual_closed()
+
+
+## 飞行任务面板：模态窗口，冻结玩家（同任务与成就面板）。
+func _build_mission_panel(root: Control) -> void:
+	_mission_panel = MissionPanel.new()
+	_mission_panel.closed.connect(_on_mission_panel_closed)
+	_mission_panel.mission_reward.connect(_on_mission_panel_reward)
+	root.add_child(_mission_panel)
+
+
+func open_mission_panel() -> void:
+	if _mission_panel == null:
+		return
+	_mission_panel.open()
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_mission_panel() -> void:
+	if _mission_panel == null:
+		return
+	_mission_panel.close()
+
+
+func _on_mission_panel_closed() -> void:
+	_set_player_frozen(false)
+	_on_manual_closed()
+
+
+## main 每物理帧调用：把飞行遥测透传给任务面板（仅 RUNNING 时生效）。
+func feed_mission(dt: float, telemetry: Dictionary) -> void:
+	if _mission_panel != null:
+		_mission_panel.feed(dt, telemetry)
+
+
+## 任务成功奖励：绿宝石直接入库存（货币复用 ItemTypes.EMERALD），并 Toast。
+func _on_mission_panel_reward(emeralds: int, success: bool, _result: Dictionary) -> void:
+	if not success or emeralds <= 0:
+		return
+	if _player != null:
+		_player.inventory.add_item(ItemTypes.EMERALD, emeralds)
+		_refresh_hotbar()
+	_show_toast("任务奖励：绿宝石 ×%d" % emeralds)
 
 
 ## 进度信号 → 面板刷新 / 奖励入包 / 顶部 Toast 提示。

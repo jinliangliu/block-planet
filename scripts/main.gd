@@ -66,6 +66,25 @@ func _ready() -> void:
 		_hud.open_map_selector()
 
 
+## 飞行任务遥测：玩家在机上时，每物理帧把真实飞行状态喂给 HUD 任务面板
+## （MissionManager 的遥测约定：altitude_agl/speed(km/h)/position/on_ground/
+## vertical_speed/wrecked）。不在机上则无需喂帧——面板只在 RUNNING 时透传。
+func _physics_process(delta: float) -> void:
+	var craft := _player.aircraft()
+	if craft == null or not is_instance_valid(craft):
+		return
+	var snap := craft.snapshot()
+	var telemetry := {
+		"altitude_agl": float(snap.get("altitude_agl", 0.0)),
+		"speed": float(snap.get("kmh", 0.0)),
+		"position": craft.global_position,
+		"on_ground": craft.is_on_floor(),
+		"vertical_speed": craft.velocity.y,
+		"wrecked": craft.is_wrecked(),
+	}
+	_hud.feed_mission(delta, telemetry)
+
+
 ## 选图确认：记录区域并重载场景，由新实例按该区域重新生成世界。
 func _on_region_entered(region_id: int) -> void:
 	GameState.carried_inventory = _player.inventory

@@ -735,6 +735,24 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
 - 验证：`tests/build_screen_probe.tscn` 26 项断言全 PASS（BUILD_SCREEN_PROBE_OK）：
   开/关、默认蓝图加载、放置/旋转/镜像改动、save→load 往返一致、试飞入口存在。
 
+#### Phase 4b-i · 飞行任务面板（mission_panel）— 已完成
+- 新增 `scripts/ui/mission_panel.gd`（`MissionPanel extends Control`）：K 键唤出的模态
+  面板（冻结玩家，同任务与成就面板惯例）——三任务卡（标题/说明/奖励/开始）、进行中卡片
+  （计时/目标摘要/放弃）、结果行；面板自持 `MissionManager`，外部每物理帧
+  `feed(dt, telemetry)` 喂真实遥测（altitude_agl/speed/position/on_ground/
+  vertical_speed/wrecked，与 3a 约定一致）。
+- `MissionManager` 增补 `abandon()`（放弃按钮，原因「主动放弃」）与 `elapsed()`（计时）。
+- HUD 接线：`_build_mission_panel` + K 键/ESC 模态处理 + `_any_overlay_open` 纳入；
+  成功奖励经 `_on_mission_panel_reward` 直接入库存（绿宝石 204）+ Toast——「任务→
+  奖励」闭合到现有货币体系，不建平行经济。
+- main 接线：`_physics_process` 在玩家登机时逐帧组装遥测并 `_hud.feed_mission()`。
+- 加固 life_probe：`_water_spawn_position` 贴底分支增加「正下方为实体」校验——水底
+  悬空（区块未生成/世界边缘）时螃蟹坠入虚空的偶发失败根因是落点选择缺陷，非物理缺陷。
+- 验证：`tests/mission_panel_probe.tscn` 15 项全 PASS（MISSION_PANEL_OK）：初始隐藏/
+  三任务载入/开面板/开始→达标遥测→成功且奖励 5 绿宝石只发一次/结果行/结束后喂帧安全/
+  放弃原因正确/关闭信号。回归：mission_probe、build_screen_probe、smoke_test、
+  life_probe（含加固）全 OK；flight_hud_shot fails=0。
+
 ---
 
 ## 附：待定/开放问题

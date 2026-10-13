@@ -75,6 +75,17 @@ func timeout() -> void:
 		_finish(false, "超时未达成")
 
 
+## 主动放弃（UI 放弃按钮）：当前仍 RUNNING 则判失败，原因区别于超时。
+func abandon() -> void:
+	if status == Status.RUNNING:
+		_finish(false, "主动放弃")
+
+
+## 已进行时长（秒）；非 RUNNING 时为定格值，供面板计时显示。
+func elapsed() -> float:
+	return _elapsed
+
+
 func _step_takeoff(agl: float, speed: float, on_ground: bool) -> void:
 	if on_ground:
 		return

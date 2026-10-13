@@ -2553,8 +2553,16 @@ func _water_spawn_position(world: World, center: Vector2i, prefer_bottom: bool) 
 			var y := (World.SEA_LEVEL - depth + 1) if prefer_bottom else (World.SEA_LEVEL - depth / 2)
 			for offset in [0, 1, -1, 2, -2]:
 				var cell := Vector3i(wx, y + offset, wz)
-				if world.get_block(cell) == BlockTypes.Block.WATER:
-					return Vector3(wx + 0.5, float(cell.y) + 0.1, wz + 0.5)
+				if world.get_block(cell) != BlockTypes.Block.WATER:
+					continue
+				# 贴底 spawn（蟹）额外要求正下方是实体：水底若悬空（区块尚未
+				# 生成 / 世界边缘），螃蟹会坠入虚空——该断言偶发失败过，
+				# 根因是落点选择缺陷而非物理缺陷。
+				if prefer_bottom:
+					var below := world.get_block(Vector3i(cell.x, cell.y - 1, cell.z))
+					if below == BlockTypes.Block.AIR or below == BlockTypes.Block.WATER:
+						continue
+				return Vector3(wx + 0.5, float(cell.y) + 0.1, wz + 0.5)
 	return Vector3(0.0, -1.0, 0.0)
 
 
