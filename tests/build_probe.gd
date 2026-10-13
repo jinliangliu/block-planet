@@ -1,0 +1,155 @@
+extends Node
+## 建造编辑器探针（D-032 Phase 2）：纯逻辑验证——蓝图的合法性校验、
+## 重心/升力中心/推力矢量、序列化存读、对称镜像、增删旋转、可视化建节点。
+## 无世界依赖，直接驱动 Blueprint / BuildEditor / BuildVisualizer。
+## 运行：Godot_v4.6.3-stable_win64_console.exe --headless --path . res://tests/build_probe.tscn
+
+var _failed := 0
+
+
+func _ready() -> void:
+	await _run()
+	_finish()
+
+
+func _run() -> void:
+	_check_default_valid()
+	_check_center_of_gravity()
+	_check_aggregates()
+	_check_orphan_invalid()
+	_check_no_fuselage_invalid()
+	_check_symmetry_mirror()
+	_check_save_load_roundtrip()
+	_check_remove_rotate()
+	_check_visualizer()
+
+
+## 默认套件合法（含机身且全连通）。
+func _check_default_valid() -> void:
+	var e := BuildEditor.new()
+	e.blueprint.parts = PartRegistry.default_loadout()
+	var v: Dictionary = e.validate()
+	_check(v["ok"], "默认套件合法（含机身且全连通）")
+
+
+## 蓝图重心 = Airframe 聚合重心（单一数据源，不应有二套计算）。
+func _check_center_of_gravity() -> void:
+	var bp := Blueprint.new()
+	bp.parts = PartRegistry.default_loadout()
+	var cog := bp.center_of_gravity()
+	var ref := AircraftFlight.Airframe.aggregate(bp.parts).com
+	_check(cog.distance_to(ref) < 1e-6,
+		"蓝图重心 = 聚合重心（%.3f,%.3f,%.3f）" % [cog.x, cog.y, cog.z])
+
+
+## 蓝图聚合与 D-031 标定一致（经 Blueprint 路径复算）。
+func _check_aggregates() -> void:
+	var bp := Blueprint.new()
+	bp.parts = PartRegistry.default_loadout()
+	var af := bp.aggregate()
+	_check(absf(af.mass - 240.0) < 0.01, "聚合质量 = 240 kg（%.1f）" % af.mass)
+	_check(absf(af.wing_area - 14.0) < 0.01, "聚合翼面积 = 14 m²（%.1f）" % af.wing_area)
+	_check(absf(af.thrust_max - 1650.0) < 0.01, "聚合推力 = 1650 N（%.0f）" % af.thrust_max)
+	_check(absf(af.cd0 - 0.075) < 1e-6, "聚合 cd0 = 0.075（%.3f）" % af.cd0)
+	var tv: Dictionary = bp.thrust_vector()
+	_check(absf(tv["magnitude"] - 1650.0) < 0.01, "推力矢量量级 = 1650 N")
+	_check(tv["dir"].is_equal_approx(Vector3(0, 0, -1)), "推力矢量指向机头 -Z")
+
+
+## 孤立零件（不与机身面邻接）→ 非法。
+func _check_orphan_invalid() -> void:
+	var e := BuildEditor.new()
+	e.place(PartRegistry.by_id("fuselage"), Vector3i(0, 0, 0), 0, false)
+	e.place(PartRegistry.by_id("wing"), Vector3i(20, 1, 0), 0, false)
+	var v: Dictionary = e.validate()
+	_check(not v["ok"], "孤立翼（不连机身）→ 非法")
+	var joined := ""
+	for s in v["errors"]:
+		joined += s + ";"
+	_check(joined.contains("orphan"), "孤立件报错含 orphan（%s）" % joined)
+
+
+## 无机身 → 非法（机身是结构根）。
+func _check_no_fuselage_invalid() -> void:
+	var e := BuildEditor.new()
+	e.place(PartRegistry.by_id("wing"), Vector3i(0, 1, 0), 0, false)
+	var v: Dictionary = e.validate()
+	_check(not v["ok"] and v["errors"].has("no_fuselage"), "无机身 → 报 no_fuselage")
+
+
+## X 轴对称镜像：放右侧翼，镜像出左侧翼。
+func _check_symmetry_mirror() -> void:
+	var e := BuildEditor.new()
+	e.place(PartRegistry.by_id("wing"), Vector3i(1, 1, -2), 0, true)
+	_check(e.blueprint.parts.size() == 2, "镜像放置产生 2 个零件（实 %d）" % e.blueprint.parts.size())
+	var mirrored := false
+	for p in e.blueprint.parts:
+		if p.cell.x == -24:  # 1 + 24 - 1 → -(-24) 的镜像锚
+			mirrored = true
+	_check(mirrored, "镜像件锚格落于 x=-24（对称于 x=0）")
+
+
+## 蓝图存读：写 JSON → 读回，零件集合一致。
+func _check_save_load_roundtrip() -> void:
+	var path := "user://build_probe_test.json"
+	var e := BuildEditor.new()
+	e.blueprint.parts = PartRegistry.default_loadout()
+	e.blueprint.title = "probe_ship"
+	e.save(path)
+	var loaded := BuildEditor.load(path)
+	_check(loaded != null, "从 JSON 读回蓝图成功")
+	if loaded != null:
+		_check(loaded.blueprint.parts.size() == 7, "读回零件数一致（7）")
+		_check(loaded.blueprint.title == "probe_ship", "读回标题一致")
+		var ok := true
+		for i in loaded.blueprint.parts.size():
+			var a := loaded.blueprint.parts[i]
+			var b := e.blueprint.parts[i]
+			if a.data.id != b.data.id or a.cell != b.cell or a.rot != b.rot:
+				ok = false
+		_check(ok, "读回每件 id/格/旋转一致")
+
+
+## 删除与旋转：删除减少计数；旋转步进 mod 4。
+func _check_remove_rotate() -> void:
+	var e := BuildEditor.new()
+	e.place(PartRegistry.by_id("wing"), Vector3i(1, 1, -2), 0, true)
+	var before := e.blueprint.parts.size()
+	e.remove_at(Vector3i(1, 1, -2), true)
+	_check(e.blueprint.parts.size() == before - 2, "带镜像删除一次移除 2 件")
+	e.clear()
+	e.place(PartRegistry.by_id("engine"), Vector3i(-1, 0, -9), 0, false)
+	var rot0 := e.blueprint.parts[0].rot
+	e.rotate_at(Vector3i(-1, 0, -9), false)
+	_check(e.blueprint.parts[0].rot == wrapi(rot0 + 1, 0, 4), "旋转一次 rot 步进 +1 mod 4")
+
+
+## 可视化：根据蓝图生成重心/升力中心/推力线标记节点。
+func _check_visualizer() -> void:
+	var bp := Blueprint.new()
+	bp.parts = PartRegistry.default_loadout()
+	var viz := BuildVisualizer.new()
+	add_child(viz)
+	viz.rebuild(bp)
+	var count := viz.get_child_count()
+	_check(count >= 3, "可视化生成 ≥3 个标记（实 %d）" % count)
+	_check(viz.has_node("cog"), "含重心标记 cog")
+	_check(viz.has_node("lift"), "含升力中心标记 lift")
+	_check(viz.has_node("thrust"), "含推力线标记 thrust")
+
+
+func _finish() -> void:
+	if _failed == 0:
+		print("BUILD_PROBE_OK")
+		get_tree().quit(0)
+	else:
+		print("BUILD_PROBE_FAILED count=%d" % _failed)
+		get_tree().quit(1)
+
+
+func _check(cond: bool, label: String) -> void:
+	if cond:
+		print("PASS: " + label)
+	else:
+		_failed += 1
+		print("FAIL: " + label)

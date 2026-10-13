@@ -113,7 +113,7 @@ static func default_loadout() -> Array[PlacedPart]:
 	loadout.append(PlacedPart.make(by_id("wing"), Vector3i(-12, 1, -2)))
 	loadout.append(PlacedPart.make(by_id("tail"), Vector3i(-5, 1, 5)))
 	loadout.append(PlacedPart.make(by_id("engine"), Vector3i(-1, 0, -9)))
-	loadout.append(PlacedPart.make(by_id("propeller"), Vector3i(-1, 1, -11)))
+	loadout.append(PlacedPart.make(by_id("propeller"), Vector3i(-1, 1, -10)))
 	loadout.append(PlacedPart.make(by_id("gear"), Vector3i(-2, -2, -3)))
 	loadout.append(PlacedPart.make(by_id("fuel_tank"), Vector3i(-1, 0, -3)))
 	return loadout

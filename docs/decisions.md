@@ -653,11 +653,26 @@ C172 / F-16 / A-10 / 747 四机型标定，另有襟翼、起落架、配平、�
 - 聚合不改变任何已验证飞行动作的数值——这是本重构的硬约束，由 flight_probe
   的「聚合一致性」与「动作复现」双侧断言守护。
 
-**验证**：`tests/flight_probe.tscn` 新增 21 项聚合断言——Σ质量=240、
-Σ翼面积=14、Σ推力=1650、cd0=0.075、重心=质量加权平均、升力中心异于重心、
-拆机翼 → 失速速度升高（32.4 > 13.1 m/s）、加油箱 → 质量升且重心前移、
-空零件聚合为零且不崩；B~F 段动作数值与重构前一致（起飞第 142 帧、巡航
-136 km/h、爬升 +82.5 m）。回归：smoke_test / life_probe / flight_hud_shot。
+**Phase 2 落地（建造编辑器，已完成）**：
+- 新增 `blueprint.gd`（`Blueprint extends Resource`）：零件容器 + 序列化
+  （`to_dict`/`from_dict`，JSON 存读，不依赖 .tres）+ 聚合派生（重心/升力中心/
+  推力矢量委托 `Airframe`）+ 邻接连通合法性（`validate()`：必含机身，BFS 从
+  机身面邻接达全零件）。
+- 新增 `build_editor.gd`（`BuildEditor extends RefCounted`）：放置/删除/旋转、
+  X 轴对称镜像、清空、占用查询、`validate` 透传、`save/load` 包装——纯数据模型，
+  不含输入与渲染。
+- 新增 `build_visualizer.gd`（`BuildVisualizer extends Node3D`）：据 Blueprint 生成
+  重心(红)/升力中心(蓝)/推力线(箭头) 标记 Mesh，`rebuild()` 重建。
+- 修正：`Blueprint._cells_of` 由「仅展开 x/z」改为三维展开，否则多层零件的 y
+  被压扁、连通性误判（起落架/发动机/螺旋桨孤立）；并调 `default_loadout` 螺旋桨
+  锚 z=-11→-10 消除与发动机的 1 格缝隙，默认套件方能全连通。
+- 探针 `tests/build_probe.tscn` 守护：默认套件合法、重心=聚合重心、聚合数值一致、
+  孤立件/无机身非法、对称镜像、JSON 存读一致、增删旋转、可视化建节点。
+
+**验证**：`tests/flight_probe.tscn` 21 项聚合断言（同上）；`tests/build_probe.tscn`
+全绿（BUILD_PROBE_OK）。回归：smoke_test / life_probe / flight_hud_shot 均无回归。
+Phase 2 仍只动数据层与探针，未接入玩家输入 UI——交互（鼠标拾取/网格光标）留待
+Phase 3 试飞闭环时一并接入。
 
 ---
 
