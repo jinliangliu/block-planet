@@ -609,6 +609,13 @@ func is_riding() -> bool:
 	return _aircraft != null
 
 
+## 登机判定容差（m）：距机身碰撞盒最近点再放宽的距离。
+## 机模放大后（MODEL_SCALE=3）机身碰撞盒达 6.6 × 4.8 × 15.6 m，右键放机又固定
+## 落在身前 5 m 处——若只按「到重心原点 ≤ 4 m」判定，刚放好按 F、或站在机头/
+## 机尾旁按 F 都会误报「附近没有飞行器」。改为按碰撞盒最近点 + 容差判定
+## （D-032 玩家反馈）。
+const BOARD_MARGIN := 1.6
+
 ## F 键：驾驶中下机；徒步时登上附近的飞行器。
 func _toggle_aircraft() -> void:
 	if _aircraft != null:
@@ -616,24 +623,35 @@ func _toggle_aircraft() -> void:
 		return
 	var craft := nearest_aircraft()
 	if craft == null:
-		Events.notice.emit("附近没有飞行器——手持飞机右键，在平地上放一架。")
+		Events.notice.emit("附近没有飞行器——走到机身跟前按 F 登机。")
 		return
 	ride_aircraft(craft)
 
 
-## 最近的可用飞行器：未解体、无人驾驶，且在本机 4 m 内。
+## 最近的可用飞行器：未解体、无人驾驶，且玩家贴近机身碰撞盒。
+## 距离按「玩家到机身碰撞盒最近点」计算（而非到重心原点的直线距离），
+## 否则机身两端各约 4 m 内按 F 都会失败——机模越大越离谱。
 func nearest_aircraft() -> Aircraft:
 	var best: Aircraft = null
-	var best_distance := 4.0
+	var best_distance := BOARD_MARGIN
 	for node in get_tree().get_nodes_in_group("aircraft"):
 		var craft := node as Aircraft
 		if craft == null or craft.is_wrecked() or craft.piloted:
 			continue
-		var distance := global_position.distance_to(craft.global_position)
+		var distance := _board_distance(craft)
 		if distance < best_distance:
 			best_distance = distance
 			best = craft
 	return best
+
+
+## 玩家到机身碰撞盒最近点的距离（m）：把玩家位置变换到机体局部坐标，
+## 夹到碰撞盒（含碰撞盒中心偏移）范围内后取距离。碰撞盒只包机身不含机翼。
+func _board_distance(craft: Aircraft) -> float:
+	var local := craft.to_local(global_position) - Aircraft.COLLIDER_CENTER
+	var half: Vector3 = Aircraft.COLLIDER_SIZE * 0.5
+	var closest := local.clamp(-half, half)
+	return local.distance_to(closest)
 
 
 func get_selected_item() -> int:
