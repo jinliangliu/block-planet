@@ -194,6 +194,8 @@ func _show_intro(region_id: int) -> void:
 	_intro_title.text = String(data["title"])
 	_intro_subtitle.text = String(data["subtitle"])
 	_intro_body.text = String(data["intro"])
+	if RegionAtlas.has_airport(region_id):
+		_intro_body.text += "\n\n本区域建有带跑道的机场——出生点就在跑道旁，落地即可起飞。"
 	_detail_cards = RegionAtlas.cards_of(region_id)
 	for child in _card_row.get_children():
 		child.queue_free()
@@ -250,7 +252,7 @@ func _build_backdrop() -> void:
 	add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍"
+	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；标「机场」的区域带跑道"
 	subtitle.add_theme_font_size_override("font_size", 16)
 	subtitle.add_theme_color_override("font_color", Color(0.72, 0.80, 0.92))
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

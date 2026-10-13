@@ -48,6 +48,11 @@ const FISH_BITE_WINDOW := 1.6
 const ATTACK_DAMAGE := 1
 const ATTACK_COOLDOWN_MS := 500
 const DOUBLE_TAP_FLY_MS := 300
+## 双击 F 收起飞机：从「下机 / 登机」切换为「把停着的飞机收回到背包」。
+const DOUBLE_TAP_PICKUP_MS := 350
+## 回收飞机的搜索半径（m，按机体重心原点）：比登机判定（碰撞盒 + 1.6 m 容差）
+## 更宽松，因为下机后玩家被弹到机身侧旁约 5 m，单按 F 下机后立刻再按 F 仍能找到。
+const PICKUP_RANGE := 7.0
 const CAM_STEP := 1.8
 const CAM_DISTANCE_MAX := 9.0
 ## 驾驶时的追尾距离上限：机模放大后（翼展 24 格）9 格距离会被机身糊满屏。
@@ -115,6 +120,8 @@ var _swing_cooldown := 0.0
 var camera_distance := 0.0
 var _last_attack_ms := 0
 var _last_jump_ms := 0
+## 上次按 F 的时间戳（ms）：用于双击 F 收起飞机。
+var _last_aircraft_f_ms := 0
 var _last_hunger_int := MAX_HUNGER
 var _stuck_frames := 0
 var _hurt_invuln := 0.0
@@ -191,9 +198,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				select_slot(i)
 		if event.is_action_pressed("jump") and _aircraft == null:
 			_handle_jump_tap()
-		# F：驾驶中下机；徒步时登上附近的飞行器。
+		# F：驾驶中下机；徒步时登上附近的飞行器。双击 F 把停着的飞机收回背包。
 		if event.is_action_pressed("aircraft_exit") and not _dead:
-			_toggle_aircraft()
+			_handle_aircraft_key()
 
 	if event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = (
@@ -616,16 +623,62 @@ func is_riding() -> bool:
 ## （D-032 玩家反馈）。
 const BOARD_MARGIN := 1.6
 
-## F 键：驾驶中下机；徒步时登上附近的飞行器。
-func _toggle_aircraft() -> void:
+## F 键分发：单按 = 登机 / 下机；双击 = 把停着的飞机收回背包。
+## 双击判据：距上次按 F ≤ DOUBLE_TAP_PICKUP_MS。下机后玩家被弹到机身侧旁约 5 m，
+## 故回收搜索用更宽松的 PICKUP_RANGE（按机体重心原点）。
+func _handle_aircraft_key() -> void:
+	var now := Time.get_ticks_msec()
+	var double := now - _last_aircraft_f_ms <= DOUBLE_TAP_PICKUP_MS
+	_last_aircraft_f_ms = now
+
 	if _aircraft != null:
-		exit_aircraft()
+		if double:
+			_pick_up_aircraft(_aircraft)
+		else:
+			exit_aircraft()
 		return
-	var craft := nearest_aircraft()
+
+	# 徒步：就近停车场机。
+	var craft := _pickup_target() if double else nearest_aircraft()
 	if craft == null:
-		Events.notice.emit("附近没有飞行器——走到机身跟前按 F 登机。")
+		if not double:
+			Events.notice.emit("附近没有飞行器——走到机身跟前按 F 登机。")
 		return
-	ride_aircraft(craft)
+	if double:
+		_pick_up_aircraft(craft)
+	else:
+		ride_aircraft(craft)
+
+
+## 收回停着的飞机：从世界移除；生存模式退回 1 个飞行器道具（与放置时的消耗对应），
+## 创造 / 探索不增不减（放置本就不消耗）。已解体或正在驾驶的不处理。
+func _pick_up_aircraft(craft: Aircraft) -> void:
+	if craft == null or not is_instance_valid(craft) or craft.is_wrecked():
+		return
+	if _aircraft == craft:
+		exit_aircraft()
+	if GameState.is_survival():
+		inventory.add_item(ItemTypes.AIRCRAFT, 1)
+		Events.notice.emit("✈️ 飞机已收回（背包 +1）。")
+	else:
+		Events.notice.emit("✈️ 飞机已收回。")
+	craft.queue_free()
+
+
+## 回收目标：未解体、无人驾驶，且在 PICKUP_RANGE（到机体重心原点）内的就近一架。
+## 比登机判定更宽松——下机后被弹到机身侧旁约 5 m，双击 F 仍能命中。
+func _pickup_target() -> Aircraft:
+	var best: Aircraft = null
+	var best_distance := PICKUP_RANGE
+	for node in get_tree().get_nodes_in_group("aircraft"):
+		var craft := node as Aircraft
+		if craft == null or craft.is_wrecked() or craft.piloted:
+			continue
+		var distance := global_position.distance_to(craft.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = craft
+	return best
 
 
 ## 最近的可用飞行器：未解体、无人驾驶，且玩家贴近机身碰撞盒。

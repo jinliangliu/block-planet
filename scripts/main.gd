@@ -42,10 +42,19 @@ func _ready() -> void:
 
 	_world.set_player(_player)
 	_player.day_night_ref = _day_night
+	# 机场先于出生点生成：带机场的区域把出生点改写到跑道南段，
+	# 玩家开局即站在跑道上；机场位置避开村庄，互不重叠。
+	var airport_spawn := Vector3.ZERO
+	if RegionAtlas.has_airport(GameState.current_region):
+		airport_spawn = AirportBuilder.new().build(_world, _airport_center(GameState.current_region))
 	# 村庄先于出生点生成：亚洲出生点锚定在村庄整平区内，扫描时读到的
 	# 必须是整平后的 GRASS+空气（set_block_deferred 的数据写入是同步的）。
 	_build_village()
-	var spawn_pos := _find_spawn_position()
+	var spawn_pos: Vector3
+	if airport_spawn != Vector3.ZERO:
+		spawn_pos = airport_spawn
+	else:
+		spawn_pos = _find_spawn_position()
 	_player.global_position = spawn_pos
 	_player.set_spawn_position(spawn_pos)
 	_player.setup_world(_world)
@@ -129,6 +138,14 @@ func _build_village() -> void:
 	]:
 		var builder := VillageBuilder.new()
 		builder.build(_world, _player, _day_night, self, offset)
+
+
+## 机场中心：亚洲村庄在原点附近，机场放到东南角（96,96）避开村庄；
+## 其余大陆区域出生点本就在 (8,8) 附近，机场即落其旁，开局即达跑道。
+func _airport_center(region_id: int) -> Vector3i:
+	if region_id == RegionAtlas.ASIA:
+		return Vector3i(96, 0, 96)
+	return Vector3i(8, 0, 8)
 
 
 ## 出生点：在出生列按真实方块向上扫描"两格空气 + 实心底"，双脚精确落在

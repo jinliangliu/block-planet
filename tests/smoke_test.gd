@@ -37,15 +37,18 @@ func _run() -> void:
 	_check(on_ground, "玩家出生区域存在地形（出生列 %s）"
 		% Vector3i(player.global_position.floor()))
 
-	# 2) 放置方块并立即读取。
-	var target := Vector3i(20, 40, 20)
+	# 2) 放置方块并立即读取。目标取出生列附近（确保所在区块已加载——
+	#    机场/村庄会改变出生点，故不再硬编码 (20,40,20) 这类远离出生点的坐标）。
+	var _spawn_cell := Vector3i(player.global_position.floor())
+	var target := Vector3i(_spawn_cell.x + 4, _spawn_cell.y + 8, _spawn_cell.z + 4)
 	world.set_block(target, BlockTypes.Block.STONE)
 	_check(world.get_block(target) == BlockTypes.Block.STONE, "set_block 后可立即读取")
 
-	# 3) 传送远离触发卸载，再返回验证修改留存（F-02 往返）。
+	# 3) 传送远离触发卸载，再返回验证修改留存（F-02 往返）。返回点对齐目标列，
+	#    保证该区块在玩家回到出生区域时被重新加载、且修改仍在。
 	player.global_position = Vector3(200.5, 40.0, 200.5)
 	await _wait_frames(TELEPORT_FRAMES)
-	player.global_position = Vector3(8.5, 40.0, 8.5)
+	player.global_position = Vector3(target.x + 0.5, 40.0, target.z + 0.5)
 	await _wait_frames(TELEPORT_FRAMES)
 	_check(world.get_block(target) == BlockTypes.Block.STONE, "区块卸载重载后修改仍在")
 

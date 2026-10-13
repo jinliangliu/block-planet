@@ -299,6 +299,7 @@ const REGIONS := [
 		"scenery": "连绵丘陵、开阔草原与成片树林交错，是最经典的方块大陆。",
 		"seed": 12345,
 		"water": "normal",
+		"has_airport": true,
 		"base_height": 28.0,
 		"amplitude": 10.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -323,6 +324,7 @@ const REGIONS := [
 		"scenery": "平缓丘陵与密林相连，天空清冷明亮。",
 		"seed": 20260505,
 		"water": "normal",
+		"has_airport": true,
 		"base_height": 29.0,
 		"amplitude": 8.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -346,6 +348,7 @@ const REGIONS := [
 		"scenery": "金色沙丘与稀疏草原相接，天空泛暖黄。",
 		"seed": 20260606,
 		"water": "dry",
+		"has_airport": true,
 		"base_height": 28.0,
 		"amplitude": 11.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -369,6 +372,7 @@ const REGIONS := [
 		"scenery": "起伏山脊与平原交错，地形起伏最为丰富。",
 		"seed": 20260707,
 		"water": "normal",
+		"has_airport": true,
 		"base_height": 28.0,
 		"amplitude": 11.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -392,6 +396,7 @@ const REGIONS := [
 		"scenery": "高耸山脊与浓密雨林相接，天光微绿。",
 		"seed": 20260808,
 		"water": "normal",
+		"has_airport": true,
 		"base_height": 27.0,
 		"amplitude": 13.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -415,6 +420,7 @@ const REGIONS := [
 		"scenery": "低矮沙地与零散草原相接，天空泛暖。",
 		"seed": 20260909,
 		"water": "dry",
+		"has_airport": true,
 		"base_height": 27.0,
 		"amplitude": 9.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -492,6 +498,12 @@ static func region_of_cell(row: int, col: int) -> int:
 
 static func profile(region_id: int) -> Dictionary:
 	return REGIONS[clampi(region_id, 0, COUNT - 1)]
+
+
+## 区域是否建有带跑道的机场（地图标注 + 世界生成共用）。
+static func has_airport(region_id: int) -> bool:
+	var p: Dictionary = profile(region_id)
+	return bool(p.get("has_airport", false))
 
 
 static func title_of(region_id: int) -> String:

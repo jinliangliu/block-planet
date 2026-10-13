@@ -43,14 +43,30 @@ func _run() -> void:
 		"酿灶台方块存在于广场东侧 (54,%d,52)" % (base_y + 1),
 	)
 
-	# 亚洲（默认区域）出生点必须落在村庄旁：距广场中心 20 格内，
-	# 且脚下是整平区 GRASS——落地即见村，不用再找。
+	# 出生点位置随区域而异：
+	# - 带机场的区域（如亚洲）出生点改写到跑道旁（main.gd _airport_center +
+	#   AirportBuilder），落地即站在跑道上、可立即起飞；
+	# - 其余区域仍锚定村庄广场。故按 has_airport 分流断言。
 	var spawn_xz := Vector2(player.global_position.x, player.global_position.z)
-	var plaza_xz := Vector2(49.0, 53.0)
-	_check(
-		spawn_xz.distance_to(plaza_xz) < 20.0,
-		"亚洲出生点锚定村庄旁（距广场 %.1f 格）" % spawn_xz.distance_to(plaza_xz),
-	)
+	if RegionAtlas.has_airport(GameState.current_region):
+		# 验证出生点落在跑道上：出生列周围（脚下）存在跑道方块 COBBLESTONE/SAND。
+		var on_runway := false
+		var feet_y := int(player.global_position.y) - 1
+		for dx in range(-3, 4):
+			for dz in range(-3, 4):
+				var b := world.get_block(Vector3i(int(spawn_xz.x) + dx, feet_y, int(spawn_xz.y) + dz))
+				if b == BlockTypes.Block.COBBLESTONE or b == BlockTypes.Block.SAND:
+					on_runway = true
+					break
+			if on_runway:
+				break
+		_check(on_runway, "带机场区域出生点落在跑道旁（出生列 %s）" % Vector3i(player.global_position.floor()))
+	else:
+		var plaza_xz := Vector2(49.0, 53.0)
+		_check(
+			spawn_xz.distance_to(plaza_xz) < 20.0,
+			"出生点锚定村庄旁（距广场 %.1f 格）" % spawn_xz.distance_to(plaza_xz),
+		)
 
 	# 民居玻璃窗：位置由 VillageBuilder._build_house 决定（x=0/11 两侧墙 y+3）。
 	_check(
