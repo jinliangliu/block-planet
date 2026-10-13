@@ -39,7 +39,7 @@ func _ready() -> void:
 
 	# 点击「休闲」：难度变更并把辅助重置为预设（全开）。
 	var box := {"n": 0}
-	panel.settings_changed.connect(func(_d: int, _a: int): box["n"] += 1)
+	panel.settings_changed.connect(func(_d: int, _a: int, _l: int): box["n"] += 1)
 	panel._difficulty_buttons[0].pressed.emit()
 	_check(FlightSettings.current().difficulty == FlightSettings.Difficulty.CASUAL, "点击休闲后难度=休闲")
 	_check(FlightSettings.current().assist_level == FlightSettings.Assist.FULL,
@@ -63,6 +63,21 @@ func _ready() -> void:
 	var read := FlightSettings.load_or_new()
 	_check(read.difficulty == FlightSettings.Difficulty.EXPERT and read.assist_level == FlightSettings.Assist.OFF,
 		"设置已落盘，读回一致")
+
+	# 涂装行：四套涂装，点「落日橙」改 livery_index 并落盘；越界夹回。
+	_check(panel._livery_buttons.size() == AircraftLivery.count(),
+		"涂装按钮数=涂装数（%d）" % AircraftLivery.count())
+	_check(panel._livery_buttons[0].button_pressed, "默认选中第一套涂装")
+	panel._livery_buttons[3].pressed.emit()
+	_check(FlightSettings.current().livery_index == 3, "点落日橙后涂装索引=3")
+	_check(FlightSettings.current().livery_name() == "落日橙", "涂装名=落日橙")
+	_check(panel._livery_buttons[3].button_pressed and not panel._livery_buttons[0].button_pressed,
+		"涂装选中态同步")
+	var read2 := FlightSettings.load_or_new()
+	_check(read2.livery_index == 3, "涂装已落盘")
+	# 越界保护。
+	FlightSettings.current().set_livery(99)
+	_check(FlightSettings.current().livery_index == AircraftLivery.count() - 1, "涂装索引越界夹回")
 
 	# 关闭：隐藏 + closed 信号。
 	var closed := {"n": 0}

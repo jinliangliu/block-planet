@@ -2167,10 +2167,10 @@ func _on_settings_panel_closed() -> void:
 
 
 ## 设置改动即时生效（飞机每帧读 FlightSettings.current()）；此处只 Toast 确认。
-func _on_settings_changed(_difficulty: int, _assist_level: int) -> void:
+func _on_settings_changed(_difficulty: int, _assist_level: int, _livery_index: int) -> void:
 	var s := FlightSettings.current()
-	Events.notice.emit("飞行设置：难度 %s · 辅助 %s" % [
-		s.difficulty_name(), s.assist_name()])
+	Events.notice.emit("飞行设置：难度 %s · 辅助 %s · 涂装 %s" % [
+		s.difficulty_name(), s.assist_name(), s.livery_name()])
 
 
 ## main 每物理帧调用：把飞行遥测透传给任务面板（仅 RUNNING 时生效）。

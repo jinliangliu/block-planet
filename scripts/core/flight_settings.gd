@@ -47,6 +47,8 @@ const ASSIST_NAMES := {
 
 var difficulty: int = Difficulty.NORMAL
 var assist_level: int = Assist.PARTIAL
+## 涂装索引（AircraftLivery.LIVERIES 的下标，默认经典红白）。
+var livery_index := 0
 
 static var _current: FlightSettings = null
 
@@ -90,6 +92,14 @@ func set_assist_level(a: int) -> void:
 	assist_level = clampi(a, Assist.OFF, Assist.FULL)
 
 
+func set_livery(index: int) -> void:
+	livery_index = clampi(index, 0, AircraftLivery.count() - 1)
+
+
+func livery_name() -> String:
+	return AircraftLivery.name_of(livery_index)
+
+
 func difficulty_name() -> String:
 	return DIFFICULTY_NAMES.get(difficulty, "标准")
 
@@ -99,7 +109,7 @@ func assist_name() -> String:
 
 
 func to_dict() -> Dictionary:
-	return {"difficulty": difficulty, "assist_level": assist_level}
+	return {"difficulty": difficulty, "assist_level": assist_level, "livery_index": livery_index}
 
 
 static func from_dict(d: Dictionary) -> FlightSettings:
@@ -108,6 +118,7 @@ static func from_dict(d: Dictionary) -> FlightSettings:
 	# 辅助等级允许被单独覆盖：读档时若显式带 assist_level 以后者为准。
 	var a: int = int(d.get("assist_level", s.assist_level))
 	s.set_assist_level(a)
+	s.set_livery(int(d.get("livery_index", 0)))
 	return s
 
 

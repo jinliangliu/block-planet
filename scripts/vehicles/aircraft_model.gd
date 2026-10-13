@@ -27,6 +27,10 @@ var _propeller: Node3D
 var _elevator: Node3D
 var _aileron_left: Node3D
 var _aileron_right: Node3D
+## 角色 → 材质数组：机身/强调两块可随涂装改色，其余（玻璃/暗件/桨）固定。
+var _role_materials: Dictionary = {}
+## 当前已应用的涂装索引（-1 = 尚未应用）。
+var _livery_index := -1
 
 
 func _ready() -> void:
@@ -40,34 +44,34 @@ func build() -> void:
 		return
 	# 机身：前段略窄 + 座舱 + 尾锥。
 	_add_box(self, Vector3(0.92, 0.86, 3.4) * MODEL_SCALE, BODY_COLOR,
-		Vector3(0.0, 0.15, -0.5) * MODEL_SCALE)
+		Vector3(0.0, 0.15, -0.5) * MODEL_SCALE, "body")
 	_add_box(self, Vector3(0.78, 0.70, 1.6) * MODEL_SCALE, ACCENT_COLOR,
-		Vector3(0.0, 0.10, 1.9) * MODEL_SCALE)
+		Vector3(0.0, 0.10, 1.9) * MODEL_SCALE, "accent")
 	# 座舱罩：抬高的玻璃舱，第一人称眼位要落进这个盒子里。
 	_add_box(self, Vector3(0.9, 0.55, 0.9) * MODEL_SCALE, BODY_COLOR,
-		Vector3(0.0, 0.72, -1.1) * MODEL_SCALE)
+		Vector3(0.0, 0.72, -1.1) * MODEL_SCALE, "body")
 	# 风挡：座舱罩前缘的半透明玻璃，从舱内看是一块真正的风挡。
 	_add_box(self, Vector3(0.7, 0.42, 0.16) * MODEL_SCALE, GLASS_COLOR,
 		Vector3(0.0, 0.78, -1.52) * MODEL_SCALE)
 	# 机翼：上单翼，横贯机身。
 	_add_box(self, Vector3(8.0, 0.14, 1.5) * MODEL_SCALE, BODY_COLOR,
-		Vector3(0.0, 0.52, -0.7) * MODEL_SCALE)
+		Vector3(0.0, 0.52, -0.7) * MODEL_SCALE, "body")
 	_add_box(self, Vector3(1.4, 0.16, 1.5) * MODEL_SCALE, ACCENT_COLOR,
-		Vector3(3.4, 0.52, -0.7) * MODEL_SCALE)
+		Vector3(3.4, 0.52, -0.7) * MODEL_SCALE, "accent")
 	_add_box(self, Vector3(1.4, 0.16, 1.5) * MODEL_SCALE, ACCENT_COLOR,
-		Vector3(-3.4, 0.52, -0.7) * MODEL_SCALE)
+		Vector3(-3.4, 0.52, -0.7) * MODEL_SCALE, "accent")
 	# 副翼：机翼后缘外侧，随滚转杆偏转。
 	_aileron_left = _add_box(self, Vector3(1.5, 0.09, 0.42) * MODEL_SCALE, ACCENT_COLOR,
-		Vector3(-2.9, 0.52, 0.08) * MODEL_SCALE)
+		Vector3(-2.9, 0.52, 0.08) * MODEL_SCALE, "accent")
 	_aileron_right = _add_box(self, Vector3(1.5, 0.09, 0.42) * MODEL_SCALE, ACCENT_COLOR,
-		Vector3(2.9, 0.52, 0.08) * MODEL_SCALE)
+		Vector3(2.9, 0.52, 0.08) * MODEL_SCALE, "accent")
 	# 尾翼：垂直安定面 + 水平安定面 + 升降舵。
 	_add_box(self, Vector3(0.12, 1.15, 1.0) * MODEL_SCALE, ACCENT_COLOR,
-		Vector3(0.0, 0.85, 2.6) * MODEL_SCALE)
+		Vector3(0.0, 0.85, 2.6) * MODEL_SCALE, "accent")
 	_add_box(self, Vector3(2.6, 0.12, 0.9) * MODEL_SCALE, BODY_COLOR,
-		Vector3(0.0, 0.42, 2.7) * MODEL_SCALE)
+		Vector3(0.0, 0.42, 2.7) * MODEL_SCALE, "body")
 	_elevator = _add_box(self, Vector3(2.4, 0.09, 0.42) * MODEL_SCALE, ACCENT_COLOR,
-		Vector3(0.0, 0.42, 3.2) * MODEL_SCALE)
+		Vector3(0.0, 0.42, 3.2) * MODEL_SCALE, "accent")
 	# 起落架：前三点式（前轮 + 左右主轮），机轮底面即 y = −GROUND_CLEARANCE。
 	_add_box(self, Vector3(0.08, 0.5, 0.08) * MODEL_SCALE, DARK_COLOR,
 		Vector3(0.0, -0.58, -1.7) * MODEL_SCALE)
@@ -87,6 +91,31 @@ func build() -> void:
 	_add_box(hub, Vector3(2.3, 0.16, 0.06) * MODEL_SCALE, PROP_COLOR, Vector3.ZERO)
 	_add_box(hub, Vector3(0.22, 0.22, 0.3) * MODEL_SCALE, DARK_COLOR, Vector3(0.0, 0.0, 0.1))
 
+	# 建模完成后套用当前涂装（默认经典红白，与重构前外观一致）。
+	set_livery_index(_livery_index if _livery_index >= 0 else 0)
+
+
+## 按涂装索引给机身/强调两块换色；越界自动夹回。玻璃、暗件、桨叶保持固定色。
+func set_livery_index(index: int) -> void:
+	if _role_materials.is_empty():
+		# 尚未 build（材质还没建）：记住索引，build() 末尾会套用。
+		_livery_index = clampi(index, 0, AircraftLivery.count() - 1)
+		return
+	_livery_index = clampi(index, 0, AircraftLivery.count() - 1)
+	_apply_role("body", AircraftLivery.body_of(_livery_index))
+	_apply_role("accent", AircraftLivery.accent_of(_livery_index))
+
+
+## 当前已应用的涂装索引。
+func livery_index() -> int:
+	return _livery_index
+
+
+func _apply_role(role: String, color: Color) -> void:
+	var mats: Array = _role_materials.get(role, [])
+	for mat: StandardMaterial3D in mats:
+		mat.albedo_color = color
+
 
 ## 螺旋桨视觉转速：rpm01 为油门归一化值，delta 为帧间隔。
 func spin_propeller(rpm01: float, delta: float) -> void:
@@ -105,7 +134,7 @@ func deflect_controls(roll: float, pitch: float) -> void:
 
 
 func _add_box(
-	parent: Node3D, size: Vector3, color: Color, pos: Vector3
+		parent: Node3D, size: Vector3, color: Color, pos: Vector3, role: String = ""
 ) -> Node3D:
 	var holder := Node3D.new()
 	holder.position = pos
@@ -122,4 +151,9 @@ func _add_box(
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mesh.material_override = mat
 	holder.add_child(mesh)
+	if role != "":
+		if not _role_materials.has(role):
+			_role_materials[role] = []
+		var list: Array = _role_materials[role]
+		list.append(mat)
 	return holder

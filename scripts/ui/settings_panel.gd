@@ -9,7 +9,7 @@ extends Control
 ## user://settings.json；面板本身只做展示与改写，不直接碰飞行动力学。
 
 signal closed
-signal settings_changed(difficulty: int, assist_level: int)
+signal settings_changed(difficulty: int, assist_level: int, livery_index: int)
 
 const PANEL_BG := Color(0.95, 0.92, 0.84)
 const PANEL_BORDER := Color(0.62, 0.47, 0.27)
@@ -19,6 +19,7 @@ const BODY_COLOR := Color(0.42, 0.32, 0.18)
 var _settings: FlightSettings
 var _difficulty_buttons: Array[Button] = []
 var _assist_buttons: Array[Button] = []
+var _livery_buttons: Array[Button] = []
 var _status_label: Label
 
 
@@ -68,6 +69,11 @@ func _ready() -> void:
 	vbox.add_child(_make_segment(
 		["关闭", "半开", "全开"], _settings.assist_level,
 		func(i: int): _on_assist(i), _assist_buttons))
+
+	vbox.add_child(_make_row_label("涂装"))
+	vbox.add_child(_make_segment(
+		AircraftLivery.names(), _settings.livery_index,
+		func(i: int): _on_livery(i), _livery_buttons))
 
 	var hint := Label.new()
 	hint.text = "辅助稳定只在松杆时接管：放手后自动摆平机翼、压住摆头；一压杆立刻让位。"
@@ -137,9 +143,10 @@ func refresh() -> void:
 		return
 	_sync(_difficulty_buttons, _settings.difficulty)
 	_sync(_assist_buttons, _settings.assist_level)
+	_sync(_livery_buttons, _settings.livery_index)
 	if _status_label != null:
-		_status_label.text = "当前：难度 %s · 辅助 %s" % [
-			_settings.difficulty_name(), _settings.assist_name()]
+		_status_label.text = "当前：难度 %s · 辅助 %s · 涂装 %s" % [
+			_settings.difficulty_name(), _settings.assist_name(), _settings.livery_name()]
 
 
 func _sync(buttons: Array[Button], current: int) -> void:
@@ -157,10 +164,16 @@ func _on_assist(index: int) -> void:
 	_after_change()
 
 
+func _on_livery(index: int) -> void:
+	_settings.set_livery(index)
+	_after_change()
+
+
 func _after_change() -> void:
 	_settings.save()
 	refresh()
-	settings_changed.emit(_settings.difficulty, _settings.assist_level)
+	settings_changed.emit(
+		_settings.difficulty, _settings.assist_level, _settings.livery_index)
 
 
 func _panel_style() -> StyleBoxFlat:

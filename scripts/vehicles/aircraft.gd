@@ -77,6 +77,8 @@ var rider: Player = null
 
 var _state := AircraftFlight.State.new()
 var _model: AircraftModel
+## 已套用的涂装索引（每帧与设置比对，变了才改色，避免无谓的材质刷新）。
+var _applied_livery := -1
 ## 蓝图装配来源：非 null 时 _ready 据其零件生成体素块外观（替代整机机模）。
 var _blueprint: Blueprint = null
 var _wrecked := false
@@ -168,6 +170,9 @@ func _ready() -> void:
 		_build_part_visuals(_blueprint)
 	else:
 		_model = AircraftModel.new()
+		# 出厂即套用当前涂装（默认经典红白）。
+		_model.set_livery_index(FlightSettings.current().livery_index)
+		_applied_livery = _model.livery_index()
 		add_child(_model)
 	_collider = CollisionShape3D.new()
 	var shape := BoxShape3D.new()
@@ -247,6 +252,7 @@ func _physics_process(delta: float) -> void:
 	# 辅助稳定增益（FlightSettings 单例）；无设置/关闭档即纯气动模型。
 	var assist := FlightSettings.current().gains()
 	AircraftFlight.integrate(_state, controls, delta, on_ground, assist)
+	_sync_livery()
 	if on_ground:
 		_apply_ground_forces(delta)
 
@@ -270,6 +276,16 @@ func _physics_process(delta: float) -> void:
 	_update_flight_tracking(delta, on_ground)
 	_check_failure(impact)
 	_emit_readings(delta)
+
+
+## 涂装同步：设置里换了涂装就在下一帧改色（整数比对，命中才刷材质）。
+func _sync_livery() -> void:
+	if _model == null:
+		return
+	var want := FlightSettings.current().livery_index
+	if want != _applied_livery:
+		_model.set_livery_index(want)
+		_applied_livery = _model.livery_index()
 
 
 ## 飞行里程统计：起飞边沿、离地高度里程碑、累计里程，广播给进度核心

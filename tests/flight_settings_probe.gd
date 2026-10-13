@@ -86,6 +86,35 @@ func _run() -> void:
 	var b := FlightSettings.from_dict(d)
 	_check(b.difficulty == FlightSettings.Difficulty.NORMAL and b.assist_level == FlightSettings.Assist.FULL, "from_dict 还原难度与辅助覆盖")
 
+	# ── 涂装（livery_index 随设置往返）──
+	_check(AircraftLivery.count() == 4, "涂装共 4 套（实际 %d）" % AircraftLivery.count())
+	_check(AircraftLivery.name_of(0) == "经典红白", "默认涂装名=经典红白")
+	_check(AircraftLivery.body_of(1) != AircraftLivery.body_of(0), "不同涂装机身色不同")
+	a.set_livery(2)
+	var d_liv := a.to_dict()
+	_check(d_liv["livery_index"] == 2, "to_dict 含涂装索引")
+	var b2 := FlightSettings.from_dict(d_liv)
+	_check(b2.livery_index == 2, "from_dict 还原涂装索引")
+
+	# ── 机模按涂装改色（角色材质）──
+	var model := AircraftModel.new()
+	model.build()
+	_check(model.livery_index() == 0, "机模默认涂装索引 0")
+	var body_mats: Array = model._role_materials.get("body", [])
+	var accent_mats: Array = model._role_materials.get("accent", [])
+	_check(body_mats.size() > 0 and accent_mats.size() > 0, "机模登记了机身/强调材质")
+	model.set_livery_index(2)
+	var recolored: bool = true
+	for mat: StandardMaterial3D in body_mats:
+		if mat.albedo_color != AircraftLivery.body_of(2):
+			recolored = false
+	_check(recolored and model.livery_index() == 2, "切涂装后机身材质改色为丛林绿")
+	for mat: StandardMaterial3D in accent_mats:
+		if mat.albedo_color != AircraftLivery.accent_of(2):
+			recolored = false
+	_check(recolored, "切涂装后强调材质同步改色")
+	model.queue_free()
+
 	# ── save / load_or_new（临时路径）──
 	var tmp := "user://flight_settings_probe.tmp.json"
 	var c := FlightSettings.for_difficulty(FlightSettings.Difficulty.CASUAL)

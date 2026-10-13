@@ -797,6 +797,18 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
   两行按钮/默认选中态/难度→辅助预设重置/辅助单独覆盖/落盘读回/模态开关。
   回归：mission_panel_probe 15 项、smoke_test 全 OK。
 
+#### Phase 5-c · 涂装 — 已完成
+- 新增 `scripts/vehicles/aircraft_livery.gd`（`AircraftLivery`）：4 套涂装
+  （经典红白/深海蓝/丛林绿/落日橙），每套 = 机身色 + 强调色；索引 0 为默认，
+  与重构前硬编码外观逐项一致。
+- `AircraftModel` 改造为「角色化材质」：`_add_box` 增 role 参数，机身/强调块的
+  `StandardMaterial3D` 登记到 `_role_materials`，`set_livery_index()` 统一改色；
+  玻璃/暗件/桨叶保持固定色。涂装索引存 `FlightSettings.livery_index` 随设置落盘。
+- `Aircraft._sync_livery()` 每帧整数比对设置索引，变了才刷材质（无谓刷新为零）；
+  出厂即套当前涂装。设置面板增「涂装」一行四按钮。
+- 验证：`flight_settings_probe` 31 项（含 4 套涂装/改色/往返）、`settings_panel_probe`
+  26 项全 PASS；`flight_hud_shot` fails=0 回归。
+
 ---
 
 ## 附：待定/开放问题
