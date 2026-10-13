@@ -674,6 +674,35 @@ C172 / F-16 / A-10 / 747 四机型标定，另有襟翼、起落架、配平、�
 Phase 2 仍只动数据层与探针，未接入玩家输入 UI——交互（鼠标拾取/网格光标）留待
 Phase 3 试飞闭环时一并接入。
 
+### Phase 3 · 试飞闭环（MVP 核心循环收尾）— 进行中
+MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再试飞**。拆成 3a/3b/3c 三个
+可独立验证的子期，逐期用探针验收，禁一次性堆砌。
+
+#### Phase 3a · 任务框架 + 三任务逻辑（已完成）
+- 新增 `MissionData`（Resource）：三种任务类型 `Type.TAKEOFF/CIRCUIT/LANDING`，
+  数值参数走 `params`（目标高度/最低速度/绕点半径/降落区半径/触地垂直速度上限/
+  停稳速度上限/奖励绿宝石），`default_missions()` 给出 MVP 三任务预设。
+- 新增 `MissionManager`（RefCounted）：纯逻辑、无节点依赖，外部每帧 `step(dt, telemetry)`
+  喂遥测（altitude_agl/speed/position/on_ground/vertical_speed/wrecked）；成功/失败/
+  超时后一次性 `mission_result(success, result)` 并锁定状态；`result` 含 reason/elapsed/
+  score/reward/touchdown_vs/各点最近距离。评分按任务类型（起飞看耗时、绕点看精度、
+  降落看触地柔和度）。
+- 裁决口径：起飞须离地并达目标高度+最低速度；绕点须按序经过全部航点（水平半径判定）；
+  降落须先在空中的再触地，软着陆（触地垂直速度≤上限）后于降落区内停稳，否则硬着陆/
+  滑出区判失败；坠机与超时一律失败。
+- 新增 `tests/mission_probe.tscn`：合成遥测序列验收 9 场景 × 各断言，共 21 项全 PASS
+  （MISSION_PROBE_OK）。避坑：GDScript 4.6 闭包对捕获变量重赋值不向外传递，探针改用
+  共享字典持有结果。
+
+#### Phase 3b · 试飞闭环（蓝图→飞机 spawn）— 待开工
+扩展 `Aircraft.from_loadout()`：按 `Blueprint` 的零件实例化可见体素块（机翼/机身/
+发动机/螺旋桨/起落架/油箱拼装外观），物理框已聚合；默认 spawn 仍走 ×3 代码机模保持
+手感。让 blueprint 驱动的飞机能飞、能完成 3a 任务。
+
+#### Phase 3c · 绿宝石解锁新零件 — 待开工
+新增 `unlock_table.gd`（part_id → 绿宝石成本）+ 采购/解锁逻辑；默认套件外的新零件需
+解锁；奖励结算接入玩家货币（复用绿宝石，不建平行经济）。
+
 ---
 
 ## 附：待定/开放问题
