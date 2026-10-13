@@ -37,6 +37,7 @@ var _manual: ManualPanel
 var _bestiary: BestiaryUI
 var _quest_panel: QuestPanel
 var _mission_panel: MissionPanel
+var _settings_panel: SettingsPanel
 var _inventory_panel: InventoryPanel
 var _toast_label: Label
 var _toast_tween: Tween
@@ -153,6 +154,7 @@ func _build() -> void:
 	_build_inventory_panel(root)
 	_build_quest_panel(root)
 	_build_mission_panel(root)
+	_build_settings_panel(root)
 	_build_toast(root)
 	_build_death_overlay(root)
 	_build_flight_panel(root)
@@ -196,6 +198,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			close_mission_panel()
 			get_viewport().set_input_as_handled()
 		return
+	# 飞行设置面板同为模态窗口：ESC / O 关闭。
+	if _settings_panel != null and _settings_panel.is_open():
+		if event is InputEventKey and event.pressed and not event.echo \
+				and (event.keycode == KEY_ESCAPE or event.keycode == KEY_O):
+			close_settings_panel()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.is_action_pressed("toggle_craft"):
 			_toggle_craft_panel()
@@ -216,6 +225,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			open_quest_panel()
 		elif event.is_action_pressed("toggle_missions"):
 			open_mission_panel()
+		elif event.is_action_pressed("toggle_settings"):
+			open_settings_panel()
 		elif event.keycode == KEY_ESCAPE and _box_overlay != null and _box_overlay.visible:
 			set_box_open(false)
 			get_viewport().set_input_as_handled()
@@ -2014,7 +2025,8 @@ func _any_overlay_open() -> bool:
 		or (_manual != null and _manual.is_open()) \
 		or (_bestiary != null and _bestiary.is_open()) \
 		or (_quest_panel != null and _quest_panel.is_open()) \
-		or (_mission_panel != null and _mission_panel.is_open())
+		or (_mission_panel != null and _mission_panel.is_open()) \
+		or (_settings_panel != null and _settings_panel.is_open())
 
 
 func open_manual() -> void:
@@ -2125,6 +2137,40 @@ func close_mission_panel() -> void:
 func _on_mission_panel_closed() -> void:
 	_set_player_frozen(false)
 	_on_manual_closed()
+
+
+func _build_settings_panel(root: Control) -> void:
+	_settings_panel = SettingsPanel.new()
+	_settings_panel.closed.connect(_on_settings_panel_closed)
+	_settings_panel.settings_changed.connect(_on_settings_changed)
+	root.add_child(_settings_panel)
+
+
+func open_settings_panel() -> void:
+	if _settings_panel == null:
+		return
+	_settings_panel.open()
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_settings_panel() -> void:
+	if _settings_panel == null:
+		return
+	_settings_panel.close()
+
+
+func _on_settings_panel_closed() -> void:
+	_set_player_frozen(false)
+	_on_manual_closed()
+
+
+## 设置改动即时生效（飞机每帧读 FlightSettings.current()）；此处只 Toast 确认。
+func _on_settings_changed(_difficulty: int, _assist_level: int) -> void:
+	var s := FlightSettings.current()
+	Events.notice.emit("飞行设置：难度 %s · 辅助 %s" % [
+		s.difficulty_name(), s.assist_name()])
 
 
 ## main 每物理帧调用：把飞行遥测透传给任务面板（仅 RUNNING 时生效）。

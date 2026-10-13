@@ -21,6 +21,8 @@ const ACTIONS := {
 	# 工坊台建造界面（V）：蓝图编辑 + 试飞（D-032 Phase 4a）。
 	"toggle_build": [KEY_V],
 	"toggle_missions": [KEY_K],
+	# 飞行设置面板（O）：难度与辅助稳定（D-032 Phase 5-b）。
+	"toggle_settings": [KEY_O],
 	# 飞行器驾驶：鼠标给操纵杆（俯仰/滚转），方向键为键盘替代；
 	# W/S 复用 move_forward/back（油门），A/D 复用 move_left/right（方向舵），
 	# 空格复用 jump（机轮刹车），F 上机/下机。

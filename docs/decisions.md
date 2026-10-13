@@ -786,6 +786,17 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
   默认/难度预设/增益表/to_dict/from_dict/save 往返/损坏文件退回/坡度配平/辅助
   不干预俯仰。回归：flight_probe 46 项、smoke_test、flight_hud_shot fails=0。
 
+#### Phase 5-b · 飞行设置面板 — 已完成
+- 新增 `scripts/ui/settings_panel.gd`（`SettingsPanel`，O 键模态，冻结玩家）：
+  两行分段按钮（难度 休闲/标准/硬核、辅助 关闭/半开/全开），选中态用
+  ButtonGroup + toggle_mode 呈现；点难度即把辅助重置为该预设，可再单独覆盖；
+  每次改动 `_settings.save()` 落盘并即时生效（飞机每帧读单例）。
+- HUD 接线：`toggle_settings`(O) 打开、ESC/O 关闭、`_any_overlay_open` 纳入、
+  改动后 Toast 确认；main 无需改动（面板自持 FlightSettings 单例）。
+- 验证：`tests/settings_panel_probe.tscn` 19 项全 PASS（SETTINGS_PANEL_OK）：
+  两行按钮/默认选中态/难度→辅助预设重置/辅助单独覆盖/落盘读回/模态开关。
+  回归：mission_panel_probe 15 项、smoke_test 全 OK。
+
 ---
 
 ## 附：待定/开放问题
