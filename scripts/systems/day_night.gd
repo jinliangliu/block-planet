@@ -24,6 +24,38 @@ const NIGHT_AMBIENT_ENERGY := 0.05
 const NIGHT_AMBIENT_COLOR := Color(0.16, 0.18, 0.32)
 const NIGHT_BACKGROUND_COLOR := Color(0.012, 0.018, 0.05)
 
+# ── 天气（D-032 打磨 Phase 5-d）────────────────────────────────
+# 只做低风险视觉向天气：晴/阴/雨 通过乘算压暗环境光与日光，并可叠加雨幕粒子。
+# 按 D-032 backlog「雷暴天气首版不做」，不含雷电与天气—气动强耦合。
+enum Weather { CLEAR, CLOUDY, RAIN }
+
+const WEATHER_NAMES := {
+	Weather.CLEAR: "晴",
+	Weather.CLOUDY: "阴",
+	Weather.RAIN: "雨",
+}
+## 环境光/日光乘算（阴天压暗环境，雨天再压并大幅削弱直射）。
+const WEATHER_AMBIENT_MUL := {
+	Weather.CLEAR: 1.0,
+	Weather.CLOUDY: 0.75,
+	Weather.RAIN: 0.55,
+}
+const WEATHER_SUN_MUL := {
+	Weather.CLEAR: 1.0,
+	Weather.CLOUDY: 0.6,
+	Weather.RAIN: 0.35,
+}
+## 自动轮换：每 WEATHER_SLOT 秒（真实时间）切一种天气，固定序列保证可复现。
+const WEATHER_SLOT := 150.0
+const WEATHER_CYCLE := [
+	Weather.CLEAR, Weather.CLEAR, Weather.CLOUDY, Weather.RAIN, Weather.CLOUDY, Weather.CLEAR,
+]
+
+# 雨幕粒子（纯视觉，无物理）：跟随相机上方一团下落的雨滴。
+const RAIN_AMOUNT := 240
+const RAIN_BOX := Vector3(14.0, 0.5, 14.0)
+const RAIN_HEIGHT := 14.0
+
 # 夜空特效：月亮与星星挂在 _sky_root（每帧贴到相机位置 = 无穷远天幕）。
 const SKY_FX_DISTANCE := 115.0
 const STAR_LAYER_COUNT := 3
@@ -47,10 +79,14 @@ var _sky_root: Node3D
 var _moon_material: StandardMaterial3D
 var _star_materials: Array[StandardMaterial3D] = []
 var _fx_alpha := 0.0
+## 当前天气；-1 表示「跟随自动轮换」。
+var _weather := -1
+var _rain: CPUParticles3D
 
 
 func _ready() -> void:
 	_build_sky_fx()
+	_build_rain()
 
 
 func setup(light: DirectionalLight3D) -> void:
@@ -77,10 +113,36 @@ func _process(delta: float) -> void:
 	_track_day()
 	_apply_lighting()
 	_update_sky_fx(delta)
+	_update_rain()
 	var second := int(_time)
 	if second != _last_emitted_second:
 		_last_emitted_second = second
 		time_changed.emit(_time / FULL_CYCLE, is_day())
+
+
+## ── 天气 ────────────────────────────────────────────────────
+
+## 手动设定天气（钉住，不再自动轮换）。
+func set_weather(w: int) -> void:
+	_weather = clampi(w, Weather.CLEAR, Weather.RAIN)
+	_apply_lighting()
+
+
+## 交回自动轮换。
+func clear_weather_override() -> void:
+	_weather = -1
+
+
+## 当前天气（_weather 为 -1 时按自动序列取值）。
+func get_weather() -> int:
+	if _weather >= 0:
+		return _weather
+	var slot := int(_elapsed / WEATHER_SLOT)
+	return WEATHER_CYCLE[slot % WEATHER_CYCLE.size()]
+
+
+func weather_name() -> String:
+	return WEATHER_NAMES.get(get_weather(), "晴")
 
 
 ## 睡觉：把时间直接拨到次日清晨（只在夜晚有效）。
@@ -140,30 +202,69 @@ func get_clock() -> String:
 func _apply_lighting() -> void:
 	if _light == null:
 		return
+	var weather := get_weather()
+	var ambient_mul: float = WEATHER_AMBIENT_MUL[weather]
+	var sun_mul: float = WEATHER_SUN_MUL[weather]
 
 	if is_day():
 		var t := _time / DAY_LENGTH
 		var sun := sin(PI * t)
 		_light.rotation_degrees.x = lerpf(-85.0, -10.0, sun)
-		_light.light_energy = maxf(lerpf(0.2, 1.0, sun), 0.2)
+		_light.light_energy = maxf(lerpf(0.2, 1.0, sun) * sun_mul, 0.2)
 		_light.light_color = Color(1.0, 0.98, 0.92) * _sky_tint
 		if _env != null:
 			# 环境光随日落渐暗并向暮色过渡，与夜晚起始值衔接不跳变。
-			_env.ambient_light_energy = lerpf(0.35, DAY_AMBIENT_ENERGY, sun)
+			_env.ambient_light_energy = lerpf(0.35, DAY_AMBIENT_ENERGY, sun) * ambient_mul
 			_env.ambient_light_color = DAY_AMBIENT_COLOR.lerp(DUSK_AMBIENT_COLOR, 1.0 - sun) * _sky_tint
 			_env.background_color = DAY_BACKGROUND_COLOR.lerp(DUSK_BACKGROUND_COLOR, 1.0 - sun) * _sky_tint
 	else:
 		var t := (_time - DAY_LENGTH) / NIGHT_LENGTH
 		_light.rotation_degrees.x = -85.0
-		_light.light_energy = lerpf(0.35, 0.04, t)
+		_light.light_energy = lerpf(0.35, 0.04, t) * sun_mul
 		_light.light_color = Color(0.55, 0.60, 0.85)
 		if _env != null:
 			# 夜晚：环境光与天幕压至近黑，保证"晚上天是黑的"可感知。
 			# 渐暗在入夜前 40% 内完成，其余时间保持近黑，避免整夜缓慢变暗。
 			var fade := minf(1.0, t / 0.4)
-			_env.ambient_light_energy = lerpf(0.30, NIGHT_AMBIENT_ENERGY, fade)
+			_env.ambient_light_energy = lerpf(0.30, NIGHT_AMBIENT_ENERGY, fade) * ambient_mul
 			_env.ambient_light_color = DUSK_AMBIENT_COLOR.lerp(NIGHT_AMBIENT_COLOR, fade)
 			_env.background_color = DUSK_BACKGROUND_COLOR.lerp(NIGHT_BACKGROUND_COLOR, fade)
+
+
+## 雨幕：纯视觉粒子团，跟随相机上方；仅雨天开启。
+func _build_rain() -> void:
+	_rain = CPUParticles3D.new()
+	_rain.amount = RAIN_AMOUNT
+	_rain.lifetime = 1.2
+	_rain.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	_rain.emission_box_extents = RAIN_BOX
+	_rain.direction = Vector3(0.0, -1.0, 0.0)
+	_rain.initial_velocity_min = 16.0
+	_rain.initial_velocity_max = 20.0
+	_rain.gravity = Vector3(0.0, -14.0, 0.0)
+	_rain.emitting = false
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.06, 0.5)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.72, 0.82, 0.92, 0.55)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	quad.material = mat
+	_rain.mesh = quad
+	add_child(_rain)
+
+
+func _update_rain() -> void:
+	if _rain == null:
+		return
+	var raining := get_weather() == Weather.RAIN
+	_rain.emitting = raining
+	if not raining:
+		return
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		_rain.global_position = cam.global_position + Vector3(0.0, RAIN_HEIGHT, 0.0)
 
 
 ## ── 夜空特效：卡通月亮 + 三层闪烁星星 ─────────────────────────

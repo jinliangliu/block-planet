@@ -2342,10 +2342,11 @@ func _refresh_time() -> void:
 	if _day_night == null:
 		_time_label.text = "白天 06:00"
 	else:
-		_time_label.text = "第 %d 天 %s%s" % [
+		_time_label.text = "第 %d 天 %s%s · %s" % [
 			_day_night.day_count(),
 			"白天 " if _day_night.is_day() else "夜晚 ",
 			_day_night.get_clock(),
+			_day_night.weather_name(),
 		]
 
 

@@ -809,6 +809,17 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
 - 验证：`flight_settings_probe` 31 项（含 4 套涂装/改色/往返）、`settings_panel_probe`
   26 项全 PASS；`flight_hud_shot` fails=0 回归。
 
+#### Phase 5-d · 天气（低风险视觉向）— 已完成
+- `DayNightCycle` 增天气态 晴/阴/雨：环境光与日光各按乘数压暗（晴 1.0/1.0、
+  阴 0.75/0.6、雨 0.55/0.35），随 `_apply_lighting` 生效；默认自动轮换
+  （每 150 s 固定序列，保证可复现），`set_weather()` 可手动钉住、`clear_weather_override()`
+  交回自动。
+- 雨幕为纯视觉 `CPUParticles3D`，跟随相机上方，仅雨天发射——无物理耦合。
+- 边界：按 D-032 backlog「雷暴天气首版不做」，本阶段不含雷电，也刻意不引入
+  天气—气动耦合（飞行手感与探针断言不受天气影响）。
+- 验证：`tests/weather_probe.tscn` 9 项全 PASS（WEATHER_OK）；回归：smoke_test、
+  life_probe 全 OK。
+
 ---
 
 ## 附：待定/开放问题
