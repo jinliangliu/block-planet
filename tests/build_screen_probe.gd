@@ -8,6 +8,10 @@ const TEST_PATH := "user://test_bp_probe.json"
 
 var _pass := 0
 var _fail := 0
+## 真实蓝图存档快照（D-010 铁律 3）：本探针要删掉它从默认可飞套件开局，且运行中
+## close() 会把探针态自动落盘——结束时原样还原，绝不毁用户真实蓝图。
+var _bp_existed := false
+var _bp_text := ""
 
 
 func _check(cond: bool, msg: String) -> void:
@@ -33,7 +37,12 @@ func _send(screen: BuildScreen, ev: InputEvent) -> void:
 
 func _ready() -> void:
 	InputActions.register()
-	# 清掉可能残留的真实存档，保证从默认可飞套件开局。
+	# 快照真实蓝图存档，再清场（保证从默认可飞套件开局）。
+	if FileAccess.file_exists(BuildScreen.BLUEPRINT_PATH):
+		_bp_existed = true
+		var bf := FileAccess.open(BuildScreen.BLUEPRINT_PATH, FileAccess.READ)
+		_bp_text = bf.get_as_text()
+		bf.close()
 	if FileAccess.file_exists(BuildScreen.BLUEPRINT_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(BuildScreen.BLUEPRINT_PATH))
 	if FileAccess.file_exists(TEST_PATH):
@@ -126,6 +135,15 @@ func _ready() -> void:
 	_check(loaded != null and loaded.parts.size() == 7, "显式保存后可读回（%d 件）"
 		% (loaded.parts.size() if loaded else -1))
 	screen.close()
+
+	# 还原真实蓝图存档 + 清理探针临时文件（D-010 铁律 3）。
+	if _bp_existed:
+		var bf := FileAccess.open(BuildScreen.BLUEPRINT_PATH, FileAccess.WRITE)
+		bf.store_string(_bp_text)
+		bf.close()
+	else:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(BuildScreen.BLUEPRINT_PATH))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_PATH))
 
 	print("BUILD_SCREEN_PROBE_DONE fails=%d" % _fail)
 	if _fail > 0:

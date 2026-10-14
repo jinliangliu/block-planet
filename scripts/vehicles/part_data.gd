@@ -34,6 +34,10 @@ enum Category {
 @export var cost: int = 0
 ## 耐久（结构强度）：过载/撞击损伤的上限，Phase 3 结构失效接入。
 @export var durability: float = 100.0
+## 结构限速（m/s）：该零件能承受的最大空速；整机 VNE 取所有零件 vne_limit 的下限。
+## 默认等于基准结构极限 55（AircraftFlight.VNE）；高推力 / 轻结构件可下调，
+## 以反映「动力越强 = 越接近结构极限」——配合降推力避免满油门平飞超速解体。
+@export var vne_limit: float = 55.0
 
 ## ── 气动（升力面）──────────────────────────────────────
 ## 是否为升力面；仅 WING / TAIL 为真。

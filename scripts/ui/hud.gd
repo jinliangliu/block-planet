@@ -93,6 +93,15 @@ var _flight_speed: Label
 var _flight_altitude: Label
 var _flight_throttle: Label
 var _flight_stall: Label
+## 触屏飞行控制层：仅触屏设备、驾驶飞行器时出现；隐藏步行触控（_touch_walk）。
+var _flight_touch: Control
+var _touch_walk: Control
+var _ft_throttle_slider: VSlider
+var _ft_pitch := 0.0
+var _ft_roll := 0.0
+var _ft_yaw := 0.0
+var _ft_throttle := 0.0
+var _ft_brake := false
 
 
 func setup(player: Player) -> void:
@@ -139,9 +148,16 @@ func _build() -> void:
 	_build_log(root)
 
 	if DisplayServer.is_touchscreen_available():
-		_build_joystick(root)
-		_build_look_area(root)
-		_build_action_buttons(root)
+		# 步行触控（摇杆/视角/动作按钮）收进一个容器，驾驶飞机时整体隐藏，
+		# 改由 _flight_touch 飞行触控层接管。
+		_touch_walk = Control.new()
+		_touch_walk.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_touch_walk.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(_touch_walk)
+		_build_joystick(_touch_walk)
+		_build_look_area(_touch_walk)
+		_build_action_buttons(_touch_walk)
+		_build_flight_touch(root)
 
 	_build_hotbar(root)
 	_build_craft_panel(root)
@@ -515,7 +531,146 @@ func _flight_line(box: VBoxContainer, color: Color) -> Label:
 	return label
 
 
+## 触屏飞行控制层（P1-3 最小飞行 UI）：单杆俯仰/滚转 + 油门竖滑 + 方向舵 + 刹车 + 下机。
+## 仅触屏设备构建；驾驶飞机时由 _on_aircraft_ride_changed 显隐，并隐藏步行触控。
+func _build_flight_touch(root: Control) -> void:
+	var pad := Control.new()
+	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pad.visible = false
+	root.add_child(pad)
+	_flight_touch = pad
+
+	# 左下：俯仰/滚转单杆（复用 VirtualJoystick；上推=抬头，右推=右滚）。
+	var stick := VirtualJoystick.new()
+	stick.anchor_left = 0.0
+	stick.anchor_top = 1.0
+	stick.anchor_right = 0.0
+	stick.anchor_bottom = 1.0
+	var s := stick.custom_minimum_size
+	stick.offset_left = 32.0
+	stick.offset_top = -(s.y + 32.0)
+	stick.offset_right = 32.0 + s.x
+	stick.offset_bottom = -32.0
+	pad.add_child(stick)
+	stick.value_changed.connect(_on_ft_joystick)
+
+	# 右下：油门竖滑杆（上推=加油门）。
+	var thr := VSlider.new()
+	thr.min_value = 0.0
+	thr.max_value = 1.0
+	thr.step = 0.01
+	thr.anchor_left = 1.0
+	thr.anchor_top = 1.0
+	thr.anchor_right = 1.0
+	thr.anchor_bottom = 1.0
+	thr.offset_right = -32.0
+	thr.offset_bottom = -32.0
+	thr.offset_left = -80.0
+	thr.offset_top = -232.0
+	thr.mouse_filter = Control.MOUSE_FILTER_STOP
+	pad.add_child(thr)
+	thr.value_changed.connect(_on_ft_throttle)
+	_ft_throttle_slider = thr
+
+	# 油门旁：方向舵左右 + 刹车（竖直排布）。
+	var col := VBoxContainer.new()
+	col.anchor_left = 1.0
+	col.anchor_top = 1.0
+	col.anchor_right = 1.0
+	col.anchor_bottom = 1.0
+	col.offset_right = -96.0
+	col.offset_bottom = -32.0
+	col.offset_left = -226.0
+	col.offset_top = -154.0
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	pad.add_child(col)
+
+	var yaw_row := HBoxContainer.new()
+	col.add_child(yaw_row)
+	var yaw_l := Button.new()
+	yaw_l.text = "◀"
+	yaw_l.custom_minimum_size = Vector2(60, 54)
+	yaw_l.focus_mode = Control.FOCUS_NONE
+	var yaw_r := Button.new()
+	yaw_r.text = "▶"
+	yaw_r.custom_minimum_size = Vector2(60, 54)
+	yaw_r.focus_mode = Control.FOCUS_NONE
+	yaw_row.add_child(yaw_l)
+	yaw_row.add_child(yaw_r)
+	yaw_l.button_down.connect(func(): _ft_yaw = -1.0; _push_touch_flight())
+	yaw_l.button_up.connect(func(): if _ft_yaw < 0.0: _ft_yaw = 0.0; _push_touch_flight())
+	yaw_r.button_down.connect(func(): _ft_yaw = 1.0; _push_touch_flight())
+	yaw_r.button_up.connect(func(): if _ft_yaw > 0.0: _ft_yaw = 0.0; _push_touch_flight())
+	var brake := Button.new()
+	brake.text = "刹车"
+	brake.custom_minimum_size = Vector2(120, 54)
+	brake.focus_mode = Control.FOCUS_NONE
+	brake.button_down.connect(func(): _ft_brake = true; _push_touch_flight())
+	brake.button_up.connect(func(): _ft_brake = false; _push_touch_flight())
+	col.add_child(brake)
+
+	# 右上：下机（等价于键盘 F）。
+	var exit := Button.new()
+	exit.text = "下机"
+	exit.custom_minimum_size = Vector2(96, 56)
+	exit.focus_mode = Control.FOCUS_NONE
+	exit.anchor_left = 1.0
+	exit.anchor_top = 0.0
+	exit.anchor_right = 1.0
+	exit.anchor_bottom = 0.0
+	exit.offset_right = -16.0
+	exit.offset_top = 16.0
+	exit.offset_left = -112.0
+	exit.offset_bottom = 72.0
+	exit.pressed.connect(_on_ft_exit)
+	pad.add_child(exit)
+
+
+func _on_ft_joystick(value: Vector2) -> void:
+	_ft_pitch = -value.y   # 摇杆上推 = 抬头（屏幕 y 向下，故取负）
+	_ft_roll = value.x     # 右推 = 右滚
+	_push_touch_flight()
+
+
+func _on_ft_throttle(value: float) -> void:
+	_ft_throttle = value
+	_push_touch_flight()
+
+
+## 把当前触屏操纵量推给正在驾驶的飞机。
+func _push_touch_flight() -> void:
+	var craft: Aircraft = _player.aircraft() if _player != null else null
+	if craft == null or craft.is_wrecked():
+		return
+	craft.set_touch_flight_input(_ft_pitch, _ft_roll, _ft_yaw, _ft_throttle, _ft_brake)
+
+
+func _on_ft_exit() -> void:
+	if _player != null and _player.is_riding():
+		_player.exit_aircraft()
+
+
 func _on_aircraft_ride_changed(_riding: bool) -> void:
+	# P1-2：下机且任务仍在进行 → 主动放弃当前任务，避免永久卡 RUNNING。
+	if not _riding and _mission_panel != null and _mission_panel.is_running():
+		_mission_panel.abandon_mission()
+	# P1-3：触屏设备上，驾驶时隐藏步行触控、显示飞行触控层。
+	if DisplayServer.is_touchscreen_available() and _flight_touch != null:
+		if _riding:
+			_touch_walk.visible = false
+			_flight_touch.visible = true
+			_ft_pitch = 0.0
+			_ft_roll = 0.0
+			_ft_yaw = 0.0
+			_ft_brake = false
+			_ft_throttle = 0.0
+			if _ft_throttle_slider != null:
+				_ft_throttle_slider.value = 0.0
+			_push_touch_flight()
+		else:
+			_touch_walk.visible = true
+			_flight_touch.visible = false
 	_refresh_flight_panel()
 
 

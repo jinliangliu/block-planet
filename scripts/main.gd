@@ -140,7 +140,17 @@ func _on_test_fly_requested(bp: Blueprint) -> void:
 		forward = Vector3(1.0, 0.0, 0.0)
 	var at := _player.global_position + forward.normalized() * 10.0
 	var cell := Vector3i(at.floor())
+	# 实心面扫描：自投放点上方往下找首个实块，取其顶面高度。
+	# 不能直接用 get_surface_height——那只是噪声地形基准，看不见机场整平垫高、
+	# 玩家自建平台；在垫高跑道旁试飞会把飞机嵌进跑道里再被物理弹飞
+	# （与本函数遥测里 block_under 的向下扫描同思路）。
 	var surface := _world.get_surface_height(cell.x, cell.z)
+	var scan := Vector3i(cell.x, cell.y + 6, cell.z)
+	for i in range(16):
+		var b := _world.get_block(scan - Vector3i(0, i, 0))
+		if BlockTypes.is_solid(b):
+			surface = scan.y - i + 1
+			break
 	var craft := Aircraft.from_loadout(
 		self,
 		Vector3(float(cell.x) + 0.5, float(surface) + 0.1, float(cell.z) + 0.5),

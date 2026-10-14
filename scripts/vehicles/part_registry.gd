@@ -111,7 +111,13 @@ static func all() -> Array[PartData]:
 	turbine.mass = 55.0
 	turbine.cost = 30          # 绿宝石解锁价
 	turbine.durability = 90.0
-	turbine.thrust = 2600.0     # 比默认发动机(1650)更强
+	# 比默认发动机(1650)略强，且满油门平飞平衡解 ≈52 m/s < 结构限速 55，
+	# 避免「买最贵的零件反而必超速解体」（D-032 修复：原 2600 N 平衡解 63.5 m/s > VNE）。
+	# 余量 3 m/s 是故意的：密度随高度衰减慢于阻力（推力 ∝ρ^0.7），且富波摆动会
+	# 瞬时超速——贴线值（1850→54.1 / 1900→54.8）实测都会触限，1750 留足余量。
+	turbine.thrust = 1750.0
+	# 不弱于默认件(55)；若以后加入更脆的零件，整机 VNE 会取零件下限（Airframe.aggregate）。
+	turbine.vne_limit = 55.0
 	turbine.fuel_burn = 0.035
 	parts.append(turbine)
 

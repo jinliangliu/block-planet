@@ -6,6 +6,10 @@ extends Node
 
 var _pass := 0
 var _fail := 0
+## 真实 settings.json 快照（D-010 铁律 3）：面板点击会经 current().save() 写真实
+## 存档，原实现末尾直接删除——用户若有真实飞行设置会被毁。改为结束前原样还原。
+var _settings_existed := false
+var _settings_text := ""
 
 
 func _check(cond, msg) -> void:
@@ -18,6 +22,12 @@ func _check(cond, msg) -> void:
 
 
 func _ready() -> void:
+	# 先快照真实 settings.json，再隔离单例（面板点击的落盘在结束时还原）。
+	if FileAccess.file_exists("user://settings.json"):
+		_settings_existed = true
+		var sf := FileAccess.open("user://settings.json", FileAccess.READ)
+		_settings_text = sf.get_as_text()
+		sf.close()
 	# 用干净的默认实例做单例，避免探针污染真实 user://settings.json。
 	FlightSettings.set_current(FlightSettings.default_settings())
 	var panel := SettingsPanel.new()
@@ -86,8 +96,13 @@ func _ready() -> void:
 	_check(not panel.is_open(), "close() 后面板隐藏")
 	_check(closed["n"] == 1, "close() 发出 closed 信号")
 
-	# 清理：不留下真实存档污染。
-	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://settings.json"))
+	# 还原真实 settings.json 原样（D-010）：探针期间的点击落盘不留给用户。
+	if _settings_existed:
+		var sf := FileAccess.open("user://settings.json", FileAccess.WRITE)
+		sf.store_string(_settings_text)
+		sf.close()
+	else:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path("user://settings.json"))
 	FlightSettings.set_current(null)
 
 	print("SETTINGS_PANEL_DONE fails=%d" % _fail)

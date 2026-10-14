@@ -44,8 +44,8 @@ const INDUCED_K := 0.052
 const SIDESLIP_DRAG := 0.35
 ## 螺旋桨推力随密度衰减的指数（螺旋桨比喷气机更依赖空气密度）。
 const THRUST_DENSITY_EXPONENT := 0.7
-## 不可超越速度默认值（结构极限，超出即解体）。MVP 不随零件变化，
-## Airframe.vne 取此值；Phase 3 按机身/机翼结构强度取各零件下限。
+## 基准结构极限速度（m/s），超出即解体。Airframe.aggregate 取「所有零件 vne_limit 的下限」，
+## 故单个零件可被压低其结构限速（如高推力涡轮发动机略低于基准），其余零件默认等于本值。
 const VNE := 55.0
 ## 触地垂直速度上限（m/s），超出即解体。
 const TOUCHDOWN_LIMIT := 6.0
@@ -115,6 +115,8 @@ class Airframe extends RefCounted:
 			mass_sum += data.mass
 			thrust_sum += data.thrust
 			cd0_sum += data.parasite_drag
+			# 结构限速取零件下限：高推力/轻结构件可拉低整机 VNE。
+			af.vne = minf(af.vne, data.vne_limit)
 			com_weighted += pos * data.mass
 			if data.is_lifting and data.lift_area > 0.0:
 				area_sum += data.lift_area

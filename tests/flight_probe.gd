@@ -13,8 +13,10 @@ const STRIP_CANDIDATES := [
 	Vector2i(600, 300),
 	Vector2i(600, 600),
 ]
-const STRIP_WIDTH := 10
-## 跑道长度 64 格：满油门滑跑到抬轮速度约 21 格，余量充足。
+## 跑道横向 16 格 = 8 m：宽于机身碰撞盒（6.6 m），整机含翼尖全由铺面支撑，
+## 不再仅靠跑道中线吃重量（核对记录：10 格窄跑道时机身横向各悬空约 0.8 m）。
+const STRIP_WIDTH := 16
+## 跑道长度 64 格：满油门滑跑到抬轮约 35 格（17.6 m），余量充足。
 ## 上限受世界流式加载半径约束（LOAD_RADIUS = 2 区块 = 80 格）。
 const STRIP_LENGTH := 64
 ## 玩家站位：跑到中段，保证整条跑道所在区块常驻（区块跟随玩家位置流式加载）。
@@ -26,6 +28,15 @@ const RUNWAY_HEADING := PI
 var _failed := 0
 var _stall_event := false
 var _crash_reasons: Array[String] = []
+## 存档隔离快照（D-010 铁律 3）：跑前存档文本 + 进度内存态，_finish() 前原样还原。
+## 空串表示原文件不存在（还原即删除），避免「探针凭空建了个新存档」的污染。
+## 内存态也必须还原：Progress._exit_tree 退出时会 _save() 把内存态写盘——
+## 只还原文件会被它覆盖（实测：只写文件后 flew 107→119，还原失效）。
+var _saved_progress := ""
+var _saved_settings := ""
+var _saved_counters: Dictionary = {}
+var _saved_states: Dictionary = {}
+var _saved_quiz_streak := 0
 
 
 func _ready() -> void:
@@ -33,6 +44,25 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 输入动作注册（幂等）：H 段键盘/鼠标驾驶通路断言依赖 InputMap 里已有动作。
+	InputActions.register()
+	# 存档隔离（D-010 铁律 3）：本探针会真实推进飞行成就计数并读写飞行设置，
+	# 跑前快照 user:// 两个存档文件，_finish() 前原样还原（life_probe 阶段 S 同款教训）。
+	_saved_progress = _read_user_text("user://progress.json")
+	_saved_settings = _read_user_text("user://settings.json")
+	_saved_counters = Progress.counters.duplicate()
+	_saved_states = Progress.states.duplicate()
+	_saved_quiz_streak = Progress._quiz_correct_since_reward
+	# 飞行设置钉死「标准/半开」：探针逐帧行为不再依赖开发者磁盘设置档
+	# （硬核档无辅助稳定，逐帧行为不同——违反探针可复现原则）。set_current 只改内存。
+	FlightSettings.set_current(FlightSettings.for_difficulty(FlightSettings.Difficulty.NORMAL))
+	# 领机一次性标记：同进程首次领取为真、再领为假（探索赠机不刷屏）。
+	var prev_mode: GameState.Mode = GameState.mode
+	GameState.mode = GameState.Mode.EXPLORE
+	_check(GameState.claim_explore_aircraft(), "探索模式首次领取飞机为真")
+	_check(not GameState.claim_explore_aircraft(), "同进程内二次领取为假（赠机不刷屏）")
+	GameState.mode = prev_mode
+
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(60):
@@ -51,6 +81,7 @@ func _run() -> void:
 
 	_run_flight_model_checks()
 	_run_parts_checks()
+	_run_attitude_sign_checks()
 
 	# ── 准备：高架测试跑道 ──────────────────────────────
 	var origin := _pick_strip_origin(world)
@@ -68,9 +99,8 @@ func _run() -> void:
 
 	var surface := float(strip_y + 1)
 	# 起飞点（地面点）：place() 内部会再加 GROUND_CLEARANCE，这里只给地表高度。
-	# 机身放大后碰撞盒长 15.6 格、宽 6.6 格，故横向取跑道中线、
-	# 纵向留出机尾到跑道起点的余量，保证整机都在铺面上。
-	var start := Vector3(float(origin.x) + 5.0, surface + 0.1,
+	# 碰撞盒 15.6 m × 6.6 m（米制，非格）：横向取跑道中线，整机都在铺面上。
+	var start := Vector3(float(origin.x) + STRIP_WIDTH * 0.5, surface + 0.1,
 		float(origin.y) + 10.0)
 
 	# ── B 段：停放 ───────────────────────────────────────
@@ -107,12 +137,14 @@ func _run() -> void:
 	_check(not craft.is_wrecked(), "起飞过程未解体")
 	craft.controls.pitch = 0.0
 	var roll_distance := craft.global_position.z - start.z
-	_check(roll_distance > 2.0 and roll_distance < float(STRIP_LENGTH),
-		"滑跑距离落在跑道内（%.1f m）" % roll_distance)
+	_check(roll_distance > 12.0 and roll_distance < 24.0,
+		"起飞滑跑钉死 ≈18 m（实际 %.1f m，D-031）" % roll_distance)
 	var liftoff := craft.snapshot()
 	_check(liftoff["airspeed"] >= liftoff["stall_speed"] * 0.95,
 		"离地空速不低于失速速度（%.1f / %.1f m/s）"
 			% [liftoff["airspeed"], liftoff["stall_speed"]])
+	_check(liftoff["airspeed"] >= 13.5 and liftoff["airspeed"] <= 18.0,
+		"抬轮离地空速落在 14~18 m/s（实际 %.1f m/s）" % liftoff["airspeed"])
 
 	# ── D 段：半油门平飞速度收敛 ─────────────────────────
 	# 另起一架飞机投到**区块高度上限（64 格）之上**：那里全图无方块，
@@ -130,8 +162,8 @@ func _run() -> void:
 		var drift: float = cruiser.global_position.y - hold_y
 		cruiser.controls.pitch = clampf(-drift * 0.05, -0.35, 0.35)
 	var cruise := cruiser.snapshot()
-	_check(cruise["kmh"] > 95.0 and cruise["kmh"] < 155.0,
-		"半油门平飞速度收敛在巡航带（%.0f km/h）" % cruise["kmh"])
+	_check(cruise["kmh"] > 120.0 and cruise["kmh"] < 150.0,
+		"半油门平飞收敛钉死在巡航带（%.0f km/h，D-031 目标 127~137）" % cruise["kmh"])
 	_check(not cruise["stalled"], "巡航状态未失速")
 	_check(not cruiser.is_wrecked(), "巡航过程未解体")
 
@@ -142,7 +174,8 @@ func _run() -> void:
 	for i in range(360):
 		await get_tree().physics_frame
 	var climbed: float = cruiser.global_position.y - climb_start_y
-	_check(climbed > 5.0, "满油门拉杆可以爬升（+%.1f m）" % climbed)
+	_check(climbed > 30.0 and climbed < 110.0,
+		"满油门爬升率落在 5~18 m/s 量级（6 s 爬升 +%.1f m，D-031 目标 ≈10 m/s）" % climbed)
 
 	cruiser.controls.pitch = 1.0
 	var stalled := false
@@ -165,6 +198,31 @@ func _run() -> void:
 			recovered = true
 			break
 	_check(recovered, "推杆后改出失速")
+	cruiser.queue_free()
+
+	# ── D2 段：满油门平飞收敛（D-031：最大平飞 ≈50 m/s，必须低于 VNE 55）──
+	# 自起一架投到区块高度上限之上（全图无方块，可放心飞）。高度保持带阻尼项
+	# （-垂直速度）把富波阻尼掉，速度干净收敛到平衡值；50 m/s 初发贴近平衡点，
+	# 不激发大振幅摆动。默认机 1650 N / 240 kg：海平面平衡解 50.4 m/s。
+	var full_craft := Aircraft.spawn(
+		main_scene, start + Vector3(6.0, 46.0, 24.0), RUNWAY_HEADING)
+	full_craft.drive_remotely()
+	full_craft.launch(50.0)
+	full_craft.controls.throttle = 1.0
+	var full_hold_y := full_craft.global_position.y
+	for i in range(1200):
+		await get_tree().physics_frame
+		var fdrift: float = full_craft.global_position.y - full_hold_y
+		full_craft.controls.pitch = clampf(
+			-fdrift * 0.05 - full_craft.velocity.y * 0.04, -0.35, 0.35)
+	var full := full_craft.snapshot()
+	_check(full["airspeed"] < AircraftFlight.VNE - 1.0,
+		"满油门平飞低于结构极限（%.1f < %.0f m/s）"
+			% [full["airspeed"], AircraftFlight.VNE])
+	_check(full["airspeed"] > 46.0 and full["airspeed"] < 53.0,
+		"满油门平飞收敛钉死 ≈50 m/s（实际 %.1f m/s，D-031）" % full["airspeed"])
+	_check(not full["overspeed"], "满油门平飞未标超速")
+	full_craft.queue_free()
 
 	# ── F 段：俯冲撞地 → 解体 ────────────────────────────
 	# ── F 段：俯冲撞地 → 解体（机头朝 −Z，确保俯冲路径落在常驻区块内）──
@@ -207,6 +265,189 @@ func _run() -> void:
 	_check(lo_lifted > 0, "蓝图飞机满油门可离地（第 %d 帧）" % lo_lifted)
 	_check(not loadout.is_wrecked(), "蓝图飞机起飞未解体")
 	loadout.queue_free()
+
+	# ── G2 段：涡轮发动机套件满油门不解体（P1-1 修复守护）────────────
+	# 原 2600 N 涡轮满油门平飞平衡解 63.5 m/s > VNE 55，最贵解锁件必然超速解体。
+	# 修复（两者结合）：推力降到 1750 N + Airframe.aggregate 按零件 vne_limit 取下限
+	# （后者留给未来更脆零件；涡轮本身不弱于基准 55）。套件 = 默认零件拆下默认
+	# 发动机、原位换装涡轮（聚合只求和，位置不影响气动；双发并装仍会超速，属自找）。
+	var turbo_parts: Array[PlacedPart] = []
+	var engine_cell := Vector3i.ZERO
+	for p in PartRegistry.default_loadout():
+		if p.data.category == PartData.Category.ENGINE:
+			engine_cell = p.cell
+		else:
+			turbo_parts.append(p)
+	turbo_parts.append(PlacedPart.make(PartRegistry.by_id("turbine"), engine_cell))
+	var turbo_af := AircraftFlight.Airframe.aggregate(turbo_parts)
+	_check(absf(turbo_af.thrust_max - 1750.0) < 0.01,
+		"涡轮套件聚合推力 = 1750 N（实际 %.0f N）" % turbo_af.thrust_max)
+	_check(absf(turbo_af.mass - 250.0) < 0.01,
+		"涡轮套件聚合质量 = 250 kg（实际 %.1f kg）" % turbo_af.mass)
+	_check(turbo_af.vne == AircraftFlight.VNE,
+		"涡轮件不弱于基准结构限速（整机 VNE 仍 %.0f）" % turbo_af.vne)
+	# 满油门平飞 60 s：高度保持带阻尼，逐帧记录峰值空速。「不解体」即蕴含
+	# 「全程未触 VNE」——超速 flag 下一帧就触发解体（_check_failure）。
+	var turbo_bp := Blueprint.new()
+	turbo_bp.parts = turbo_parts
+	var turbo := Aircraft.from_loadout(
+		main_scene, start + Vector3(-6.0, 46.0, 24.0), RUNWAY_HEADING, turbo_bp)
+	turbo.drive_remotely()
+	turbo.crashed.connect(_on_crashed)
+	var turbo_crashes_before := _crash_reasons.size()
+	turbo.launch(50.0)
+	turbo.controls.throttle = 1.0
+	var turbo_hold_y := turbo.global_position.y
+	var turbo_max_v := 0.0
+	for i in range(3600):
+		await get_tree().physics_frame
+		turbo_max_v = maxf(turbo_max_v, float(turbo.snapshot()["airspeed"]))
+		var tdrift: float = turbo.global_position.y - turbo_hold_y
+		turbo.controls.pitch = clampf(
+			-tdrift * 0.05 - turbo.velocity.y * 0.04, -0.35, 0.35)
+	var turbo_reason := "无"
+	if _crash_reasons.size() > turbo_crashes_before:
+		turbo_reason = _crash_reasons[_crash_reasons.size() - 1]
+	_check(not turbo.is_wrecked(),
+		"涡轮套件满油门 60 s 不解体（峰值空速 %.1f m/s，坠机原因：%s）"
+			% [turbo_max_v, turbo_reason])
+	_check(turbo_max_v < AircraftFlight.VNE,
+		"涡轮全程峰值空速低于 VNE（%.1f < %.0f m/s）" % [turbo_max_v, AircraftFlight.VNE])
+	_check(turbo.snapshot()["airspeed"] > 48.0,
+		"涡轮满油门收敛在预期带（末速 %.1f m/s，平衡解 ≈52）"
+			% turbo.snapshot()["airspeed"])
+	turbo.queue_free()
+
+	# ── H 段：键盘 / 鼠标驾驶通路（此前探针全程远程驾驶，键鼠通路零覆盖）──
+	# 真实驾驶形态：piloted=true 且 use_player_input=true（不调 drive_remotely），
+	# _prepare_input 走 Input.get_axis 读动作；触屏分支在桌面端恒不激活。
+	var kb := Aircraft.spawn(main_scene, start + Vector3(6.0, 0.0, 6.0), RUNWAY_HEADING)
+	kb.set_piloted(true, player)
+	await _frames(2)
+	Input.action_press("aircraft_pitch_up")
+	await get_tree().physics_frame
+	_check(kb.controls.pitch > 0.5, "键盘 ↑ 拉杆产生正俯仰杆量（%.2f）" % kb.controls.pitch)
+	Input.action_release("aircraft_pitch_up")
+	await get_tree().physics_frame
+	_check(kb.controls.pitch < 0.05, "松杆后俯仰回中（%.2f）" % kb.controls.pitch)
+	Input.action_press("aircraft_roll_right")
+	await get_tree().physics_frame
+	_check(kb.controls.roll > 0.5, "键盘 → 产生右滚杆量（%.2f）" % kb.controls.roll)
+	Input.action_release("aircraft_roll_right")
+	Input.action_press("move_right")
+	await get_tree().physics_frame
+	_check(kb.controls.yaw > 0.5, "键盘 D 产生右偏航杆量（%.2f）" % kb.controls.yaw)
+	Input.action_release("move_right")
+	Input.action_press("jump")
+	await get_tree().physics_frame
+	_check(kb.controls.brake, "空格键触发机轮刹车")
+	Input.action_release("jump")
+	var thr0 := kb.controls.throttle
+	Input.action_press("move_forward")
+	await _frames(20)
+	_check(kb.controls.throttle > thr0 + 0.05,
+		"W 推升油门（%.2f → %.2f）" % [thr0, kb.controls.throttle])
+	Input.action_release("move_forward")
+	var thr1 := kb.controls.throttle
+	Input.action_press("move_back")
+	await _frames(20)
+	_check(kb.controls.throttle < thr1 - 0.05,
+		"S 收低油门（%.2f → %.2f）" % [thr1, kb.controls.throttle])
+	Input.action_release("move_back")
+	# 鼠标操纵杆：右移 → 右滚、上移 → 抬头（Godot 鼠标 motion 的 y 正方向向下）。
+	kb.add_mouse_motion(Vector2(200.0, -200.0))
+	await get_tree().physics_frame
+	_check(kb.controls.roll > 0.3, "鼠标右移产生右滚杆量（%.2f）" % kb.controls.roll)
+	_check(kb.controls.pitch > 0.3, "鼠标上移产生抬头杆量（%.2f）" % kb.controls.pitch)
+	kb.set_piloted(false)
+	kb.queue_free()
+
+	# ── I 段：试飞闭环端到端（build_screen_probe 只验到信号层，这里验 main 接线）──
+	# main._on_test_fly_requested：蓝图 → 放到玩家身前实心面 → 直接登机。
+	# 玩家先站到跑道中段（面朝 −Z，沿跑道），试飞机才会落在铺面上。
+	player.global_position = Vector3(
+		float(origin.x) + STRIP_WIDTH * 0.5,
+		float(strip_y) + 3.0,
+		float(origin.y) + STRIP_LENGTH * 0.5)
+	player.rotation = Vector3.ZERO
+	var player_pos_before: Vector3 = player.global_position
+	var e2e_bp := Blueprint.new()
+	e2e_bp.parts = PartRegistry.default_loadout()
+	main_scene.call("_on_test_fly_requested", e2e_bp)
+	var fly_craft: Aircraft = player.aircraft()
+	_check(fly_craft != null, "试飞请求后玩家直接登机（player.aircraft() 非空）")
+	if fly_craft != null:
+		_check(fly_craft.get_parent() == main_scene, "试飞机作为 main 子节点生成")
+		var to_craft: Vector3 = fly_craft.global_position - player_pos_before
+		to_craft.y = 0.0
+		_check(to_craft.length() > 8.0 and to_craft.length() < 12.0,
+			"飞机生成在玩家身前约 10 m（实际 %.1f m）" % to_craft.length())
+		await _frames(30)
+		_check(fly_craft.is_on_floor(), "试飞机停在实心面上")
+		var cell_u := Vector3i(fly_craft.global_position.floor())
+		var block_u := BlockTypes.Block.AIR
+		for i in range(6):
+			var bb = world.get_block(cell_u - Vector3i(0, i, 0))
+			if bb != BlockTypes.Block.AIR:
+				block_u = bb
+				break
+		_check(block_u == BlockTypes.Block.COBBLESTONE,
+			"试飞机下方是跑道铺面（block=%d）" % block_u)
+		_check(absf(fly_craft._state.airframe.mass - 240.0) < 0.01,
+			"试飞气动框 = 蓝图聚合（质量 %.1f kg）" % fly_craft._state.airframe.mass)
+		player.exit_aircraft()
+		await _frames(2)
+		_check(player.aircraft() == null, "下机后玩家脱离飞机")
+		fly_craft.queue_free()
+
+	# ── J 段：任务遥测接线端到端 + 下机中止（P1-2 修复守护）────────────
+	# mission_panel_probe 用合成遥测直喂面板；这里验 main._physics_process 的
+	# 真实接线：骑乘 → 组遥测 → hud.feed_mission → 面板 → MissionManager.step。
+	hud.set_mission_anchor(Vector3(
+		float(origin.x) + STRIP_WIDTH * 0.5, 0.0,
+		float(origin.y) + STRIP_LENGTH * 0.5))
+	hud.open_mission_panel()
+	var panel: MissionPanel = hud._mission_panel
+	_check(panel != null and panel.is_open(), "任务面板可打开")
+	panel.start_mission(0)
+	_check(panel.is_running(), "任务 0（起飞）已开始")
+	var mm_before: float = panel._mm.elapsed()
+	var tel_craft := Aircraft.spawn(
+		main_scene, start + Vector3(-6.0, 0.0, 6.0), RUNWAY_HEADING)
+	player.ride_aircraft(tel_craft)
+	await _frames(30)
+	var mm_riding: float = panel._mm.elapsed()
+	_check(mm_riding > mm_before + 0.2,
+		"骑乘时真实遥测喂进任务管理器（elapsed %.2f → %.2f s）"
+			% [mm_before, mm_riding])
+	# 下机：遥测停喂 + P1-2 修复——任务被 abandon，不再永久卡 RUNNING。
+	player.exit_aircraft()
+	await _frames(10)
+	_check(absf(panel._mm.elapsed() - mm_riding) < 0.001,
+		"下机后遥测停喂，elapsed 定格（%.2f s）" % panel._mm.elapsed())
+	_check(not panel.is_running(),
+		"下机后任务被中止（P1-2：可再开新任务，不再卡死）")
+	hud.close_mission_panel()
+	tel_craft.queue_free()
+
+	# ── K 段：涂装每帧同步（settings_panel_probe 只验面板落盘，这里验在飞飞机）──
+	var livery_craft := Aircraft.spawn(
+		main_scene, start + Vector3(6.0, 0.0, -6.0), RUNWAY_HEADING)
+	livery_craft.drive_remotely()
+	await _frames(2)
+	_check(livery_craft._model != null, "默认（非蓝图）飞机带程序化机模")
+	FlightSettings.current().set_livery(2)
+	await get_tree().physics_frame
+	_check(livery_craft._model != null and livery_craft._model.livery_index() == 2,
+		"改设置后下一帧机身改色（涂装索引 %d）" % livery_craft._model.livery_index())
+	var livery_body_mats: Array = livery_craft._model._role_materials.get("body", [])
+	var livery_ok := livery_body_mats.size() > 0
+	for mat: StandardMaterial3D in livery_body_mats:
+		if mat.albedo_color != AircraftLivery.body_of(2):
+			livery_ok = false
+	_check(livery_ok, "机身材质 albedo 同步为丛林绿")
+	FlightSettings.current().set_livery(0)
+	livery_craft.queue_free()
 
 	_finish()
 
@@ -254,6 +495,64 @@ func _run_flight_model_checks() -> void:
 	_check(absf(level.load_factor - 1.0) < 0.1,
 		"配平平飞时载荷系数 ≈ 1g（%.2f，配平攻角 %.1f°）"
 			% [level.load_factor, rad_to_deg(alpha_trim)])
+
+	# ── D-031 标定值钉死（核对报告：此前为宽区间/弱不等式，改坏数值不一定被抓）──
+	_check(AircraftFlight.VNE == 55.0, "结构极限速度 VNE = 55 m/s（D-031 钉死）")
+	# 巡航 35 m/s 平飞阻力 ≈815 N：直接用模型 acceleration() 反推——攻角配平后
+	# 升力与重力相消、零油门，合加速度即阻力/质量，故 |a|·m 就是阻力（N）。
+	var cruise_state := AircraftFlight.make_state(Vector3.ZERO)
+	cruise_state.velocity = Vector3(0.0, 0.0, -35.0)
+	var q35 := 0.5 * AircraftFlight.SEA_LEVEL_DENSITY * 35.0 * 35.0
+	var cl35 := (af.mass * AircraftFlight.GRAVITY) / (q35 * af.wing_area)
+	cruise_state.basis = Basis.from_euler(Vector3(cl35 / AircraftFlight.CL_ALPHA, 0.0, 0.0))
+	var drag35 := AircraftFlight.acceleration(
+		cruise_state, AircraftFlight.Controls.new()).length() * af.mass
+	_check(absf(drag35 - 815.0) < 82.0,
+		"巡航 35 m/s 平飞阻力 ≈815 N（模型反推 %.0f N，D-031 半油门巡航点）" % drag35)
+	# 最大升阻比扫描：L/Dmax = 1/(2·√(cd0·k)) ≈ 8（D-031）。
+	var best_ld := 0.0
+	for i in range(65):
+		var a_ld := float(i) / 64.0 * AircraftFlight.STALL_ALPHA
+		var cl_ld := AircraftFlight.lift_coefficient(a_ld)
+		best_ld = maxf(best_ld, cl_ld / (af.cd0 + af.induced_k * cl_ld * cl_ld))
+	_check(best_ld > 7.0 and best_ld < 9.0,
+		"最大升阻比 L/Dmax ≈8（扫描峰值 %.2f，D-031）" % best_ld)
+	# 失速速度钉死 13.1 m/s（D-031 目标，容差 0.3）。
+	_check(absf(vs - 13.1) < 0.3,
+		"海平面失速速度钉死 13.1 m/s（实际 %.2f m/s，合 %.1f km/h）"
+			% [vs, vs * AircraftFlight.MPS_TO_KMH])
+
+
+## 姿态积分三轴符号回归：正滚转杆量 → 右翼下沉、正俯仰杆量 → 机头上仰、
+## 正偏航杆量 → 机头右偏。D-031 曾把 pitch 符号写反（拉杆变成压机头），
+## 此处把「杆量方向 → 机体响应」钉死，将来改坏 _integrate_attitude 符号立刻被抓。
+func _run_attitude_sign_checks() -> void:
+	var dt := 1.0 / 60.0
+	var rs := AircraftFlight.make_state(Vector3.ZERO)
+	rs.velocity = -rs.basis.z * 40.0
+	var rc := AircraftFlight.Controls.new()
+	rc.roll = 1.0
+	for i in range(30):
+		AircraftFlight.integrate(rs, rc, dt, false)
+	_check(rs.basis.x.y < -0.2,
+		"正滚转杆量把右翼压下沉（basis.x.y = %.2f）" % rs.basis.x.y)
+	var ps := AircraftFlight.make_state(Vector3.ZERO)
+	ps.velocity = -ps.basis.z * 40.0
+	var pc := AircraftFlight.Controls.new()
+	pc.pitch = 1.0
+	for i in range(30):
+		AircraftFlight.integrate(ps, pc, dt, false)
+	_check((-ps.basis.z).y > 0.2,
+		"拉杆（正俯仰杆量）抬机头（仰角 %.1f°）"
+			% rad_to_deg(asin(clampf((-ps.basis.z).y, -1.0, 1.0))))
+	var ys := AircraftFlight.make_state(Vector3.ZERO)
+	ys.velocity = -ys.basis.z * 40.0
+	var yc := AircraftFlight.Controls.new()
+	yc.yaw = 1.0
+	for i in range(30):
+		AircraftFlight.integrate(ys, yc, dt, false)
+	_check(-ys.basis.z.x > 0.1,
+		"右舵（正偏航杆量）把机头转向右（机头 x 分量 %.2f）" % -ys.basis.z.x)
 
 
 ## Phase 1 聚合断言（D-032）：整机特性必须等于零件的求和，数据驱动不失真。
@@ -376,12 +675,49 @@ func _frames(count: int) -> void:
 
 
 func _finish() -> void:
+	# 存档还原（D-010 铁律 3）：把探针期间被推进的成就计数/设置写回快照原样，
+	# 用户真实进度零污染（life_probe 阶段 S 同款范式）。
+	_restore_user_saves()
 	if _failed == 0:
 		print("FLIGHT_PROBE_OK")
 		get_tree().quit(0)
 	else:
 		print("FLIGHT_PROBE_FAILED count=%d" % _failed)
 		get_tree().quit(1)
+
+
+## 存档隔离（D-010）：快照 / 还原 user:// 文本文件。空串 = 原文件不存在，还原即删除。
+func _read_user_text(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return ""
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return ""
+	var text := f.get_as_text()
+	f.close()
+	return text
+
+
+func _write_user_text(path: String, text: String) -> void:
+	if text == "":
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+		return
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(text)
+	f.close()
+
+
+func _restore_user_saves() -> void:
+	_write_user_text("user://progress.json", _saved_progress)
+	_write_user_text("user://settings.json", _saved_settings)
+	# 内存态一并还原：否则 Progress._exit_tree 的 _save() 会把探针推进过的
+	# 计数再写一遍盘，文件还原被覆盖（D-010 铁律 3 的实测教训）。
+	Progress.counters = _saved_counters.duplicate()
+	Progress.states = _saved_states.duplicate()
+	Progress._quiz_correct_since_reward = _saved_quiz_streak
 
 
 func _check(cond: bool, label: String) -> void:

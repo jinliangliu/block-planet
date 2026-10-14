@@ -157,3 +157,6 @@ func _run() -> void:
 	var pitch_after := _pitch_of(pitch_state)
 	_check(pitch_after > deg_to_rad(12.0),
 		"辅助不干预俯仰，20° 上仰不被自动压平（实际 %.1f°）" % rad_to_deg(pitch_after))
+
+	# 清理临时存档（含故意写坏的那份），不留在 user://（D-010 铁律 3）。
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(tmp))

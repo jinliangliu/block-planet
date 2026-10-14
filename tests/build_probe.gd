@@ -167,6 +167,8 @@ func _check_visualizer() -> void:
 
 
 func _finish() -> void:
+	# 清理探针临时蓝图，不留在 user://（D-010 铁律 3）。
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://build_probe_test.json"))
 	if _failed == 0:
 		print("BUILD_PROBE_OK")
 		get_tree().quit(0)

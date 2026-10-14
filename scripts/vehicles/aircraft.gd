@@ -70,6 +70,14 @@ const DIST_MILESTONE_STEP := 100.0
 @export var use_player_input := true
 
 var controls := AircraftFlight.Controls.new()
+## 触屏驾驶输入：由 HUD 飞行触控层写入，替代键盘/鼠标（仅触屏设备、有人驾驶时启用）。
+## 桌面端 _touch_active 恒为 false，走键盘/鼠标分支，互不影响。
+var _touch_active := false
+var _touch_pitch := 0.0
+var _touch_roll := 0.0
+var _touch_yaw := 0.0
+var _touch_throttle := 0.0
+var _touch_brake := false
 ## 是否有人驾驶（决定输入来源与座位跟随）。
 var piloted := false
 ## 当前骑乘者（Player），未骑乘为 null。
@@ -232,6 +240,16 @@ func drive_remotely() -> void:
 
 
 ## 上机 / 下机。
+## 交给 HUD 飞行触控层写入本帧操纵量（触屏专用）。桌面端不调用，故不影响键鼠通路。
+func set_touch_flight_input(pitch: float, roll: float, yaw: float, throttle: float, brake: bool) -> void:
+	_touch_active = true
+	_touch_pitch = pitch
+	_touch_roll = roll
+	_touch_yaw = yaw
+	_touch_throttle = throttle
+	_touch_brake = brake
+
+
 func set_piloted(value: bool, who: Player = null) -> void:
 	piloted = value
 	rider = who if value else null
@@ -241,6 +259,12 @@ func set_piloted(value: bool, who: Player = null) -> void:
 		controls.roll = 0.0
 		controls.yaw = 0.0
 		_stick = Vector2.ZERO
+		_touch_active = false
+		_touch_pitch = 0.0
+		_touch_roll = 0.0
+		_touch_yaw = 0.0
+		_touch_throttle = 0.0
+		_touch_brake = false
 
 
 func _physics_process(delta: float) -> void:
@@ -392,6 +416,15 @@ func _prepare_input(delta: float) -> void:
 		return
 	if not use_player_input:
 		# 脚本/探针驱动：一个字段都不碰，全部由外部写入。
+		return
+
+	if _touch_active:
+		# 触屏驾驶：HUD 飞行触控层已写好本帧操纵量，原样采用。
+		controls.pitch = _touch_pitch
+		controls.roll = _touch_roll
+		controls.yaw = _touch_yaw
+		controls.throttle = _touch_throttle
+		controls.brake = _touch_brake
 		return
 
 	_stick = _stick.lerp(Vector2.ZERO, clampf(STICK_CENTER_RATE * delta, 0.0, 1.0))
