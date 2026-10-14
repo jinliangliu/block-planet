@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="100%" height="100%">
+  <defs>
+    <!-- 背景渐变 -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="70%" fx="50%" fy="50%">
+      <stop offset="0%" stop-color="#1B2433" />
+      <stop offset="100%" stop-color="#131822" />
+    </radialGradient>
+    
+    <!-- 立方体颜色变体 -->
+    <linearGradient id="cubeTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2B8FAC" />
+      <stop offset="100%" stop-color="#1E6A85" />
+    </linearGradient>
+    <linearGradient id="cubeLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A5972" />
+      <stop offset="100%" stop-color="#124256" />
+    </linearGradient>
+    <linearGradient id="cubeRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#144B61" />
+      <stop offset="100%" stop-color="#0D3547" />
+    </linearGradient>
+    
+    <!-- 高亮发光渐变 -->
+    <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#6FF9FF" stop-opacity="1" />
+      <stop offset="70%" stop-color="#2BDFEE" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#1BA8C4" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- 等距立方体图案（用于填充） -->
+    <pattern id="isoCube" width="60" height="60" patternUnits="userSpaceOnUse" patternTransform="translate(0,0)">
+      <!-- 顶面 -->
+      <polygon points="30,0 60,15 30,30 0,15" fill="#207994" />
+      <!-- 左侧面 -->
+      <polygon points="0,15 30,30 30,60 0,45" fill="#154B61" />
+      <!-- 右侧面 -->
+      <polygon points="30,30 60,15 60,45 30,60" fill="#103A4E" />
+      <!-- 描边 -->
+      <polygon points="30,0 60,15 30,30 0,15" fill="none" stroke="#1A5F78" stroke-width="1" />
+      <polygon points="0,15 30,30 30,60 0,45" fill="none" stroke="#0D3547" stroke-width="1" />
+      <polygon points="30,30 60,15 60,45 30,60" fill="none" stroke="#0D3547" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="100%" height="100%" fill="url(#bgGrad)" />
+
+  <!-- 星球主体（六边形剪裁） -->
+  <g id="planet" transform="translate(500, 450)">
+    <!-- 六边形外轮廓背景 -->
+    <polygon points="0,-240 208,-120 208,120 0,240 -208,120 -208,-120" fill="#1A2332" stroke="#1C5F7A" stroke-width="4" />
+    
+    <!-- 使用图案填充模拟立方体块 -->
+    <polygon points="0,-240 208,-120 208,120 0,240 -208,120 -208,-120" fill="url(#isoCube)" />
+    
+    <!-- 添加一些随机的高光和阴影块来增加立体感 -->
+    <!-- 顶部高光块 -->
+    <polygon points="-30,-200 30,-200 60,-180 0,-180" fill="#3AB0D1" opacity="0.6" />
+    <polygon points="-60,-160 -10,-160 20,-140 -30,-140" fill="#3AB0D1" opacity="0.4" />
+    <polygon points="60,-160 110,-160 140,-140 90,-140" fill="#2B8FAC" opacity="0.5" />
+    
+    <!-- 右侧阴影块 -->
+    <polygon points="100,0 150,0 180,20 130,20" fill="#0D3547" opacity="0.8" />
+    <polygon points="120,40 170,40 200,60 150,60" fill="#0D3547" opacity="0.9" />
+    
+    <!-- 底部阴影块 -->
+    <polygon points="-100,160 -50,160 -20,180 -70,180" fill="#0D3547" opacity="0.8" />
+    <polygon points="-40,200 10,200 40,220 -10,220" fill="#0D3547" opacity="0.9" />
+
+    <!-- 中心发光十字（标志性元素） -->
+    <!-- 基础发光层 -->
+    <path d="M -40,-60 L 40,-60 L 40,-10 L 90,-10 L 90,30 L 40,30 L 40,80 L -40,80 L -40,30 L -90,30 L -90,-10 L -40,-10 Z" 
+          fill="url(#glowGrad)" />
+    
+    <!-- 亮青色核心十字 -->
+    <path d="M -30,-50 L 30,-50 L 30,-5 L 75,-5 L 75,25 L 30,25 L 30,70 L -30,70 L -30,25 L -75,25 L -75,-5 L -30,-5 Z" 
+          fill="#4DE8F5" />
+    
+    <!-- 内部高亮核心 -->
+    <path d="M -20,-40 L 20,-40 L 20,0 L 60,0 L 60,15 L 20,15 L 20,55 L -20,55 L -20,15 L -60,15 L -60,0 L -20,0 Z" 
+          fill="#8AFFFF" />
+  </g>
+
+  <!-- 底部文字 "block-planet" -->
+  <g transform="translate(500, 850)">
+    <!-- 文字阴影增加厚度感 -->
+    <text x="0" y="0" font-family="'Arial Black', 'Impact', sans-serif" font-weight="900" font-size="140" fill="#0D141E" text-anchor="middle" letter-spacing="4" transform="translate(4, 4)">
+      block-planet
+    </text>
+    <!-- 主文字 -->
+    <text x="0" y="0" font-family="'Arial Black', 'Impact', sans-serif" font-weight="900" font-size="140" fill="#FFFFFF" text-anchor="middle" letter-spacing="4">
+      block-planet
+    </text>
+  </g>
+</svg>
