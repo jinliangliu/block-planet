@@ -55,10 +55,10 @@ const DOUBLE_TAP_PICKUP_MS := 350
 const PICKUP_RANGE := 7.0
 const CAM_STEP := 1.8
 const CAM_DISTANCE_MAX := 9.0
-## 驾驶时的追尾距离上限：机模放大后（翼展 24 格）9 格距离会被机身糊满屏。
+## 驾驶时的追尾距离上限：机模放大后（翼展 24 m），步行档的 9 m 距离会被机身糊满屏。
 const CAM_DISTANCE_MAX_RIDING := 20.0
-## 驾驶时的默认追尾俯仰：抬高相机越过垂尾（垂尾顶 4.28 格，眼位只有 2.75），
-## 否则追尾视角正对着自己的尾翼。
+## 驾驶时的默认追尾俯仰：抬高相机越过垂尾（垂尾顶 4.28 m = 8.55 格，眼位只有
+## 2.75 m），否则追尾视角正对着自己的尾翼。
 const CHASE_PITCH_RIDING := -0.22
 const FIRST_PERSON_MAX_DISTANCE := 0.1
 const SWING_INTERVAL := 0.3

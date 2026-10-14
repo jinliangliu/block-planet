@@ -6,8 +6,9 @@ extends CharacterBody3D
 ## 机身碰撞与地面支撑、轮胎抓地、撞击解体、乘员座位、信号广播。
 ## 机型表现见 AircraftModel（纯代码生成的机模）。
 ##
-## 世界尺度：1 格 = 0.5 m（D-030）。机身约 17 格长、翼展 24 格（≈ 8.5 m × 12 m
-## 的轻型单发机），比村庄民居（12×12 格）大一圈，起飞需要一段平地或跑道。
+## 世界尺度：1 格 = 0.5 m（D-030）。机身长约 10.2 m（约 20 格）、翼展 24 m
+## （48 格）的轻型单发机，比村庄民居（12×12 格 = 6×6 m）大一圈，起飞需要
+## 一段平地或跑道。
 ##
 ## 驾驶输入（use_player_input = true 且 piloted 时）：
 ##   鼠标 → 操纵杆（俯仰 / 滚转，松手缓慢回中）
@@ -24,8 +25,8 @@ signal crashed(reason: String)
 
 ## 机身原点（重心）距地面的高度：与 AircraftModel.GROUND_CLEARANCE 一致。
 const GROUND_CLEARANCE := AircraftModel.GROUND_CLEARANCE
-## 碰撞盒：横向只包住机身（6.6 × 4.8 × 15.6 格 ≈ 3.3 × 2.4 × 7.8 m），
-## 翼展（24 格）不参与碰撞，否则机身会一路刮蹭树冠与屋檐。
+## 碰撞盒：横向只包住机身（6.6 × 4.8 × 15.6 m，即 13.2 × 9.6 × 31.2 格），
+## 翼展（24 m）不参与碰撞，否则机身会一路刮蹭树冠与屋檐。
 ## 底面必须恰在 −GROUND_CLEARANCE：中心 y = −0.15 × 3，半高 2.4。
 const COLLIDER_SIZE := Vector3(2.2, 1.6, 5.2) * AircraftModel.MODEL_SCALE
 const COLLIDER_CENTER := Vector3(0.0, -0.05, 0.0) * AircraftModel.MODEL_SCALE
