@@ -24,6 +24,7 @@ var _pole_markers: Array[Node3D] = []
 var _region_labels: Array[Label3D] = []
 ## 机场标记：带跑道区域的红色小球，钉在区域名称旁，提示玩家该区可起飞。
 var _airport_markers: Array[Node3D] = []
+var _field_markers: Array[Node3D] = []
 
 
 func _ready() -> void:
@@ -116,6 +117,7 @@ func _add_pole_markers() -> void:
 	_pole_markers.append(_make_pole_marker("南极", Color(0.94, 0.96, 0.99), -(RADIUS + POLE_MARKER_LIFT)))
 	_add_region_labels()
 	_add_airport_markers()
+	_add_field_markers()
 
 
 ## 七大洲四大洋名称贴在球面对应位置：锚点经纬度经 lat_lon_to_dir 映射到球面
@@ -133,6 +135,8 @@ func _add_region_labels() -> void:
 		var label_text := RegionAtlas.title_of(region_id)
 		if RegionAtlas.has_airport(region_id):
 			label_text += "（机场）"
+		elif RegionAtlas.has_landing_field(region_id):
+			label_text += "（降落场）"
 		_region_labels.append(_make_region_label(label_text, pos, is_land))
 
 
@@ -164,6 +168,40 @@ func _make_airport_marker(pos: Vector3) -> MeshInstance3D:
 	sphere.height = 0.07
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.95, 0.20, 0.18)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh.material_override = mat
+	mesh.position = pos
+	add_child(mesh)
+	return mesh
+
+
+## 降落场标记：非机场区域（大洋岛上 / 极地冰面）的简易跑道，钉琥珀色小球，
+## 与机场红点区分。可重复调用（幂等）。
+func _add_field_markers() -> void:
+	for marker in _field_markers:
+		marker.queue_free()
+	_field_markers.clear()
+	for region_id in RegionAtlas.COUNT:
+		if not RegionAtlas.has_landing_field(region_id):
+			continue
+		var anchor: Vector2 = RegionAtlas.REGION_ANCHORS[region_id]
+		var dir: Vector3 = RegionAtlas.lat_lon_to_dir(anchor.x, anchor.y)
+		var pos: Vector3 = dir * (RADIUS + REGION_LABEL_LIFT + 0.02)
+		# 沿球面切线方向偏移一小段，避免与名称标签重叠。
+		var tangent := dir.cross(Vector3(0.0, 1.0, 0.0))
+		if tangent.length_squared() < 0.001:
+			tangent = Vector3(1.0, 0.0, 0.0)
+		pos += tangent.normalized() * 0.05
+		_field_markers.append(_make_field_marker(pos))
+
+
+func _make_field_marker(pos: Vector3) -> MeshInstance3D:
+	var mesh := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.03
+	sphere.height = 0.06
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.98, 0.72, 0.15)
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mesh.material_override = mat
 	mesh.position = pos

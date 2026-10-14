@@ -2,7 +2,7 @@ extends Node
 
 ## 无头验证 MissionManager 的三种任务裁决逻辑（纯逻辑，不依赖世界/地形）。
 ## 以合成遥测序列驱动 step()，覆盖：起飞成功/坠机/超时、绕点成功/坠机、
-## 降落成功/硬着陆/滑出区。
+## 降落成功/硬着陆/滑出区/未停跑道面。
 
 const DT := 0.1
 
@@ -125,15 +125,17 @@ func _check_circuit() -> void:
 
 
 # ---------------------------------------------------------------- 降落
-func _frames_landing(touchdown_vs: float, final_pos: Vector3, stop_speed: float) -> Array[Dictionary]:
+func _frames_landing(touchdown_vs: float, final_pos: Vector3, stop_speed: float,
+		block_under: int = -1) -> Array[Dictionary]:
 	var f: Array[Dictionary] = []
 	for i in 4:  # 进近：空中
 		f.append({"altitude_agl": 50.0 - i * 10.0, "speed": 100.0,
 			"position": Vector3(0, 0, 0), "on_ground": false,
 			"vertical_speed": -2.0, "wrecked": false})
-	# 触地 + 滑跑停稳
+	# 触地 + 滑跑停稳（block_under：机身下方地面方块，跑道面判据）
 	f.append({"altitude_agl": 0.0, "speed": stop_speed, "position": final_pos,
-		"on_ground": true, "vertical_speed": touchdown_vs, "wrecked": false})
+		"on_ground": true, "vertical_speed": touchdown_vs, "wrecked": false,
+		"block_under": block_under})
 	return f
 
 
@@ -157,7 +159,30 @@ func _check_landing() -> void:
 	_check(out.get("reason", "") == "滑出降落区", "降落：失败原因为「滑出降落区」")
 
 
+## 降落（跑道面校验）：zone_block 任务落在草地上判失败，压在跑道面上才成功。
+func _check_landing_runway() -> void:
+	var m := _mk(MissionData.Type.LANDING,
+		{"zone_radius": 50.0, "max_touchdown_vs": 3.0, "max_roll_speed": 25.0,
+			"zone_block": BlockTypes.Block.COBBLESTONE})
+	m.zone_center = Vector3(0, 0, 0)
+	_check(m.zone_block() == BlockTypes.Block.COBBLESTONE,
+		"降落：zone_block 参数可读（锚定跑道的任务带块要求）")
+
+	var on_grass := _run_mission(m, _frames_landing(-1.5, Vector3(5, 0, 0), 10.0,
+		BlockTypes.Block.GRASS))
+	_check(not on_grass.get("success", true), "降落：区内但未压在跑道面判失败")
+	_check(on_grass.get("reason", "") == "未停在跑道面",
+		"降落：失败原因为「未停在跑道面」（实际「%s」）" % on_grass.get("reason", ""))
+
+	var on_runway := _run_mission(m, _frames_landing(-1.5, Vector3(5, 0, 0), 10.0,
+		BlockTypes.Block.COBBLESTONE))
+	_check(on_runway.get("success", false), "降落：压在跑道面上停稳判成功")
+	_check(on_runway.get("reason", "") == "降落成功",
+		"降落：成功原因为「降落成功」")
+
+
 func _run_mission_checks() -> void:
 	_check_takeoff()
 	_check_circuit()
 	_check_landing()
+	_check_landing_runway()

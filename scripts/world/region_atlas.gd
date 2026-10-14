@@ -207,6 +207,7 @@ const REGIONS := [
 		"scenery": "碧海环绕零星沙洲与绿岛，视野开阔。",
 		"seed": 20260101,
 		"water": "normal",
+		"has_landing_field": true,
 		"base_height": 18.0,
 		"amplitude": 9.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -230,6 +231,7 @@ const REGIONS := [
 		"scenery": "深蓝海面托起苍翠岛屿，天色沉静。",
 		"seed": 20260202,
 		"water": "normal",
+		"has_landing_field": true,
 		"base_height": 19.0,
 		"amplitude": 9.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -253,6 +255,7 @@ const REGIONS := [
 		"scenery": "碧绿海水与金色沙洲相接，明亮温暖。",
 		"seed": 20260303,
 		"water": "normal",
+		"has_landing_field": true,
 		"base_height": 18.5,
 		"amplitude": 10.0,
 		"surface": BlockTypes.Block.GRASS,
@@ -276,6 +279,7 @@ const REGIONS := [
 		"scenery": "一望无际的封冻冰海，巨大的冰山零零散散立在海面上。",
 		"seed": 20260404,
 		"water": "iceberg",
+		"has_landing_field": true,
 		"base_height": 16.0,
 		"amplitude": 5.0,
 		"surface": BlockTypes.Block.SNOW,
@@ -444,6 +448,7 @@ const REGIONS := [
 		"scenery": "无边冰海延伸到天际，巨大冰山与雪顶浮冰静静漂浮。",
 		"seed": 20261010,
 		"water": "iceberg",
+		"has_landing_field": true,
 		"base_height": 17.0,
 		"amplitude": 5.0,
 		"surface": BlockTypes.Block.SNOW,
@@ -504,6 +509,12 @@ static func profile(region_id: int) -> Dictionary:
 static func has_airport(region_id: int) -> bool:
 	var p: Dictionary = profile(region_id)
 	return bool(p.get("has_airport", false))
+
+
+## 该区域是否布有简易降落场（大洋岛上 / 极地冰面的短跑道，无机库）。
+static func has_landing_field(region_id: int) -> bool:
+	var p: Dictionary = profile(region_id)
+	return bool(p.get("has_landing_field", false))
 
 
 static func title_of(region_id: int) -> String:

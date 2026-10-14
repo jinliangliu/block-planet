@@ -42,11 +42,21 @@ func _ready() -> void:
 
 	_world.set_player(_player)
 	_player.day_night_ref = _day_night
-	# 机场先于出生点生成：带机场的区域把出生点改写到跑道南段，
-	# 玩家开局即站在跑道上；机场位置避开村庄，互不重叠。
+	# 机场 / 降落场先于出生点生成：带机场的区域把出生点改写到跑道南段；
+	# 大洋（岛上）/ 极地（冰面）区域布一座无机库的简易降落场，同样开场在
+	# 跑道旁。位置均避开村庄（机场在村庄东南角，降落场搜索半径 ≤ 10），
+	# 互不重叠。
 	var airport_spawn := Vector3.ZERO
-	if RegionAtlas.has_airport(GameState.current_region):
-		airport_spawn = AirportBuilder.new().build(_world, _airport_center(GameState.current_region))
+	var mission_anchor := Vector3.ZERO
+	var region := GameState.current_region
+	if RegionAtlas.has_airport(region):
+		var center := _airport_center(region)
+		airport_spawn = AirportBuilder.new().build(_world, center)
+		mission_anchor = Vector3(center)
+	elif RegionAtlas.has_landing_field(region):
+		var site := _find_field_site()
+		airport_spawn = AirportBuilder.new().build_field(_world, site)
+		mission_anchor = Vector3(site)
 	# 村庄先于出生点生成：亚洲出生点锚定在村庄整平区内，扫描时读到的
 	# 必须是整平后的 GRASS+空气（set_block_deferred 的数据写入是同步的）。
 	_build_village()
@@ -61,11 +71,11 @@ func _ready() -> void:
 	_hud.setup(_player)
 	_hud.set_day_night(_day_night)
 	_hud.set_map_name(String(profile["title"]))
-	# 飞行任务航路 / 降落区锚定机场（无机场区域锚定出生点）：形成「跑道起飞 → 绕场 → 落回」闭环。
-	var mission_anchor := Vector3(spawn_pos.x, 0.0, spawn_pos.z)
-	if airport_spawn != Vector3.ZERO:
-		mission_anchor = Vector3(_airport_center(GameState.current_region))
-	_hud.set_mission_airport(mission_anchor)
+	# 飞行任务航路 / 降落区锚定机场或降落场（两者皆无才锚定出生点）：
+	# 形成「跑道起飞 → 单向绕场 → 落回跑道面」闭环。
+	if mission_anchor == Vector3.ZERO:
+		mission_anchor = Vector3(spawn_pos.x, 0.0, spawn_pos.z)
+	_hud.set_mission_anchor(mission_anchor)
 	_mob_spawner.setup(_player, _world, _day_night)
 	_mob_spawner.set_region(profile)
 	_player.died.connect(func(): Events.player_died.emit())
@@ -86,12 +96,22 @@ func _ready() -> void:
 
 ## 飞行任务遥测：玩家在机上时，每物理帧把真实飞行状态喂给 HUD 任务面板
 ## （MissionManager 的遥测约定：altitude_agl/speed(km/h)/position/on_ground/
-## vertical_speed/wrecked）。不在机上则无需喂帧——面板只在 RUNNING 时透传。
+## vertical_speed/wrecked/block_under）。不在机上则无需喂帧——面板只在
+## RUNNING 时透传。
 func _physics_process(delta: float) -> void:
 	var craft := _player.aircraft()
 	if craft == null or not is_instance_valid(craft):
 		return
 	var snap := craft.snapshot()
+	# 机身下方地面方块（自机身原点向下扫首个实块）：降落任务「必须停在
+	# 跑道面」的判据。停机时机身原点离地约 2.5 m，扫 6 格必达地面。
+	var cell := Vector3i(craft.global_position.floor())
+	var block_under := BlockTypes.Block.AIR
+	for i in range(6):
+		var b := _world.get_block(cell - Vector3i(0, i, 0))
+		if b != BlockTypes.Block.AIR:
+			block_under = b
+			break
 	var telemetry := {
 		"altitude_agl": float(snap.get("altitude_agl", 0.0)),
 		"speed": float(snap.get("kmh", 0.0)),
@@ -99,6 +119,7 @@ func _physics_process(delta: float) -> void:
 		"on_ground": craft.is_on_floor(),
 		"vertical_speed": craft.velocity.y,
 		"wrecked": craft.is_wrecked(),
+		"block_under": block_under,
 	}
 	_hud.feed_mission(delta, telemetry)
 
@@ -190,3 +211,37 @@ func _scan_spawn_column(x: int, z: int) -> Vector3:
 		if clear and _world.get_block(cell + Vector3i(0, -1, 0)) != BlockTypes.Block.AIR:
 			return Vector3(x + 0.5, float(base_y + i), z + 0.5)
 	return Vector3.ZERO
+
+
+## 简易降落场场址：以 (8,8) 为圆心逐环外扩，找「地表实体可站（非水）+
+## 四格空气」的列——大洋区域落到岛上草地/沙地，极地落到封冻海面的冰盖上。
+## 搜索半径 ≤ 10：村庄 A 占 x∈[26,82]/z∈[32,80]，降落场含 2 格施工缘最远
+## 只到 25，永不重叠。
+func _find_field_site() -> Vector3i:
+	_world.ensure_chunks_in_region(Vector3i(-4, 0, -4), Vector3i(20, 0, 20))
+	for radius in range(11):
+		for x in range(8 - radius, 8 + radius + 1):
+			for z in range(8 - radius, 8 + radius + 1):
+				if maxi(absi(x - 8), absi(z - 8)) != radius:
+					continue
+				if _field_column_ok(x, z):
+					return Vector3i(x, 0, z)
+	return Vector3i(8, 0, 8)
+
+
+## 场址列判定：自 SEA_LEVEL+8 向下找首个非空气块，须为可站实体（非水），
+## 其上四格空气（避开树冠与冰山侧壁）。
+func _field_column_ok(x: int, z: int) -> bool:
+	var top := -1
+	for y in range(World.SEA_LEVEL + 8, 0, -1):
+		if _world.get_block(Vector3i(x, y, z)) != BlockTypes.Block.AIR:
+			top = y
+			break
+	if top < 0:
+		return false
+	if _world.get_block(Vector3i(x, top, z)) == BlockTypes.Block.WATER:
+		return false
+	for h in range(1, 5):
+		if _world.get_block(Vector3i(x, top + h, z)) != BlockTypes.Block.AIR:
+			return false
+	return true

@@ -2,7 +2,8 @@ class_name MissionPanel
 extends Control
 
 ## 飞行任务面板（K 键唤出的模态窗口，冻结玩家；配色同「任务与成就」面板）。
-## 展示 MissionData.default_missions() 的 MVP 三任务（起飞/绕点/降落）：
+## 展示锚定机场/降落场的 MVP 三任务（起飞/绕点/降落，锚点由 main 经
+## set_anchor 注入；注入前为 MissionData.default_missions() 的默认形状）：
 ##   - 未进行时列出可选任务卡（标题/说明/奖励/开始按钮）；
 ##   - 进行中显示当前任务计时与目标摘要，可放弃；
 ##   - 结束后显示结果，成功奖励经 mission_reward 信号上交 HUD 发放绿宝石。
@@ -129,9 +130,12 @@ func abandon_mission() -> void:
 	_mm.abandon()
 
 
-## 设置任务航路 / 降落区锚点（机场中心或出生点 xz）：按锚点重建三任务并刷新卡片。
-## 由 main 经 HUD 在场景就绪后调用，使「起飞 → 绕场 → 落回」闭环贴合实际机场位置。
-func set_airport(center: Vector3) -> void:
+## 设置任务航路 / 降落区锚点（机场中心或降落场中心）：按锚点重建三任务并
+## 刷新卡片。由 main 经 HUD 在场景就绪后调用，使「起飞 → 单向绕场 → 落回
+## 跑道面」闭环贴合实际跑道位置。
+## 注意：不能简写为 set_anchor——Control 已有同名原生方法，重写会被引擎
+## 按错误处置（编译失败）。
+func set_mission_anchor(center: Vector3) -> void:
 	_missions = MissionData.missions_for_airport(center)
 	refresh()
 
@@ -168,6 +172,9 @@ func _describe(m: MissionData) -> String:
 			return "按顺序经过 %d 个航点（判定半径 %.0f m）。" % [
 				m.waypoints.size(), m.radius()]
 		MissionData.Type.LANDING:
+			if m.zone_block() >= 0:
+				return "以低于 %.1f m/s 的垂直速度触地，停稳在跑道面上（须压在跑道铺面方块上）。" % [
+					m.max_touchdown_vs()]
 			return "以低于 %.1f m/s 的垂直速度触地，停稳在降落区（半径 %.0f m）内。" % [
 				m.max_touchdown_vs(), m.zone_radius()]
 		_:

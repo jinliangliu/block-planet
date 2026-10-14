@@ -9,7 +9,16 @@ extends Node
 var _failed := 0
 
 
+## 看门狗：主场景加载 + 全量断言若中途异常（协程中断则不会 quit），
+## 120 s 强制失败退出，避免无头进程无限空转。
+func _watchdog() -> void:
+	await get_tree().create_timer(120.0).timeout
+	print("AIRPORT_TEST_FAILED count=%d (watchdog timeout)" % _failed)
+	get_tree().quit(1)
+
+
 func _ready() -> void:
+	_watchdog()
 	await _run()
 
 
@@ -87,6 +96,18 @@ func _run() -> void:
 			anchored = false
 	_check(anchored, "绕点航路绕机场中心（4 点，均在 200 m 内）")
 
+	# 4b) 降落任务要求停在跑道面（zone_block = COBBLESTONE）。
+	_check(landing.zone_block() == BlockTypes.Block.COBBLESTONE,
+		"降落任务要求停在跑道面（zone_block=COBBLESTONE）")
+
+	# 4c) 绕点航路为单向进场矩形：末航点落在跑道中线上（最后一程直线进场），
+	#     首航点越过跑道北端（+28），第三航点在南端外侧。
+	var wps := circuit.waypoints
+	var sized := wps.size() == 4
+	var final_on_centerline := sized and is_equal_approx(wps[3].x, 96.0) and is_equal_approx(wps[0].x, 96.0)
+	var spans_runway := sized and wps[0].z > 96.0 + 28.0 and wps[2].z < 96.0 - 28.0
+	_check(final_on_centerline and spans_runway, "绕点航路末程对准跑道中线（单向进场，x=96）")
+
 	# 端到端：main 经 HUD 注入后，面板实际持有的是锚定机场的任务集。
 	var hud_node: HUD = main_scene.get_node("UI")
 	var panel: MissionPanel = hud_node._mission_panel if hud_node != null else null
@@ -95,6 +116,34 @@ func _run() -> void:
 		var live_landing: MissionData = panel._missions[2]
 		live_ok = live_landing.zone_center.distance_to(Vector3(96.0, 0.0, 96.0)) < 0.01
 	_check(live_ok, "面板降落区已锚定机场（端到端注入生效）")
+
+	# 5) 简易降落场（build_field）：大洋/极地区域的无机库短跑道。
+	#    在亚洲场景里手动建一座验证生成器本身（场址用 main 的选址逻辑）。
+	var site: Vector3i = main_scene._find_field_site()
+	var field_spawn: Vector3 = AirportBuilder.new().build_field(world, site)
+	_check(field_spawn != Vector3.ZERO, "build_field 返回出生点（%s）" % field_spawn)
+	# 出生列脚下为跑道铺面（COBBLESTONE/SAND）。
+	var fx := int(field_spawn.x)
+	var fz := int(field_spawn.z)
+	var fy := int(field_spawn.y) - 1
+	var feet_on_field := false
+	for dx in range(-3, 4):
+		for dz in range(-3, 4):
+			var fb := world.get_block(Vector3i(fx + dx, fy, fz + dz))
+			if fb == BlockTypes.Block.COBBLESTONE or fb == BlockTypes.Block.SAND:
+				feet_on_field = true
+				break
+		if feet_on_field:
+			break
+	_check(feet_on_field, "降落场出生点落在跑道面上")
+	# 铺面完整：宽 10 × 长 32 = 320 个 COBBLESTONE（无机库）。
+	var field_cobble := 0
+	for x in range(site.x - 7, site.x + 8):
+		for z in range(site.z - 18, site.z + 19):
+			for y in range(20, 50):
+				if world.get_block(Vector3i(x, y, z)) == BlockTypes.Block.COBBLESTONE:
+					field_cobble += 1
+	_check(field_cobble >= 320, "降落场跑道铺面完整（COBBLESTONE %d ≥ 320）" % field_cobble)
 
 	if _failed == 0:
 		print("AIRPORT_TEST_OK")

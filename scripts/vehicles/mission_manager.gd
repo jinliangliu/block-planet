@@ -13,6 +13,7 @@ extends RefCounted
 ##   on_ground    : 机轮是否触地
 ##   vertical_speed : 垂直速度 (m/s，正为爬升)
 ##   wrecked      : 是否已坠毁解体
+##   block_under  : 机身下方地面方块类型（降落区要求跑道面时判定；缺省 -1）
 
 signal mission_result(success: bool, result: Dictionary)
 signal progress_updated(info: Dictionary)
@@ -53,6 +54,7 @@ func step(dt: float, telemetry: Dictionary) -> void:
 	var on_ground: bool = bool(telemetry.get("on_ground", true))
 	var vs: float = float(telemetry.get("vertical_speed", 0.0))
 	var wrecked: bool = bool(telemetry.get("wrecked", false))
+	var block_under: int = int(telemetry.get("block_under", -1))
 
 	if wrecked:
 		_finish(false, "坠机解体")
@@ -66,7 +68,7 @@ func step(dt: float, telemetry: Dictionary) -> void:
 		MissionData.Type.CIRCUIT:
 			_step_circuit(pos)
 		MissionData.Type.LANDING:
-			_step_landing(speed, pos, on_ground, vs)
+			_step_landing(speed, pos, on_ground, vs, block_under)
 
 
 ## 外部超时（如任务限时）：当前仍 RUNNING 则判失败。
@@ -105,7 +107,8 @@ func _step_circuit(pos: Vector3) -> void:
 			_finish(true, "绕点成功")
 
 
-func _step_landing(speed: float, pos: Vector3, on_ground: bool, vs: float) -> void:
+func _step_landing(speed: float, pos: Vector3, on_ground: bool, vs: float,
+		block_under: int) -> void:
 	if not _was_airborne:
 		return  # 还没离地，不算降落
 	if on_ground:
@@ -119,10 +122,15 @@ func _step_landing(speed: float, pos: Vector3, on_ground: bool, vs: float) -> vo
 		if speed <= mission.max_roll_speed():
 			var in_zone := Vector2(pos.x - mission.zone_center.x,
 				pos.z - mission.zone_center.z).length() <= mission.zone_radius()
-			if in_zone:
-				_finish(true, "降落成功")
-			else:
+			if not in_zone:
 				_finish(false, "滑出降落区")
+				return
+			# 锚定跑道的任务：停在区里还不够，必须压在跑道铺面方块上。
+			var need_block := mission.zone_block()
+			if need_block >= 0 and block_under != need_block:
+				_finish(false, "未停在跑道面")
+				return
+			_finish(true, "降落成功")
 
 
 func _finish(success: bool, reason: String) -> void:

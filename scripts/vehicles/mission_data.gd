@@ -39,6 +39,12 @@ func radius() -> float:
 func zone_radius() -> float:
 	return float(params.get("zone_radius", DEFAULT_ZONE_RADIUS))
 
+
+## LANDING：降落区要求的地面方块（-1 = 不限定）。锚定机场/降落场的任务
+## 要求停在 COBBLESTONE 跑道面上——落进旁边草地或水里不算完成。
+func zone_block() -> int:
+	return int(params.get("zone_block", -1))
+
 func max_touchdown_vs() -> float:
 	return float(params.get("max_touchdown_vs", DEFAULT_TOUCHDOWN_VS))
 
@@ -97,12 +103,13 @@ static func missions_for_airport(center: Vector3) -> Array[MissionData]:
 	circuit.id = "m_circuit"
 	circuit.title = "绕场巡航"
 	circuit.type = Type.CIRCUIT
-	# 绕机场的矩形航路（西南→东南→东北→西北，顺时针一圈）。
+	# 跑道朝向 +Z 的单向进场矩形（起飞越过北端 → 侧风 → 南端外侧风 →
+	# 回到中线）：末航点落在跑道中线上，最后一程即直线进场，对准跑道。
 	circuit.waypoints = [
-		Vector3(cx - 100.0, 0.0, cz - 75.0),
-		Vector3(cx + 100.0, 0.0, cz - 75.0),
-		Vector3(cx + 100.0, 0.0, cz + 75.0),
-		Vector3(cx - 100.0, 0.0, cz + 75.0),
+		Vector3(cx, 0.0, cz + 90.0),
+		Vector3(cx + 110.0, 0.0, cz + 90.0),
+		Vector3(cx + 110.0, 0.0, cz - 90.0),
+		Vector3(cx, 0.0, cz - 90.0),
 	]
 	circuit.params = {"radius": DEFAULT_RADIUS}
 
@@ -115,5 +122,6 @@ static func missions_for_airport(center: Vector3) -> Array[MissionData]:
 		"zone_radius": DEFAULT_ZONE_RADIUS,
 		"max_touchdown_vs": DEFAULT_TOUCHDOWN_VS,
 		"max_roll_speed": DEFAULT_ROLL_SPEED,
+		"zone_block": BlockTypes.Block.COBBLESTONE,  # 必须停在跑道面上
 	}
 	return [takeoff, circuit, landing]
