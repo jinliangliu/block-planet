@@ -127,7 +127,7 @@ func _step_landing(speed: float, pos: Vector3, on_ground: bool, vs: float,
 				return
 			# 锚定跑道的任务：停在区里还不够，必须压在跑道铺面方块上。
 			var need_block := mission.zone_block()
-			if need_block >= 0 and block_under != need_block:
+			if need_block >= 0 and block_under != need_block and not BlockTypes.is_nav_light(block_under):
 				_finish(false, "未停在跑道面")
 				return
 			_finish(true, "降落成功")

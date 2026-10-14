@@ -59,6 +59,21 @@ func _run() -> void:
 			break
 	_check(on_runway, "出生点落在跑道旁（出生列 %s）" % Vector3i(player.global_position.floor()))
 
+	# 2b) 机场进近导航灯：南端绿门槛（进场）/ 北端红端行（远端），视觉对齐 +Z 进近。
+	#     机场 RUNWAY_LEN=56：出生点落在 center.z-_len/2+3，故南绿在 spawn_z-3、
+	#     北红在 spawn_z+53（均在已整平足迹内、base_y 高度）。
+	#     先同步强制加载机场整区：流式 LOAD_RADIUS=2 会把机场北端所在 chunk 卸载
+	#     （get_block 对未载区块返 AIR），此处与读取同帧完成，流式来不及卸载。
+	world.ensure_chunks_in_region(Vector3i(88, 0, 62), Vector3i(104, 0, 126))
+	var ap_nav := false
+	for dx in range(-6, 7):
+		var south := world.get_block(Vector3i(spawn_x + dx, feet_y, spawn_z - 3))
+		var north := world.get_block(Vector3i(spawn_x + dx, feet_y, spawn_z + 53))
+		if south == BlockTypes.Block.NAV_GREEN and north == BlockTypes.Block.NAV_RED:
+			ap_nav = true
+			break
+	_check(ap_nav, "机场进近导航灯：南绿（进场端）/ 北红（远端）")
+
 	# 3) 双击 F 回收停着的飞机：在玩家侧旁放一架。place() 会把机身抬高
 	#    GROUND_CLEARANCE，故先预扣该高度，使落位后机身与玩家同高、水平距约 6 m——
 	#    距机身碰撞盒 > 登机余量（不误登机），且在回收半径（7 m）内。
@@ -136,14 +151,16 @@ func _run() -> void:
 		if feet_on_field:
 			break
 	_check(feet_on_field, "降落场出生点落在跑道面上")
-	# 铺面完整：宽 10 × 长 32 = 320 个 COBBLESTONE（无机库）。
-	var field_cobble := 0
+	# 铺面完整：宽 10 × 长 32 = 320 个跑道面方块（COBBLESTONE 或导航灯，导航灯
+	# 替换了部分中线/边缘/端行的圆石，但仍是跑道面）。
+	var field_surface := 0
 	for x in range(site.x - 7, site.x + 8):
 		for z in range(site.z - 18, site.z + 19):
 			for y in range(20, 50):
-				if world.get_block(Vector3i(x, y, z)) == BlockTypes.Block.COBBLESTONE:
-					field_cobble += 1
-	_check(field_cobble >= 320, "降落场跑道铺面完整（COBBLESTONE %d ≥ 320）" % field_cobble)
+				var fb := world.get_block(Vector3i(x, y, z))
+				if fb == BlockTypes.Block.COBBLESTONE or BlockTypes.is_nav_light(fb):
+					field_surface += 1
+	_check(field_surface >= 320, "降落场跑道铺面完整（COBBLESTONE+导航灯 %d ≥ 320）" % field_surface)
 
 	if _failed == 0:
 		print("AIRPORT_TEST_OK")

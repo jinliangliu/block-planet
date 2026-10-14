@@ -16,6 +16,7 @@ const FACE_DIRS := [
 var data := PackedByteArray()
 
 var _mesh_instance: MeshInstance3D
+var _emissive_mesh_instance: MeshInstance3D
 var _collision_body: StaticBody3D
 # 越界邻居查询回调，由 World 注入（get_block），用于跨界面的正确剔除。
 var _neighbor_lookup := Callable()
@@ -26,31 +27,33 @@ func _init() -> void:
 	data.fill(BlockTypes.Block.AIR)
 
 
-func rebuild(material: Material, neighbor_lookup: Callable = Callable()) -> void:
+func rebuild(atlas_material: Material, emissive_material: Material, neighbor_lookup: Callable = Callable()) -> void:
 	_neighbor_lookup = neighbor_lookup
-	var render_vertices := PackedVector3Array()
-	var render_normals := PackedVector3Array()
-	var render_uvs := PackedVector2Array()
-	var render_indices := PackedInt32Array()
-
-	var collide_vertices := PackedVector3Array()
-	var collide_indices := PackedInt32Array()
+	var atlas_v := PackedVector3Array()
+	var atlas_n := PackedVector3Array()
+	var atlas_uv := PackedVector2Array()
+	var atlas_i := PackedInt32Array()
+	var ems_v := PackedVector3Array()
+	var ems_n := PackedVector3Array()
+	var ems_uv := PackedVector2Array()
+	var ems_i := PackedInt32Array()
+	var ems_c := PackedColorArray()
+	var collide_v := PackedVector3Array()
+	var collide_i := PackedInt32Array()
 
 	for x in SIZE.x:
 		for y in SIZE.y:
 			for z in SIZE.z:
 				_collect_block(
 					Vector3i(x, y, z),
-					render_vertices,
-					render_normals,
-					render_uvs,
-					render_indices,
-					collide_vertices,
-					collide_indices
+					atlas_v, atlas_n, atlas_uv, atlas_i,
+					ems_v, ems_n, ems_uv, ems_i, ems_c,
+					collide_v, collide_i
 				)
 
-	_assign_mesh(render_vertices, render_normals, render_uvs, render_indices, material)
-	_assign_collision(collide_vertices, collide_indices)
+	_assign_mesh(atlas_v, atlas_n, atlas_uv, atlas_i, atlas_material)
+	_assign_emissive_mesh(ems_v, ems_n, ems_uv, ems_i, ems_c, emissive_material)
+	_assign_collision(collide_v, collide_i)
 
 
 func get_block_local(pos: Vector3i) -> int:
@@ -67,18 +70,16 @@ func set_block_local(pos: Vector3i, id: int) -> void:
 
 func _collect_block(
 	pos: Vector3i,
-	render_vertices: PackedVector3Array,
-	render_normals: PackedVector3Array,
-	render_uvs: PackedVector2Array,
-	render_indices: PackedInt32Array,
-	collide_vertices: PackedVector3Array,
-	collide_indices: PackedInt32Array
+	atlas_v: PackedVector3Array, atlas_n: PackedVector3Array, atlas_uv: PackedVector2Array, atlas_i: PackedInt32Array,
+	ems_v: PackedVector3Array, ems_n: PackedVector3Array, ems_uv: PackedVector2Array, ems_i: PackedInt32Array, ems_c: PackedColorArray,
+	collide_v: PackedVector3Array, collide_i: PackedInt32Array
 ) -> void:
 	var id := data[_index(pos)]
 	if id == BlockTypes.Block.AIR:
 		return
 
 	var tiles: Vector3i = BlockTypes.TILES.get(id, Vector3i(0, 0, 0))
+	var is_nav := BlockTypes.is_nav_light(id)
 
 	for dir in FACE_DIRS:
 		var nid := _neighbor_id(pos + dir)
@@ -90,9 +91,12 @@ func _collect_block(
 			continue
 
 		if render_face:
-			_emit_render_face(pos, dir, _face_tile(dir, tiles), render_vertices, render_normals, render_uvs, render_indices)
+			if is_nav:
+				_emit_nav_face(pos, dir, BlockTypes.nav_color(id), ems_v, ems_n, ems_uv, ems_i, ems_c)
+			else:
+				_emit_render_face(pos, dir, _face_tile(dir, tiles), atlas_v, atlas_n, atlas_uv, atlas_i)
 		if collide_face:
-			_emit_collide_face(pos, dir, collide_vertices, collide_indices)
+			_emit_collide_face(pos, dir, collide_v, collide_i)
 
 
 func _emit_render_face(
@@ -117,6 +121,27 @@ func _emit_render_face(
 		var v := lerpf(uv_rect.position.y, uv_rect.end.y, float(i % 2))
 		uvs.append(Vector2(u, v))
 
+	_append_quad_indices(indices, base, dir)
+
+
+func _emit_nav_face(
+	pos: Vector3i,
+	dir: Vector3i,
+	color: Color,
+	vertices: PackedVector3Array,
+	normals: PackedVector3Array,
+	uvs: PackedVector2Array,
+	indices: PackedInt32Array,
+	colors: PackedColorArray
+) -> void:
+	var base := vertices.size()
+	var normal := Vector3(dir)
+	var corners := _face_corners(dir)
+	for i in range(4):
+		vertices.append(Vector3(pos) + corners[i])
+		normals.append(normal)
+		uvs.append(Vector2(0.0, 0.0))
+		colors.append(color)
 	_append_quad_indices(indices, base, dir)
 
 
@@ -246,8 +271,42 @@ func _assign_mesh(
 
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	# 逐 surface 指定材质（不跨面覆盖），与导航灯第二发光面解耦。
+	mesh.surface_set_material(0, material)
 	_mesh_instance.mesh = mesh
-	_mesh_instance.material_override = material
+
+
+## 导航灯发光面：独立 MeshInstance + 共享 unshaded 顶点色材质，整片灯仅
+## +1 draw call；颜色由顶点色逐块提供，主世界合批不受影响。
+func _assign_emissive_mesh(
+	vertices: PackedVector3Array,
+	normals: PackedVector3Array,
+	uvs: PackedVector2Array,
+	indices: PackedInt32Array,
+	colors: PackedColorArray,
+	material: Material
+) -> void:
+	if _emissive_mesh_instance == null:
+		_emissive_mesh_instance = MeshInstance3D.new()
+		_emissive_mesh_instance.name = "NavLights"
+		add_child(_emissive_mesh_instance)
+
+	if vertices.is_empty():
+		_emissive_mesh_instance.mesh = null
+		return
+
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_INDEX] = indices
+
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mesh.surface_set_material(0, material)
+	_emissive_mesh_instance.mesh = mesh
 
 
 func _assign_collision(vertices: PackedVector3Array, indices: PackedInt32Array) -> void:

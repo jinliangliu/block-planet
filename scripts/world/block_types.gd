@@ -34,6 +34,10 @@ enum Block {
 	POTATO_CROP = 28,
 	RADISH_CROP = 29,
 	ICE = 30,
+	NAV_GREEN = 31,
+	NAV_RED = 32,
+	NAV_YELLOW = 33,
+	NAV_WHITE = 34,
 }
 
 const NAMES := {
@@ -68,6 +72,10 @@ const NAMES := {
 	Block.POTATO_CROP: "土豆",
 	Block.RADISH_CROP: "白萝卜",
 	Block.ICE: "冰块",
+	Block.NAV_GREEN: "绿色导航灯",
+	Block.NAV_RED: "红色导航灯",
+	Block.NAV_YELLOW: "黄色导航灯",
+	Block.NAV_WHITE: "白色导航灯",
 }
 
 const SOLID := {
@@ -102,6 +110,10 @@ const SOLID := {
 	Block.POTATO_CROP: false,
 	Block.RADISH_CROP: false,
 	Block.ICE: true,
+	Block.NAV_GREEN: true,
+	Block.NAV_RED: true,
+	Block.NAV_YELLOW: true,
+	Block.NAV_WHITE: true,
 }
 
 const TRANSPARENT := {
@@ -136,6 +148,10 @@ const TRANSPARENT := {
 	Block.POTATO_CROP: true,
 	Block.RADISH_CROP: true,
 	Block.ICE: false,
+	Block.NAV_GREEN: false,
+	Block.NAV_RED: false,
+	Block.NAV_YELLOW: false,
+	Block.NAV_WHITE: false,
 }
 
 # 每个方块的纹理瓦片：[顶面, 底面, 侧面]
@@ -170,6 +186,12 @@ const TILES := {
 	Block.POTATO_CROP: Vector3i(29, 29, 29),
 	Block.RADISH_CROP: Vector3i(30, 30, 30),
 	Block.ICE: Vector3i(31, 31, 31),
+	# 导航灯占位瓦片：世界网格走独立 emissive 面（不采样图集），此处仅让
+	# is_placeable / 掉落物系统把它当作普通可放置方块处理。
+	Block.NAV_GREEN: Vector3i(0, 0, 0),
+	Block.NAV_RED: Vector3i(0, 0, 0),
+	Block.NAV_YELLOW: Vector3i(0, 0, 0),
+	Block.NAV_WHITE: Vector3i(0, 0, 0),
 }
 
 # 水生植物：生长在水中/水面的非固体装饰方块，徒手可采，可再放置。
@@ -180,6 +202,21 @@ const WATER_PLANTS := {
 	Block.LILY_PAD: true,
 	Block.LOTUS: true,
 }
+
+# 导航灯：跑道进近助视标记（自发光方块，走独立 emissive 渲染面，零动态光）。
+# 颜色即方向语义：绿=进场门槛（南端）/ 红=跑道远端（北端）/ 黄=中线 / 白=边缘。
+const NAV_LIGHT_COLORS := {
+	Block.NAV_GREEN: Color(0.15, 1.0, 0.25),
+	Block.NAV_RED: Color(1.0, 0.15, 0.15),
+	Block.NAV_YELLOW: Color(1.0, 0.9, 0.1),
+	Block.NAV_WHITE: Color(0.85, 0.92, 1.0),
+}
+
+static func is_nav_light(id: int) -> bool:
+	return NAV_LIGHT_COLORS.has(id)
+
+static func nav_color(id: int) -> Color:
+	return NAV_LIGHT_COLORS.get(id, Color.WHITE)
 
 # 创造模式快捷栏显示的方块顺序。
 const HOTBAR_BLOCKS := [
@@ -225,6 +262,10 @@ const SHORT_NAMES := {
 	Block.POTATO_CROP: "土豆",
 	Block.RADISH_CROP: "萝",
 	Block.ICE: "冰",
+	Block.NAV_GREEN: "绿灯",
+	Block.NAV_RED: "红灯",
+	Block.NAV_YELLOW: "黄灯",
+	Block.NAV_WHITE: "白灯",
 }
 
 # 可堆叠物品（方块/材料/食物）的每格上限。
@@ -261,6 +302,10 @@ const HARDNESS := {
 	Block.POTATO_CROP: 0.1,
 	Block.RADISH_CROP: 0.1,
 	Block.ICE: 0.6,
+	Block.NAV_GREEN: 0.5,
+	Block.NAV_RED: 0.5,
+	Block.NAV_YELLOW: 0.5,
+	Block.NAV_WHITE: 0.5,
 }
 
 # 有效工具类型；空字符串表示徒手/任意工具即可。
@@ -295,6 +340,10 @@ const EFFECTIVE_TOOL := {
 	Block.POTATO_CROP: "sickle",
 	Block.RADISH_CROP: "sickle",
 	Block.ICE: "pickaxe",
+	Block.NAV_GREEN: "",
+	Block.NAV_RED: "",
+	Block.NAV_YELLOW: "",
+	Block.NAV_WHITE: "",
 }
 
 # 采集该方块所需的最低工具等级（1 木 / 2 石 / 3 青铜 / 4 铁）。

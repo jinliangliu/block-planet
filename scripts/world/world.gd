@@ -29,6 +29,7 @@ var _modified_data: Dictionary[Vector3i, PackedByteArray] = {}
 # 卸载区块后需要补面的邻居重建队列，每帧限量处理以平滑卡顿。
 var _pending_rebuilds: Array[Vector3i] = []
 var _atlas_material: StandardMaterial3D
+var _emissive_material: StandardMaterial3D
 var _noise := FastNoiseLite.new()
 # 极地冰山噪声：低频成团，决定哪里隆起露出海面的冰山（D-028）。
 var _iceberg_noise := FastNoiseLite.new()
@@ -46,6 +47,7 @@ var _profile: Dictionary = {}
 func _ready() -> void:
 	_neighbor_lookup = Callable(self, "get_block")
 	_build_atlas_material()
+	_build_emissive_material()
 	if _profile.is_empty():
 		_profile = RegionAtlas.profile(RegionAtlas.DEFAULT_REGION)
 		seed_value = int(_profile["seed"])
@@ -285,7 +287,7 @@ func spill_box(cell: Vector3i, player: Player) -> void:
 func _rebuild_chunk(coord: Vector3i) -> void:
 	var chunk: Chunk = _chunks.get(coord)
 	if chunk:
-		chunk.rebuild(_atlas_material, _neighbor_lookup)
+		chunk.rebuild(_atlas_material, _emissive_material, _neighbor_lookup)
 
 
 ## 树干砍完后让树冠「落下消失」：由 Player 在破坏 WOOD 后调用。
@@ -424,6 +426,20 @@ func _build_atlas_material() -> void:
 	_atlas_material = material
 
 
+## 导航灯自发光材质：unshaded + 顶点色，恒亮（昼/夜均可见），不额外吃光照
+## pass；颜色由方块顶点色提供，整片导航灯合并为 1 个 draw call（见 Chunk）。
+func _build_emissive_material() -> void:
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	# Godot 4 无 vertex_colors_enabled（Godot 3 遗留名，赋值仅触发 remap 警告并忽略）；
+	# 正确属性是 vertex_color_use_as_albedo——把 ARRAY_COLOR 用作反照率，
+	# 配合 unshaded + 白色 albedo_color，使每块导航灯按自身顶点色恒亮输出。
+	material.vertex_color_use_as_albedo = true
+	material.albedo_color = Color(1, 1, 1)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	_emissive_material = material
+
+
 func _update_chunks() -> void:
 	var center := world_to_chunk(_player.global_position)
 	var wanted := {}
@@ -483,7 +499,7 @@ func _load_chunk(coord: Vector3i) -> void:
 		chunk.data = _modified_data[coord]
 	else:
 		_generate_chunk(chunk, coord)
-	chunk.rebuild(_atlas_material, _neighbor_lookup)
+	chunk.rebuild(_atlas_material, _emissive_material, _neighbor_lookup)
 	_chunks[coord] = chunk
 
 

@@ -36,6 +36,7 @@ func build(world: World, center: Vector3i) -> Vector3:
 	_begin(world, center, RUNWAY_WID, RUNWAY_LEN, HANGAR_DEPTH, CLEAR_H)
 	_flatten_ground()
 	_pave_runway()
+	_mark_approach(false)
 	_build_hangar(center)
 	_end()
 	return _spawn_point()
@@ -47,6 +48,7 @@ func build_field(world: World, center: Vector3i) -> Vector3:
 	_begin(world, center, FIELD_WID, FIELD_LEN, 0, FIELD_CLEAR_H)
 	_flatten_ground()
 	_pave_runway()
+	_mark_approach(true)
 	_end()
 	return _spawn_point()
 
@@ -87,6 +89,33 @@ func _pave_runway() -> void:
 		for dx in range(-_half_w, _half_w + 1):
 			_world.set_block_deferred(
 				Vector3i(origin.x + dx, base_y, end_z), BlockTypes.Block.SAND)
+
+
+## 进近助视导航灯：自发光方块（独立 emissive 渲染面，零动态光）。
+## 颜色即方向语义：绿=进场门槛（南端）/ 红=跑道远端（北端）/ 黄=中线 / 白=边缘。
+## 标记全部落在已整平足迹内（z∈[origin.z-_len/2-1, +_len/2+1]、x∈±_half_w），
+## 不碰地形管线；跑道逻辑进近方向（+Z、由南向北）由此在视觉上对齐。
+## with_approach=true 时（简易降落场，无南端机库）额外在南 SAND 头加一排绿，
+## 强化「从南进场」引导；机场用 false（南端已有非对称机库作朝向地标）。
+func _mark_approach(with_approach: bool) -> void:
+	var z_s := origin.z - _len / 2          # 跑道南缘（进场端）
+	var z_n := origin.z + _len / 2          # 跑道北缘（远端）
+	# 南端绿门槛行（进场端）+ 北端红端行（远端）。
+	for dx in range(-_half_w, _half_w + 1):
+		_world.set_block_deferred(Vector3i(origin.x + dx, base_y, z_s), BlockTypes.Block.NAV_GREEN)
+		_world.set_block_deferred(Vector3i(origin.x + dx, base_y, z_n), BlockTypes.Block.NAV_RED)
+	# 黄色虚线中线（对齐）：x=中线，每 3 格放 1 格。
+	for z in range(z_s + 1, z_n, 3):
+		_world.set_block_deferred(Vector3i(origin.x, base_y, z), BlockTypes.Block.NAV_YELLOW)
+	# 白色边缘线：x=±_half_w，每 2 格放 1 格（避开已铺绿/红的南北端行）。
+	for z in range(z_s + 1, z_n, 2):
+		_world.set_block_deferred(Vector3i(origin.x - _half_w, base_y, z), BlockTypes.Block.NAV_WHITE)
+		_world.set_block_deferred(Vector3i(origin.x + _half_w, base_y, z), BlockTypes.Block.NAV_WHITE)
+	# 简易降落场（无南端机库）：南 SAND 头再加一排绿，强化「从南进场」引导。
+	if with_approach:
+		var z_app := origin.z - _len / 2 - 1
+		for dx in range(-_half_w, _half_w + 1):
+			_world.set_block_deferred(Vector3i(origin.x + dx, base_y, z_app), BlockTypes.Block.NAV_GREEN)
 
 
 ## 机库：南端一座开放式圆石棚（围墙高 6 + 木顶），朝跑道（+Z）留 3 宽门洞。
