@@ -58,7 +58,8 @@ func _run() -> void:
 		player.global_position + Vector3(6.0, -Aircraft.GROUND_CLEARANCE, 0.0),
 		0.0,
 	)
-	await get_tree().process_frame
+	# 不在此处等帧：add_child 已同步触发 _ready 完成入组；等帧会让物理把机体挤出地面
+	# 而上移，拉到与玩家的 3D 距离在 7m 回收半径附近抖动（偶发越界）。此处位置确定。
 	_check(not craft.piloted and not craft.is_wrecked(), "测试飞机初始可用（未驾驶 / 未解体）")
 	_check(craft.is_in_group("aircraft"), "测试飞机已登记到 aircraft 组")
 
@@ -71,6 +72,29 @@ func _run() -> void:
 	_check(not is_instance_valid(craft), "双击 F 后飞机从世界移除")
 	var after := player.inventory.count_item(ItemTypes.AIRCRAFT)
 	_check(after == before + 1, "生存模式回收飞机退回背包（+1，%d → %d）" % [before, after])
+
+	# 4) 飞行任务航路 / 降落区锚定机场（runway ↔ mission 联动）。
+	var mm := MissionData.missions_for_airport(Vector3(96.0, 0.0, 96.0))
+	_check(mm.size() == 3, "missions_for_airport 返回三任务")
+	var landing: MissionData = mm[2]
+	_check(landing.type == MissionData.Type.LANDING, "第三个任务为降落")
+	_check(landing.zone_center.distance_to(Vector3(96.0, 0.0, 96.0)) < 0.01,
+		"降落区锚定机场中心 (96,96)")
+	var circuit: MissionData = mm[1]
+	var anchored := circuit.waypoints.size() == 4
+	for wp: Vector3 in circuit.waypoints:
+		if Vector2(wp.x - 96.0, wp.z - 96.0).length() > 200.0:
+			anchored = false
+	_check(anchored, "绕点航路绕机场中心（4 点，均在 200 m 内）")
+
+	# 端到端：main 经 HUD 注入后，面板实际持有的是锚定机场的任务集。
+	var hud_node: HUD = main_scene.get_node("UI")
+	var panel: MissionPanel = hud_node._mission_panel if hud_node != null else null
+	var live_ok := false
+	if panel != null and panel._missions.size() == 3:
+		var live_landing: MissionData = panel._missions[2]
+		live_ok = live_landing.zone_center.distance_to(Vector3(96.0, 0.0, 96.0)) < 0.01
+	_check(live_ok, "面板降落区已锚定机场（端到端注入生效）")
 
 	if _failed == 0:
 		print("AIRPORT_TEST_OK")

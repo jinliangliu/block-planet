@@ -129,6 +129,13 @@ func abandon_mission() -> void:
 	_mm.abandon()
 
 
+## 设置任务航路 / 降落区锚点（机场中心或出生点 xz）：按锚点重建三任务并刷新卡片。
+## 由 main 经 HUD 在场景就绪后调用，使「起飞 → 绕场 → 落回」闭环贴合实际机场位置。
+func set_airport(center: Vector3) -> void:
+	_missions = MissionData.missions_for_airport(center)
+	refresh()
+
+
 ## 每物理帧喂遥测；仅在 RUNNING 时透传给 MissionManager，并刷新计时。
 func feed(dt: float, telemetry: Dictionary) -> void:
 	if _mm.status != MissionManager.Status.RUNNING:

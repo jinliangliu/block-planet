@@ -61,6 +61,11 @@ func _ready() -> void:
 	_hud.setup(_player)
 	_hud.set_day_night(_day_night)
 	_hud.set_map_name(String(profile["title"]))
+	# 飞行任务航路 / 降落区锚定机场（无机场区域锚定出生点）：形成「跑道起飞 → 绕场 → 落回」闭环。
+	var mission_anchor := Vector3(spawn_pos.x, 0.0, spawn_pos.z)
+	if airport_spawn != Vector3.ZERO:
+		mission_anchor = Vector3(_airport_center(GameState.current_region))
+	_hud.set_mission_airport(mission_anchor)
 	_mob_spawner.setup(_player, _world, _day_night)
 	_mob_spawner.set_region(profile)
 	_player.died.connect(func(): Events.player_died.emit())

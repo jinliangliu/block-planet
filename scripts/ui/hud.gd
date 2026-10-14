@@ -2119,6 +2119,12 @@ func _build_mission_panel(root: Control) -> void:
 	root.add_child(_mission_panel)
 
 
+## 注入飞行任务锚点（机场中心或出生点 xz）到任务面板：任务航路/降落区随之贴合实际机场。
+func set_mission_airport(center: Vector3) -> void:
+	if _mission_panel != null:
+		_mission_panel.set_airport(center)
+
+
 func open_mission_panel() -> void:
 	if _mission_panel == null:
 		return

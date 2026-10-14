@@ -78,3 +78,42 @@ static func default_missions() -> Array[MissionData]:
 		"max_roll_speed": DEFAULT_ROLL_SPEED,
 	}
 	return [takeoff, circuit, landing]
+
+
+## 锚定到给定中心（机场跑道中心，或非机场区域的出生点）的 MVP 三任务：
+## 降落区落在锚点、绕点航路为绕锚点的矩形，使「起飞 → 绕场 → 落回」闭环贴合实际机场位置。
+## 只取 center 的 xz（y 忽略）。传 Vector3.ZERO 时退化为绕原点的旧预设形状。
+static func missions_for_airport(center: Vector3) -> Array[MissionData]:
+	var cx := center.x
+	var cz := center.z
+
+	var takeoff := MissionData.new()
+	takeoff.id = "m_takeoff"
+	takeoff.title = "初次起飞"
+	takeoff.type = Type.TAKEOFF
+	takeoff.params = {"target_alt": DEFAULT_TARGET_ALT, "min_speed": DEFAULT_MIN_SPEED}
+
+	var circuit := MissionData.new()
+	circuit.id = "m_circuit"
+	circuit.title = "绕场巡航"
+	circuit.type = Type.CIRCUIT
+	# 绕机场的矩形航路（西南→东南→东北→西北，顺时针一圈）。
+	circuit.waypoints = [
+		Vector3(cx - 100.0, 0.0, cz - 75.0),
+		Vector3(cx + 100.0, 0.0, cz - 75.0),
+		Vector3(cx + 100.0, 0.0, cz + 75.0),
+		Vector3(cx - 100.0, 0.0, cz + 75.0),
+	]
+	circuit.params = {"radius": DEFAULT_RADIUS}
+
+	var landing := MissionData.new()
+	landing.id = "m_landing"
+	landing.title = "平稳降落"
+	landing.type = Type.LANDING
+	landing.zone_center = Vector3(cx, 0.0, cz)  # 落回机场跑道区
+	landing.params = {
+		"zone_radius": DEFAULT_ZONE_RADIUS,
+		"max_touchdown_vs": DEFAULT_TOUCHDOWN_VS,
+		"max_roll_speed": DEFAULT_ROLL_SPEED,
+	}
+	return [takeoff, circuit, landing]
