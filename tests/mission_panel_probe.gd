@@ -2,7 +2,8 @@ extends Node
 
 ## 无头验证 MissionPanel 的界面逻辑与任务闭环（不依赖世界/地形）：
 ## 开/关、三任务卡、开始→喂遥测→成功→奖励信号、失败后喂帧安全、放弃、
-## 关闭信号。注意 GDScript 4.6 闭包捕获变量重赋值不向外传递——结果用共享字典持有。
+## 奖励防刷（P2-9：二次完成零奖励 + 卡片已领取标注）、关闭信号。
+## 注意 GDScript 4.6 闭包捕获变量重赋值不向外传递——结果用共享字典持有。
 
 const DT := 0.1
 
@@ -17,6 +18,16 @@ func _check(cond: bool, msg: String) -> void:
 	else:
 		_fail += 1
 		print("FAIL: " + msg)
+
+
+## 递归收集子树内全部 Label / Button 文案（任务卡断言用：防刷标注与按钮态）。
+func _collect_texts(node: Node, out: Array[String]) -> void:
+	for child in node.get_children():
+		if child is Label:
+			out.append((child as Label).text)
+		elif child is Button:
+			out.append((child as Button).text)
+		_collect_texts(child, out)
 
 
 func _ready() -> void:
@@ -73,6 +84,41 @@ func _ready() -> void:
 	panel.abandon_mission()
 	_check(not panel.is_running(), "放弃后任务结束")
 	_check(fail_box["reason"] == "主动放弃", "放弃原因为「主动放弃」（实际「%s」）" % fail_box["reason"])
+
+	# 防刷（P2-9）：二次完成同一任务——仍成功、奖励归零、结果行注明、卡片标注已领取。
+	var anti_box := {"reward": -1, "count": 0, "repeat": true}
+	panel.mission_reward.connect(func(emeralds: int, _s: bool, r: Dictionary):
+		anti_box["reward"] = emeralds
+		anti_box["count"] += 1
+		anti_box["repeat"] = bool(r.get("repeat", false)))
+	panel.start_mission(0)
+	_check(panel.is_running(), "防刷：已完成的任务可再次开始")
+	panel.feed(DT, {
+		"altitude_agl": 40.0, "speed": 50.0, "position": Vector3.ZERO,
+		"on_ground": false, "vertical_speed": 1.0, "wrecked": false,
+	})
+	_check(not panel.is_running(), "防刷：二次达标后任务结束")
+	_check(anti_box["count"] == 1 and anti_box["reward"] == 0 and anti_box["repeat"],
+		"防刷：二次完成奖励归零且带 repeat 标记（reward=%s）" % str(anti_box["reward"]))
+	_check(panel._result_label.text.contains("不再发放"),
+		"防刷：结果行注明本次不再发放（「%s」）" % panel._result_label.text)
+
+	# 任务卡：已领取标注 + 按钮变「再次挑战」；未完成任务仍显示原奖励。
+	var texts: Array[String] = []
+	_collect_texts(panel._content, texts)
+	var claimed_shown := false
+	var replay_shown := false
+	var other_reward_shown := false
+	for t in texts:
+		if t.contains("奖励：已领取"):
+			claimed_shown = true
+		if t.contains("再次挑战"):
+			replay_shown = true
+		if t.contains("奖励：绿宝石 ×5"):
+			other_reward_shown = true
+	_check(claimed_shown, "防刷：已完成任务卡标注「奖励：已领取」")
+	_check(replay_shown, "防刷：已完成任务按钮变「再次挑战（无奖励）」")
+	_check(other_reward_shown, "防刷：未完成任务卡仍显示「奖励：绿宝石 ×5」")
 
 	# 关闭：隐藏 + closed 信号。
 	var closed_box := {"n": 0}

@@ -2,7 +2,7 @@ extends Node
 
 ## 无头验证 MissionManager 的三种任务裁决逻辑（纯逻辑，不依赖世界/地形）。
 ## 以合成遥测序列驱动 step()，覆盖：起飞成功/坠机/超时、绕点成功/坠机、
-## 降落成功/硬着陆/滑出区/未停跑道面。
+## 降落成功/硬着陆/滑出区/未停跑道面、奖励防刷（P2-9：每任务每进程一次）。
 
 const DT := 0.1
 
@@ -181,8 +181,67 @@ func _check_landing_runway() -> void:
 		"降落：成功原因为「降落成功」")
 
 
+## 防刷（P2-9）：同一任务每进程仅发一次奖励——重复完成仍判成功、仍计分，
+## 但奖励归零并打 repeat 标记；换任务不受影响；状态不跨实例继承。
+func _check_reward_guard() -> void:
+	var mm := MissionManager.new()
+	var results: Array[Dictionary] = []
+	mm.mission_result.connect(func(_success: bool, r: Dictionary):
+		results.append(r))
+
+	var takeoff := _mk(MissionData.Type.TAKEOFF,
+		{"target_alt": 30.0, "min_speed": 40.0})
+	takeoff.id = "m_takeoff"
+
+	# 第一次完成：正常发奖，无 repeat 标记。
+	mm.start(takeoff)
+	for f in _frames_takeoff(true, false):
+		if not results.is_empty():
+			break
+		mm.step(DT, f)
+	_check(results.size() == 1 and bool(results[0].get("success", false)),
+		"防刷：首次完成起飞判成功")
+	_check(int(results[0].get("reward", 0)) == 5, "防刷：首次完成发 5 绿宝石")
+	_check(not bool(results[0].get("repeat", true)), "防刷：首次完成无 repeat 标记")
+
+	# 第二次完成同一任务：仍成功、仍计分，但奖励归零 + repeat 标记。
+	results.clear()
+	mm.start(takeoff)
+	for f in _frames_takeoff(true, false):
+		if not results.is_empty():
+			break
+		mm.step(DT, f)
+	_check(results.size() == 1 and bool(results[0].get("success", false)),
+		"防刷：重复完成仍判成功（可反复挑战）")
+	_check(int(results[0].get("reward", 0)) == 0, "防刷：重复完成奖励归零")
+	_check(bool(results[0].get("repeat", false)), "防刷：重复完成打 repeat 标记")
+	_check(int(results[0].get("score", 0)) > 0, "防刷：重复完成仍计分")
+
+	# 换任务：另一个 id 的首次完成不受影响。
+	results.clear()
+	var landing := _mk(MissionData.Type.LANDING,
+		{"zone_radius": 50.0, "max_touchdown_vs": 3.0, "max_roll_speed": 25.0})
+	landing.id = "m_landing"
+	landing.zone_center = Vector3(0, 0, 0)
+	mm.start(landing)
+	for f in _frames_landing(-1.5, Vector3(5, 0, 0), 10.0):
+		if not results.is_empty():
+			break
+		mm.step(DT, f)
+	_check(results.size() == 1 and int(results[0].get("reward", 0)) == 5,
+		"防刷：不同任务首次完成仍发 5 绿宝石")
+
+	# is_rewarded 查询接口 + 新实例不继承（进程语义：面板重建即重置）。
+	_check(mm.is_rewarded("m_takeoff") and mm.is_rewarded("m_landing"),
+		"防刷：is_rewarded 反映已发奖任务")
+	_check(not mm.is_rewarded("m_circuit"), "防刷：未完成的任务 is_rewarded 为假")
+	_check(not MissionManager.new().is_rewarded("m_takeoff"),
+		"防刷：已发奖状态不跨 MissionManager 实例继承")
+
+
 func _run_mission_checks() -> void:
 	_check_takeoff()
 	_check_circuit()
 	_check_landing()
 	_check_landing_runway()
+	_check_reward_guard()

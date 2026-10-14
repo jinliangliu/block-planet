@@ -798,18 +798,23 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
   RUNNING。HUD `_on_aircraft_ride_changed` 在下机且面板 RUNNING 时自动
   `abandon_mission()`；flight_probe J 段守护（下机后 elapsed 定格、`is_running()`
   为假、可再开新任务）。
-- **任务可重复语义（2026-10-14 回订）**：`MissionManager.start()` 无终态守卫——
-  成功/失败/放弃后同一任务可再次开始，奖励（每任务 5 绿宝石，`DEFAULT_REWARD`）
-  可重复领取。儿童向无防刷机制，P2-9 待产品定夺是否保留。
+- **任务可重复语义 + 奖励防刷（P2-9，2026-10-14 定论）**：`MissionManager.start()` 无终态守卫——
+  成功/失败/放弃后同一任务可再次开始（挑战自我无惩罚，重复成功仍计分）。但奖励
+  **每任务每进程仅发一次**：`_rewarded_ids` 记录本进程已发奖的任务 id，重复成功
+  奖励归零并在 result 打 `repeat` 标记；面板任务卡标注「奖励：已领取」、按钮变
+  「再次挑战（无奖励）」、结果行注明「本次不再发放」，HUD 对 repeat 只提示不再
+  入包。语义为运行时态：不落盘（重启可重新赚），面板重建（换区域等）同样重置。
+  任务身份即 `MissionData.id`（出厂三任务均带 id）。
 - HUD 接线：`_build_mission_panel` + K 键/ESC 模态处理 + `_any_overlay_open` 纳入；
   成功奖励经 `_on_mission_panel_reward` 直接入库存（绿宝石 204）+ Toast——「任务→
   奖励」闭合到现有货币体系，不建平行经济。
 - main 接线：`_physics_process` 在玩家登机时逐帧组装遥测并 `_hud.feed_mission()`。
 - 加固 life_probe：`_water_spawn_position` 贴底分支增加「正下方为实体」校验——水底
   悬空（区块未生成/世界边缘）时螃蟹坠入虚空的偶发失败根因是落点选择缺陷，非物理缺陷。
-- 验证：`tests/mission_panel_probe.tscn` 15 项全 PASS（MISSION_PANEL_OK）：初始隐藏/
+- 验证：`tests/mission_panel_probe.tscn` 全 PASS（MISSION_PANEL_OK）：初始隐藏/
   三任务载入/开面板/开始→达标遥测→成功且奖励 5 绿宝石只发一次/结果行/结束后喂帧安全/
-  放弃原因正确/关闭信号。回归：mission_probe、build_screen_probe、smoke_test、
+  放弃原因正确/防刷（二次完成零奖励 + repeat 标记 + 结果行注明 + 卡片已领取标注）/
+  关闭信号。回归：mission_probe（含防刷段）、build_screen_probe、smoke_test、
   life_probe（含加固）全 OK；flight_hud_shot fails=0。
 
 #### Phase 4b-ii · 解锁状态持久化 — 已完成

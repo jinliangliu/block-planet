@@ -6,6 +6,12 @@ extends RefCounted
 ## step(dt, telemetry) 喂入遥测；达成 / 失败 / 超时后一次性发出
 ## mission_result(success, result)，随后状态锁定，不再处理后续帧。
 ##
+## 奖励防刷（P2-9，2026-10-14）：_rewarded_ids 记录本进程内已发过奖的任务
+## id——同一任务重复完成仍判成功、仍计分（挑战自我无惩罚），但奖励归零并
+## 在 result 里打 repeat 标记，由面板/HUD 给出「本次不再发放」提示。语义为
+## 「每任务每进程一次」：不落盘（重启游戏可重新赚），面板重建（换区域等）
+## 同样重置。任务身份即 MissionData.id（出厂三任务均带 id）。
+##
 ## 遥测字典约定：
 ##   altitude_agl  : 离地高度 (m)
 ##   speed        : 空速 (km/h)
@@ -29,6 +35,8 @@ var _was_airborne := false
 var _touchdown_vs := 0.0
 var _landed := false
 var _min_dist_per_wp: Array[float] = []
+## 本进程内已发放过奖励的任务 id 集合（P2-9 防刷；仅运行时，不持久化）。
+var _rewarded_ids := {}
 
 
 func start(m: MissionData) -> void:
@@ -133,14 +141,26 @@ func _step_landing(speed: float, pos: Vector3, on_ground: bool, vs: float,
 			_finish(true, "降落成功")
 
 
+## 该任务本进程内是否已发放过奖励（面板据此在任务卡上标注「已领取」）。
+func is_rewarded(id: String) -> bool:
+	return _rewarded_ids.has(id)
+
+
 func _finish(success: bool, reason: String) -> void:
 	status = Status.SUCCEEDED if success else Status.FAILED
+	# 防刷（P2-9）：同一任务每进程仅发一次奖励。重复完成仍判成功、仍计分，
+	# 但奖励归零并打 repeat 标记——面板/HUD 据此给出「本次不再发放」提示。
+	var repeat := success and _rewarded_ids.has(mission.id)
+	var reward := 0 if repeat else (mission.reward_emeralds() if success else 0)
+	if success and not repeat:
+		_rewarded_ids[mission.id] = true
 	var result := {
 		"success": success,
 		"reason": reason,
 		"elapsed": _elapsed,
 		"score": _score(success),
-		"reward": mission.reward_emeralds() if success else 0,
+		"reward": reward,
+		"repeat": repeat,
 		"type": mission.type,
 		"touchdown_vs": _touchdown_vs,
 		"min_dist_per_wp": _min_dist_per_wp.duplicate(),

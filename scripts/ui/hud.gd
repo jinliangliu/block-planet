@@ -2341,8 +2341,15 @@ func feed_mission(dt: float, telemetry: Dictionary) -> void:
 
 
 ## 任务成功奖励：绿宝石直接入库存（货币复用 ItemTypes.EMERALD），并 Toast。
-func _on_mission_panel_reward(emeralds: int, success: bool, _result: Dictionary) -> void:
-	if not success or emeralds <= 0:
+## 防刷（P2-9）：同一任务每进程仅发一次——repeat 结果（MissionManager 裁决）
+## 只提示「本次不再发放」，不再入包。
+func _on_mission_panel_reward(emeralds: int, success: bool, result: Dictionary) -> void:
+	if not success:
+		return
+	if bool(result.get("repeat", false)):
+		_show_toast("任务完成！奖励已在本进程内领取，本次不再发放")
+		return
+	if emeralds <= 0:
 		return
 	if _player != null:
 		_player.inventory.add_item(ItemTypes.EMERALD, emeralds)

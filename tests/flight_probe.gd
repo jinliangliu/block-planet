@@ -429,6 +429,84 @@ func _run() -> void:
 		"下机后任务被中止（P1-2：可再开新任务，不再卡死）")
 	hud.close_mission_panel()
 	tel_craft.queue_free()
+	# 踩坑：queue_free 的删除刷新晚于当前物理帧——同帧在同位置再 spawn 一架，
+	# 两具同尺寸碰撞盒会重叠一帧并被 depenetration 顶飞（本段实测被顶起一个
+	# 盒高 4.65 m，支撑消失后坠落触发 7.0 解体阈值）。释放后至少等一帧。
+	await get_tree().physics_frame
+
+	# ── J2 段：任务奖励端到端 + 防刷（P2-9）────────────────────
+	# J 段验「下机中止」；这里验奖励链末端。起飞任务判定「离地 ≥30 m 且空速
+	# ≥40 km/h」：照 D2 段惯例把飞机投到全图无方块的净空高度再满油门平飞，
+	# 由 main 真实遥测链（骑乘 → snapshot → feed_mission → 面板 → Manager）
+	# 判成功——低空滑跑起飞与爬升由 C 段覆盖，这里不重复验气动。
+	# 奖励经 mission_reward → HUD 绿宝石入包；再次开始同一任务——仍在空中，
+	# 数帧内二次成功，但奖励归零、不再入包（P2-9 守护）。
+	var emeralds_before: int = player.inventory.count_item(ItemTypes.EMERALD)
+	var rw_craft := Aircraft.spawn(
+		main_scene, start + Vector3(-6.0, 46.0, 24.0), RUNWAY_HEADING)
+	player.ride_aircraft(rw_craft)
+	await _frames(10)
+	# 探针写杆位（C/D 段惯例）：只摘输入通路、不动骑乘状态——rider 保留，
+	# 万一坠机仍会正常弹射玩家；main 遥测链只认 player.aircraft()，照常透传。
+	rw_craft.use_player_input = false
+	rw_craft.launch(50.0)
+	rw_craft.controls.throttle = 1.0
+	hud.open_mission_panel()
+	var panel2: MissionPanel = hud._mission_panel
+	panel2.start_mission(0)
+	_check(panel2.is_running(), "J2：起飞任务已开始")
+	var reward_box := {"count": 0, "reward": -1, "repeat": true}
+	panel2.mission_reward.connect(func(emeralds: int, _s: bool, r: Dictionary):
+		reward_box["count"] += 1
+		reward_box["reward"] = emeralds
+		reward_box["repeat"] = bool(r.get("repeat", false)))
+	# 高度带阻尼保持（D 段写法）：等真实遥测把任务喂成功即止。
+	var j2_hold_y := rw_craft.global_position.y
+	for i in range(600):
+		await get_tree().physics_frame
+		if panel2._mm.status != MissionManager.Status.RUNNING:
+			break
+		var drift: float = rw_craft.global_position.y - j2_hold_y
+		rw_craft.controls.pitch = clampf(
+			-drift * 0.05 - rw_craft.velocity.y * 0.04, -0.35, 0.35)
+	_check(panel2._mm.status == MissionManager.Status.SUCCEEDED,
+		"J2：起飞任务经真实遥测判成功（净空 + 满油门）")
+	_check(player.inventory.count_item(ItemTypes.EMERALD) == emeralds_before + 5,
+		"J2：首次完成 5 绿宝石入包（%d → %d）" % [
+			emeralds_before, player.inventory.count_item(ItemTypes.EMERALD)])
+	_check(reward_box["count"] == 1 and reward_box["reward"] == 5
+		and not reward_box["repeat"], "J2：mission_reward 首次发放且无 repeat 标记")
+	var toast_text := hud._toast_label.text if hud._toast_label != null else ""
+	_check(toast_text.contains("任务奖励：绿宝石 ×5"),
+		"J2：Toast 提示奖励（「%s」）" % toast_text)
+
+	# 防刷：再次开始同一任务——仍在空中，数帧即二次成功，但零发放。
+	panel2.start_mission(0)
+	_check(panel2.is_running(), "J2：已完成的任务可再次开始")
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	_check(panel2._mm.status == MissionManager.Status.SUCCEEDED,
+		"J2：二次完成仍判成功（可反复挑战）")
+	_check(player.inventory.count_item(ItemTypes.EMERALD) == emeralds_before + 5,
+		"J2（P2-9）：二次完成奖励归零，绿宝石不再入包（仍 %d）" %
+			player.inventory.count_item(ItemTypes.EMERALD))
+	_check(reward_box["count"] == 2 and reward_box["reward"] == 0
+		and reward_box["repeat"],
+		"J2（P2-9）：mission_reward 二次发放奖励 0 且带 repeat 标记")
+	toast_text = hud._toast_label.text if hud._toast_label != null else ""
+	_check(toast_text.contains("不再发放"),
+		"J2（P2-9）：Toast 注明本次不再发放（「%s」）" % toast_text)
+	# 收尾：传送回跑道面并双清零速度（_state.velocity 每帧覆盖 velocity，只清
+	# 节点侧停不住）；空中下机会让玩家从 45 m 坠落，后续段落还要用玩家。
+	rw_craft.global_position = start + Vector3(-6.0, 0.0, 2.0)
+	rw_craft._state.velocity = Vector3.ZERO
+	rw_craft.velocity = Vector3.ZERO
+	rw_craft.controls.throttle = 0.0
+	rw_craft.controls.pitch = 0.0
+	await _frames(30)
+	player.exit_aircraft()
+	hud.close_mission_panel()
+	rw_craft.queue_free()
 
 	# ── K 段：涂装每帧同步（settings_panel_probe 只验面板落盘，这里验在飞飞机）──
 	var livery_craft := Aircraft.spawn(
