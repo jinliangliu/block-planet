@@ -28,6 +28,10 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 存档隔离（D-010 铁律 3）：登机时玩家碰撞盒与机身重叠会被 depenetration
+	# 顶起一帧，on_floor 边沿跳变触发 aircraft_took_off → flew +1（实测泄漏），
+	# 快照须在实例化 main.tscn 之前。
+	SaveGuard.snapshot()
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(90):
@@ -111,6 +115,7 @@ func _run() -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shot_path("flight_shot_chase.png"))
 
+	SaveGuard.restore()
 	print("FLIGHT_SHOT_DONE strip_y=%d" % strip_y)
 	get_tree().quit(0)
 

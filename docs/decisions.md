@@ -213,7 +213,7 @@ Events  ← 发布信号  ← 任何模块（玩家、世界、生物、HUD…�
 
 1. **世界是流式加载的**（`LOAD_RADIUS = 2`）——断言前必须把玩家移到目标附近，或用 `world.ensure_chunks_in_region()` 同步补载，否则 `get_block` 一律返回空气，得到假阴性。
 2. **瞬移 `CharacterBody3D` 后同帧射线命中旧位置**——transform 同步发生在下一物理步，射线类断言必须先等一个物理帧。
-3. **探针不得污染玩家存档**——`life_probe` 阶段 L 会备份 counters/states → 清空 → 测试 → 还原；被强杀（SIGTERM）的运行会把测试态留在 `user://progress.json`，收尾需删除该文件。
+3. **探针不得污染玩家存档**——凡跑真实 gameplay 的探针（飞行/击杀/交易/开采/死亡）都会经 `Events` 信号推进 `Progress` 计数并落盘 `user://progress.json`。隔离机制：`tests/save_guard.gd`（`class_name SaveGuard` 静态助手：快照/还原 progress+settings 文件文本 + `Progress.counters/states/_quiz_correct_since_reward` 内存态；**内存态必须一并还原——`Progress._exit_tree` 退出时会 `_save()` 把内存态写盘，只还文件会被覆盖**）。新探针统一走 SaveGuard；flight_probe / life_probe / flight_e2e_shot / flight_view_probe 保留各自验证过的内联同款实现。回归脚本 `tmp/run_regression.sh` 跑前整目录备份、跑后 `diff -r` 验证（`logs/godot.log` 累积属良性）。**新增 `class_name` 脚本后须先跑一次 `godot --headless --path . --editor --quit` 重扫注册，否则 headless 探针报 "Identifier not declared"**（全局类缓存由编辑器维护）。
 4. **断言阈值要与实现节奏对齐**，实现变慢/变快时**改实现而不是放宽断言**（曾出现「夜晚中点环境光 0.19 不满足 <0.15」暴露实现渐暗过慢，正确做法是改实现）。
 5. 生成器带随机性时（如 12% 概率生成幼体），探针必须**显式固定状态**（强制成体：`stage = stage_count_of - 1` + `_rebuild_visual()` + `_apply_stage_stats()`），否则断言非确定性失败。
 

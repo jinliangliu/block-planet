@@ -12,6 +12,9 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 存档隔离（D-010 铁律 3）：本探针真实击杀生物（take_damage 致死 → mob_killed →
+	# killed_any/killed_hostile），快照须在实例化 main.tscn 之前。
+	SaveGuard.snapshot()
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(60):
@@ -162,6 +165,7 @@ func _run() -> void:
 	_check(spawner._hostile_count() == 0, "白天敌对生物被清空")
 	_check(spawner._passive_count() > 0, "白天动物被保留")
 
+	SaveGuard.restore()
 	if _failed == 0:
 		print("MOB_TEST_OK")
 		get_tree().quit(0)

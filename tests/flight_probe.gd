@@ -323,7 +323,11 @@ func _run() -> void:
 	# _prepare_input 走 Input.get_axis 读动作；触屏分支在桌面端恒不激活。
 	var kb := Aircraft.spawn(main_scene, start + Vector3(6.0, 0.0, 6.0), RUNWAY_HEADING)
 	kb.set_piloted(true, player)
-	await _frames(2)
+	kb.set_engine(true)
+	# place() 把机轮放在地面点上方 GROUND_CLEARANCE + 0.05——只等 2 帧机体
+	# 仍在空中，空格刹车（controls.brake = jump and on_floor）不成立；且熄火
+	# 门控把 W/S 油门锁 0（aircraft._prepare_input 提前 return）。等沉降 + 点火。
+	await _frames(14)
 	Input.action_press("aircraft_pitch_up")
 	await get_tree().physics_frame
 	_check(kb.controls.pitch > 0.5, "键盘 ↑ 拉杆产生正俯仰杆量（%.2f）" % kb.controls.pitch)
@@ -572,6 +576,7 @@ func _run() -> void:
 	var gate_craft := Aircraft.spawn(
 		main_scene, start + Vector3(6.0, 0.0, 6.0), RUNWAY_HEADING)
 	gate_craft.set_piloted(true, player)
+	gate_craft.set_engine(true)
 	await get_tree().physics_frame
 	hud.open_mission_panel()
 	_check(player.input_locked, "模态面板打开时玩家被冻结（input_locked）")

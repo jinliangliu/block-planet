@@ -13,3 +13,6 @@ tmp/
 # WorkBuddy session data
 .workbuddy/
 
+# Features docs
+.features/
+

@@ -11,6 +11,9 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 存档隔离（D-010 铁律 3）：本探针执行真实交易（_on_trade_pressed → traded）
+	# 并击杀掠夺者（killed_any/killed_hostile），快照须在实例化 main.tscn 之前。
+	SaveGuard.snapshot()
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(60):
@@ -209,6 +212,7 @@ func _run() -> void:
 		"酿灶台方块可放置读回",
 	)
 
+	SaveGuard.restore()
 	if _failed == 0:
 		print("VILLAGE_TEST_OK")
 		get_tree().quit(0)

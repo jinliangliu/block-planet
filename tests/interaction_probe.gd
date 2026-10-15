@@ -14,6 +14,9 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 存档隔离（D-010 铁律 3）：本探针走真实破坏链路（start_break_or_attack →
+	# block_broken → mined_5/mined_any），快照须在实例化 main.tscn 之前。
+	SaveGuard.snapshot()
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(60):
@@ -82,6 +85,7 @@ func _run() -> void:
 	_check(got_wood, "破坏后木头进入背包（生存掉落闭环）")
 	player.break_held = false
 
+	SaveGuard.restore()
 	if _failed == 0:
 		print("INTERACTION_TEST_OK")
 		get_tree().quit(0)

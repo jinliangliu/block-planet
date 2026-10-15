@@ -12,6 +12,9 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 存档隔离（D-010 铁律 3）：本探针连续击杀玩家（take_damage 致死 → player_died
+	# → died 计数），快照须在实例化 main.tscn 之前。
+	SaveGuard.snapshot()
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(60):
@@ -86,6 +89,7 @@ func _run() -> void:
 	_check(tomb_count >= tombs_total,
 		"三次死亡产生 %d 座墓碑并存（实际 %d 座）" % [tombs_total, tomb_count])
 
+	SaveGuard.restore()
 	if _failed == 0:
 		print("DEATH_PROBE_OK")
 		get_tree().quit(0)

@@ -20,6 +20,9 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 存档隔离（D-010 铁律 3）：本探针走真实收割链路（start_break_or_attack →
+	# block_broken → mined_any），快照须在实例化 main.tscn 之前。
+	SaveGuard.snapshot()
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(60):
@@ -122,6 +125,7 @@ func _probe_base_y(world: World) -> int:
 
 
 func _finish() -> void:
+	SaveGuard.restore()
 	if _failed == 0:
 		print("CROP_RAYCAST_OK")
 		get_tree().quit(0)

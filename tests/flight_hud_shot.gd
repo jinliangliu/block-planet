@@ -46,6 +46,9 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 存档隔离（D-010 铁律 3）：本探针真实起飞/巡航/失速，会推进 flew/flew_alt_*/
+	# flew_distance 计数，快照须在实例化 main.tscn 之前（暖机帧也可能触发 Events）。
+	SaveGuard.snapshot()
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(90):
@@ -179,6 +182,7 @@ func _run() -> void:
 		await get_tree().physics_frame
 	_check(not _hud._flight_panel.visible, "下机后飞行仪表盘隐藏")
 
+	SaveGuard.restore()
 	print("FLIGHT_HUD_DONE fails=%d" % _fails)
 	get_tree().quit(1 if _fails > 0 else 0)
 
