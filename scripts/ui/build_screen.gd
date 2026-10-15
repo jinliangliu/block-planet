@@ -40,6 +40,8 @@ const BAD_COLOR := Color(0.70, 0.25, 0.18)
 var editor := BuildEditor.new()
 var _player: Player
 var _unlocks := PartUnlocks.new()
+## HUD 引用（main 接线）：模态互斥——已有面板打开时 V 键不响应（P2-1）。
+var _hud: HUD
 
 var _selected_id := "fuselage"
 var _mirror := true
@@ -78,6 +80,11 @@ func setup(player: Player) -> void:
 func set_unlocks(unlocks: PartUnlocks) -> void:
 	if unlocks != null:
 		_unlocks = unlocks
+
+
+## 注入 HUD（main 接线）：模态互斥查询用——HUD 已有面板打开时 V 键不响应。
+func set_hud(hud: HUD) -> void:
+	_hud = hud
 
 
 func _ready() -> void:
@@ -325,7 +332,9 @@ func _make_bar_button(text: String, handler: Callable) -> Button:
 ## ── 输入 ───────────────────────────────────────────────
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
-		if event.is_action_pressed("toggle_build"):
+		# 模态栈只允许一层：HUD 已有面板/窗口打开时让位（P2-1）。
+		if event.is_action_pressed("toggle_build") \
+				and (_hud == null or not _hud.is_any_panel_open()):
 			open()
 		return
 

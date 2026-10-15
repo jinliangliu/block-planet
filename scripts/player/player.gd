@@ -652,12 +652,16 @@ func _handle_aircraft_key() -> void:
 
 ## 收回停着的飞机：从世界移除；生存模式退回 1 个飞行器道具（与放置时的消耗对应），
 ## 创造 / 探索不增不减（放置本就不消耗）。已解体或正在驾驶的不处理。
+## 试飞机（蓝图拼装、未消耗物品）例外：一律不退回，否则「工坊台试飞 → 双击 F
+## 收回」可无限刷 AIRCRAFT（P2-3；蓝图本身持久化在 user://，试飞不花道具）。
 func _pick_up_aircraft(craft: Aircraft) -> void:
 	if craft == null or not is_instance_valid(craft) or craft.is_wrecked():
 		return
 	if _aircraft == craft:
 		exit_aircraft()
-	if GameState.is_survival():
+	if craft.blueprint_built:
+		Events.notice.emit("✈️ 试飞机已收回（蓝图还在工坊台，不退回物品）。")
+	elif GameState.is_survival():
 		inventory.add_item(ItemTypes.AIRCRAFT, 1)
 		Events.notice.emit("✈️ 飞机已收回（背包 +1）。")
 	else:

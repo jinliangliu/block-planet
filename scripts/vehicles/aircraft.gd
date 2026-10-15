@@ -90,6 +90,15 @@ var _model: AircraftModel
 var _applied_livery := -1
 ## 蓝图装配来源：非 null 时 _ready 据其零件生成体素块外观（替代整机机模）。
 var _blueprint: Blueprint = null
+## 蓝图机外观登记表（P2-6/P2-17）：螺旋桨中继节点 / 升降舵网格 / 零件材质
+## 与类别（涂装改色用）。整机机模路径（_model）下三者皆空。
+var _bp_props: Array[Node3D] = []
+var _bp_elevators: Array[MeshInstance3D] = []
+var _bp_mats: Array[MeshInstance3D] = []
+var _bp_cats: Array[int] = []
+## 试飞机标记（from_loadout 生成）：由蓝图拼装、未消耗库存物品，双击 F
+## 收回时不退回 AIRCRAFT 道具——否则「工坊台试飞 → 收回」可无限刷物品（P2-3）。
+var blueprint_built := false
 var _wrecked := false
 var _stick := Vector2.ZERO
 var _readings_timer := 0.0
@@ -125,6 +134,7 @@ static func from_loadout(
 	parent: Node, at: Vector3, heading: float, blueprint: Blueprint) -> Aircraft:
 	var craft := Aircraft.new()
 	craft._blueprint = blueprint
+	craft.blueprint_built = true   # 试飞机：收回不退回物品（P2-3）
 	parent.add_child(craft)              # _ready 读到 _blueprint → 建零件体素外观
 	craft.place(at, heading)             # 落位并建默认气动框
 	craft._state.airframe = blueprint.aggregate()  # 覆盖为零件聚合结果
@@ -139,13 +149,41 @@ func place(at: Vector3, heading: float = 0.0) -> void:
 	velocity = Vector3.ZERO
 
 
-## 按蓝图零件生成体素块外观（以机体重心为原点居中）。纯视觉、无碰撞，不改变飞行。
+## 按蓝图零件生成体素块外观。纯视觉、无碰撞，不改变飞行。
+## 三处对齐整机机模（P2-6/P2-17 合并修，同函数一次改动）：
+##   1. 零件组底面锚到机轮触地高度（−GROUND_CLEARANCE，即碰撞盒底）——
+##      原按重心居中，而重心≠机身原点（碰撞盒以原点为准），整组悬空约 0.85 m；
+##   2. 螺旋桨/升降舵登记进 _bp_props/_bp_elevators，每帧跟油门与杆量动起来
+##      （原蓝图机的桨不转、舵不摆，与整机机模落差明显）；
+##   3. 材质登记进 _bp_mats/_bp_cats，出厂即套当前涂装——_sync_livery 原对
+##      _model==null 直接早退，蓝图机换涂装无效果。
 func _build_part_visuals(bp: Blueprint) -> void:
 	var container := Node3D.new()
 	container.name = "PartMeshes"
 	add_child(container)
 	var com := bp.center_of_gravity()
+	# 零件组最低点（相对重心）：绕 Y 旋转只对调宽/深，半高即 size.y 的一半。
+	var min_y := INF
 	for p in bp.parts:
+		var c: Vector3 = p.local_pos() - com
+		min_y = minf(min_y, c.y - float(p.data.size.y) * 0.5 * PartData.GRID_METERS)
+	container.position = Vector3(0.0, -GROUND_CLEARANCE - min_y, 0.0)
+	_bp_props.clear()
+	_bp_elevators.clear()
+	_bp_mats.clear()
+	_bp_cats.clear()
+	for p in bp.parts:
+		var center: Vector3 = p.local_pos() - com
+		var is_prop := p.data.category == PartData.Category.PROPELLER
+		var parent: Node3D = container
+		if is_prop:
+			# 桨叶挂中继节点：中继保持单位旋转，绕其局部 Z（机头轴）旋转即
+			# 盘面旋转——零件网格自身的 Y 向 rot 不会污染转轴。
+			var pivot := Node3D.new()
+			pivot.position = center
+			container.add_child(pivot)
+			parent = pivot
+			_bp_props.append(pivot)
 		var mi := MeshInstance3D.new()
 		var box := BoxMesh.new()
 		box.size = Vector3(p.data.size) * PartData.GRID_METERS
@@ -155,9 +193,16 @@ func _build_part_visuals(bp: Blueprint) -> void:
 		mat.metallic = 0.1
 		mat.roughness = 0.7
 		mi.material_override = mat
-		mi.position = p.local_pos() - com
+		mi.position = Vector3.ZERO if is_prop else center
 		mi.rotation_degrees = Vector3(0.0, float(p.rot) * 90.0, 0.0)
-		container.add_child(mi)
+		parent.add_child(mi)
+		_bp_mats.append(mi)
+		_bp_cats.append(p.data.category)
+		if p.data.category == PartData.Category.TAIL:
+			_bp_elevators.append(mi)
+	# 出厂即套当前涂装（与整机机模一致）。
+	_applied_livery = -1
+	_sync_livery()
 
 
 ## 零件类别 → 体素块配色（蓝本为儿童向、辨识度优先）。
@@ -297,6 +342,8 @@ func _physics_process(delta: float) -> void:
 	if _model != null:
 		_model.spin_propeller(controls.throttle, delta)
 		_model.deflect_controls(controls.roll, controls.pitch)
+	else:
+		_animate_bp_surfaces(controls.throttle, controls.pitch, delta)
 
 	_update_flight_tracking(delta, on_ground)
 	_check_failure(impact)
@@ -304,13 +351,46 @@ func _physics_process(delta: float) -> void:
 
 
 ## 涂装同步：设置里换了涂装就在下一帧改色（整数比对，命中才刷材质）。
+## 两条外观路径都覆盖：整机机模（_model）与蓝图零件（_bp_mats）——
+## 原实现对 _model==null 直接早退，蓝图机换涂装无效果（P2-6）。
 func _sync_livery() -> void:
-	if _model == null:
-		return
 	var want := FlightSettings.current().livery_index
-	if want != _applied_livery:
+	if want == _applied_livery:
+		return
+	if _model != null:
 		_model.set_livery_index(want)
-		_applied_livery = _model.livery_index()
+	elif not _bp_mats.is_empty():
+		_apply_bp_livery(want)
+	_applied_livery = want
+
+
+## 蓝图零件涂装：机身/机翼取涂装 body 色，尾翼/发动机/起落架/油箱取 accent 色，
+## 螺旋桨固定深色（桨叶与涂装无关，保持深色辨识）。类别→角色映射集中在此，
+## 与 _category_color 的默认配色互补——玩家显式选了涂装就以涂装为准。
+func _apply_bp_livery(index: int) -> void:
+	var body := AircraftLivery.body_of(index)
+	var accent := AircraftLivery.accent_of(index)
+	var dark := Color(0.20, 0.20, 0.22)
+	for i in _bp_mats.size():
+		var mat := _bp_mats[i].material_override as StandardMaterial3D
+		if mat == null:
+			continue
+		match _bp_cats[i]:
+			PartData.Category.FUSELAGE, PartData.Category.WING:
+				mat.albedo_color = body
+			PartData.Category.PROPELLER:
+				mat.albedo_color = dark
+			_:
+				mat.albedo_color = accent
+
+
+## 蓝图机动画：螺旋桨绕机头轴按油门旋转、升降舵随拉杆/推杆偏转
+##（参数与量级同 AircraftModel.spin_propeller / deflect_controls）。
+func _animate_bp_surfaces(throttle: float, pitch: float, delta: float) -> void:
+	for pivot in _bp_props:
+		pivot.rotate_z(-AircraftModel.PROP_MAX_SPIN * clampf(throttle, 0.0, 1.0) * delta)
+	for mi in _bp_elevators:
+		mi.rotation.x = -pitch * 0.5
 
 
 ## 飞行里程统计：起飞边沿、离地高度里程碑、累计里程，广播给进度核心
@@ -418,6 +498,11 @@ func _prepare_input(delta: float) -> void:
 	if not use_player_input:
 		# 脚本/探针驱动：一个字段都不碰，全部由外部写入。
 		return
+	# 模态界面打开中（任务/设置等面板冻结玩家，Player.input_locked）：不接受
+	# 新输入，保持当前杆位与油门继续飞行——否则玩家在面板里按 W/S/A/D/空格
+	# 仍在遥控飞机（P2-2）。
+	if rider != null and rider.input_locked:
+		return
 
 	if _touch_active:
 		# 触屏驾驶：HUD 飞行触控层已写好本帧操纵量，原样采用。
@@ -448,6 +533,9 @@ func wreck(reason: String) -> void:
 	velocity = Vector3.ZERO
 	_state.velocity = Vector3.ZERO
 	_spawn_debris()
+	# 先广播原因再弹射乘员（P2-5）：HUD 的 crashed 监听在下机时断开，
+	# 顺序反了坠机原因播报就会丢失。
+	crashed.emit(reason)
 	if rider != null:
 		var ejected := rider
 		ejected.exit_aircraft(CRASH_DAMAGE)

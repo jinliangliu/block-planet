@@ -86,7 +86,10 @@ func _ready() -> void:
 	$UI.add_child(_build_screen)
 	_build_screen.setup(_player)
 	_build_screen.set_unlocks(_unlocks)
+	_build_screen.set_hud(_hud)
 	_build_screen.test_fly_requested.connect(_on_test_fly_requested)
+	# 模态互斥（P2-1）：建造界面打开时 HUD 热键让位；HUD 有面板时 V 键不响应。
+	_hud.set_build_screen(_build_screen)
 
 	# 首次进入游戏先选地图；之后随时可用 M 键重新选择。
 	# 无头环境（探针 / CI）不自动弹出：模态界面会冻结玩家，阻塞自动化流程。

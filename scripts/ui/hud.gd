@@ -38,6 +38,8 @@ var _bestiary: BestiaryUI
 var _quest_panel: QuestPanel
 var _mission_panel: MissionPanel
 var _settings_panel: SettingsPanel
+## 工坊台建造界面（main 持有、挂在 $UI 下）：模态互斥与冻结态广播用。
+var _build_screen: BuildScreen
 var _inventory_panel: InventoryPanel
 var _toast_label: Label
 var _toast_tween: Tween
@@ -101,6 +103,9 @@ var _ft_pitch := 0.0
 var _ft_roll := 0.0
 var _ft_yaw := 0.0
 var _ft_throttle := 0.0
+## 当前驾驶的飞机（P2-5 坠机原因播报用）：驾驶中连接 crashed 信号，
+## 下机断开——wreck 先广播原因再弹射玩家，连接在广播时仍有效。
+var _ridden_craft: Aircraft = null
 var _ft_brake := false
 
 
@@ -180,6 +185,11 @@ func _build() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# 工坊台建造界面（V）同为模态窗口：打开时其余热键一律让位。否则
+	# E/B/J/K/O/M 会在建造界上叠面板，关闭顺序错乱会扯乱鼠标捕获与
+	# input_locked（P2-1）。建造界面自己的按键由它自身的 _unhandled_input 处理。
+	if _build_screen != null and _build_screen.visible:
+		return
 	# 地图选择器为模态界面：仅响应 ESC 关闭，其余热键一律让位。
 	if _map_selector != null and _map_selector.is_open():
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
@@ -646,12 +656,32 @@ func _push_touch_flight() -> void:
 	craft.set_touch_flight_input(_ft_pitch, _ft_roll, _ft_yaw, _ft_throttle, _ft_brake)
 
 
+## 坠机记录（P2-5）：存下结构失效的具体原因（超速解体/硬着陆），供随后
+## 的掉血播报带上「为什么」——Toast 是覆盖式的，两条各自弹出会互相顶掉，
+## 合并成一条「飞机坠毁了（原因）」玩家才看得全。
+var _last_crash_reason := ""
+
+
+## 坠机播报（P2-5）：记录原因并即时提示；玩家正驾驶时紧随的掉血播报会
+## 把原因合并进去（见 _on_damage_taken 的 REASON_CRASH 分支）。
+func _on_aircraft_crashed(reason: String) -> void:
+	_last_crash_reason = reason
+	_show_toast("💥 %s" % reason)
+
+
 func _on_ft_exit() -> void:
 	if _player != null and _player.is_riding():
 		_player.exit_aircraft()
 
 
 func _on_aircraft_ride_changed(_riding: bool) -> void:
+	# P2-5：坠机原因播报的监听按驾驶状态摘挂（下机即断开）。
+	if _ridden_craft != null and is_instance_valid(_ridden_craft) \
+			and _ridden_craft.crashed.is_connected(_on_aircraft_crashed):
+		_ridden_craft.crashed.disconnect(_on_aircraft_crashed)
+	_ridden_craft = _player.aircraft() if _riding and _player != null else null
+	if _ridden_craft != null:
+		_ridden_craft.crashed.connect(_on_aircraft_crashed)
 	# P1-2：下机且任务仍在进行 → 主动放弃当前任务，避免永久卡 RUNNING。
 	if not _riding and _mission_panel != null and _mission_panel.is_running():
 		_mission_panel.abandon_mission()
@@ -2184,6 +2214,19 @@ func _any_overlay_open() -> bool:
 		or (_settings_panel != null and _settings_panel.is_open())
 
 
+## 是否有任一窗口/面板打开（对外的模态互斥查询）：覆盖层 + 地图选择器 + 背包。
+## 工坊台建造界面据此决定 V 键是否响应——模态栈只允许一层（P2-1）。
+func is_any_panel_open() -> bool:
+	return _any_overlay_open() \
+		or (_map_selector != null and _map_selector.is_open()) \
+		or (_inventory_panel != null and _inventory_panel.is_open())
+
+
+## 注入工坊台建造界面（main 在 _ready 里接线）：模态互斥 + 冻结态传播用。
+func set_build_screen(screen: BuildScreen) -> void:
+	_build_screen = screen
+
+
 func open_manual() -> void:
 	if _manual == null:
 		return
@@ -2483,6 +2526,10 @@ func _set_player_frozen(frozen: bool) -> void:
 		return
 	_player.set_physics_process(not frozen)
 	_player.set_process_unhandled_input(not frozen)
+	# 冻结态同时落到 input_locked：飞行器每帧读它门控驾驶输入——
+	# 否则骑着飞机开 K/O 面板时，W/S 油门、A/D 方向舵、空格刹车仍实时
+	# 操控飞机（P2-2）。语义即「模态界面打开中」，与工坊台用法一致。
+	_player.input_locked = frozen
 
 
 func _refresh_stats() -> void:
@@ -2540,6 +2587,11 @@ func _on_damage_taken(amount: int, reason: String, remaining: int) -> void:
 		label = "摔了一跤"
 	elif reason == Player.REASON_STUCK:
 		label = "卡进方块里了"
+	elif reason == Player.REASON_CRASH:
+		# 带上 wreck 广播的具体原因（P2-5）：「飞机坠毁了（摔得太狠，机身解体）」
+		# 而不是修复前的病句「被坠机打中了」。
+		label = "飞机坠毁了" if _last_crash_reason.is_empty() \
+			else "飞机坠毁了（%s）" % _last_crash_reason
 	_show_toast("💔 %s −%d（剩 %d）" % [label, amount, remaining])
 
 

@@ -395,10 +395,25 @@ func _run() -> void:
 			"试飞机下方是跑道铺面（block=%d）" % block_u)
 		_check(absf(fly_craft._state.airframe.mass - 240.0) < 0.01,
 			"试飞气动框 = 蓝图聚合（质量 %.1f kg）" % fly_craft._state.airframe.mass)
-		player.exit_aircraft()
-		await _frames(2)
-		_check(player.aircraft() == null, "下机后玩家脱离飞机")
-		fly_craft.queue_free()
+		# P2-3：试飞机收回不刷道具。双击 F 的完整链路是「单按先下机 → 窗口期内
+		# 再按回收」；试飞机由蓝图拼装、从未消耗库存物品，回收时背包 AIRCRAFT
+		# 必须不变（修复前生存模式每轮净 +1，「工坊台试飞→收回」可无限刷）。
+		var ac_before := player.inventory.count_item(ItemTypes.AIRCRAFT)
+		# 归零上次按 F 时间：保证「单按 → 窗口期内再按」的确定序列，
+		# 不依赖探针前文是否碰过 F 键。
+		player._last_aircraft_f_ms = 0
+		player._handle_aircraft_key()
+		_check(player.aircraft() == null, "单按 F 从试飞机下机")
+		player._handle_aircraft_key()
+		# queue_free 的删除刷新晚于当前帧（踩坑记录）：等一帧物理帧再验存活。
+		await get_tree().physics_frame
+		_check(not is_instance_valid(fly_craft), "双击 F 收回试飞机（移出世界）")
+		_check(player.inventory.count_item(ItemTypes.AIRCRAFT) == ac_before,
+			"P2-3：试飞机收回不退物品（背包 %d → %d，防刷道具）"
+				% [ac_before, player.inventory.count_item(ItemTypes.AIRCRAFT)])
+		# 踩坑记录：queue_free 的删除刷新晚于当前物理帧，同帧同位置再 spawn
+		# 会被 depenetration 顶飞——释放后至少等一帧物理帧。
+		await get_tree().physics_frame
 
 	# ── J 段：任务遥测接线端到端 + 下机中止（P1-2 修复守护）────────────
 	# mission_panel_probe 用合成遥测直喂面板；这里验 main._physics_process 的
@@ -526,6 +541,145 @@ func _run() -> void:
 	_check(livery_ok, "机身材质 albedo 同步为丛林绿")
 	FlightSettings.current().set_livery(0)
 	livery_craft.queue_free()
+
+	# ── L 段：模态互斥 + 面板期间飞行输入门控（P2-1 / P2-2）────────────
+	# P2-1：工坊台与 HUD 面板互斥——两个方向各自带「对照」断言：先证明合成键
+	# 事件确实能驱动目标（排除「事件根本不匹配动作」的假阳性），再证互斥。
+	# 方向一：HUD 面板打开时，V 键不唤出工坊台。
+	hud.set_craft_open(true)
+	_check(hud.is_any_panel_open(), "合成台打开时 is_any_panel_open() 为真")
+	main_scene._build_screen._unhandled_input(_key(KEY_V))
+	_check(not main_scene._build_screen.visible,
+		"P2-1：合成台开着按 V 不唤出工坊台（模态栈只允许一层）")
+	hud.set_craft_open(false)
+	main_scene._build_screen._unhandled_input(_key(KEY_V))
+	_check(main_scene._build_screen.visible, "对照：无遮挡时 V 键可唤出工坊台")
+	# 方向二：工坊台打开时，HUD 热键（E 合成台）一律让位。
+	hud._unhandled_input(_key(KEY_E))
+	_check(not (hud._craft_overlay != null and hud._craft_overlay.visible),
+		"P2-1：工坊台打开时按 E 不开合成台（HUD 热键让位）")
+	main_scene._build_screen.close()
+	_check(not main_scene._build_screen.visible, "工坊台可正常关闭")
+	# 关面板后恢复：E 键重新能开合成台（证明让位只发生在工坊台打开期间）。
+	hud._unhandled_input(_key(KEY_E))
+	_check(hud._craft_overlay != null and hud._craft_overlay.visible,
+		"对照：工坊台关闭后 E 键恢复打开合成台")
+	hud.set_craft_open(false)
+
+	# P2-2：模态面板冻结期间，W/S/A/D/空格不再遥控飞机（修复前骑着飞机开
+	# K/O 面板时油门/方向舵/刹车仍实时响应—— aircraft._prepare_input 直接
+	# 轮询 Input，看不到面板状态）。
+	var gate_craft := Aircraft.spawn(
+		main_scene, start + Vector3(6.0, 0.0, 6.0), RUNWAY_HEADING)
+	gate_craft.set_piloted(true, player)
+	await get_tree().physics_frame
+	hud.open_mission_panel()
+	_check(player.input_locked, "模态面板打开时玩家被冻结（input_locked）")
+	var gate_thr := gate_craft.controls.throttle
+	Input.action_press("move_forward")
+	Input.action_press("move_right")
+	Input.action_press("jump")
+	await _frames(10)
+	_check(gate_craft.controls.throttle == gate_thr,
+		"P2-2：面板打开时 W 推不进油门（%.2f 保持不变）" % gate_thr)
+	_check(gate_craft.controls.yaw == 0.0, "P2-2：面板打开时 D 不产生方向舵杆量")
+	_check(not gate_craft.controls.brake, "P2-2：面板打开时空格不触发刹车")
+	Input.action_release("move_forward")
+	Input.action_release("move_right")
+	Input.action_release("jump")
+	hud.close_mission_panel()
+	_check(not player.input_locked, "关闭面板后解除冻结")
+	await get_tree().physics_frame
+	Input.action_press("move_forward")
+	await _frames(10)
+	_check(gate_craft.controls.throttle > gate_thr + 0.05,
+		"P2-2：关闭面板后 W 恢复加油门（%.2f → %.2f）"
+			% [gate_thr, gate_craft.controls.throttle])
+	Input.action_release("move_forward")
+	gate_craft.set_piloted(false)
+	gate_craft.queue_free()
+	# 踩坑记录：queue_free 删除刷新晚于当前物理帧——同帧同位置再 spawn 会被
+	# depenetration 顶飞。M 段出生点选在跑道另一处（0,+10），错开更保险。
+	await get_tree().physics_frame
+
+	# ── M 段：蓝图机外观三项合并修 + 坠机原因播报（P2-6/P2-17/P2-5）────
+	# P2-6+P2-17 同文件同函数一次改动修完：零件组悬空 0.85 m（_build_part_
+	# visuals 按重心居中、未对齐碰撞盒底）、桨不转/舵不摆（产出未登记进动画
+	# 字段）、换涂装无效果（_sync_livery 对 _model==null 早退）。
+	# P2-5：坠机只有病句「被坠机打中了」，看不到具体原因。
+	var bp := Blueprint.new()
+	bp.parts = PartRegistry.default_loadout()
+	var bp_craft := Aircraft.from_loadout(
+		main_scene, start + Vector3(0.0, 0.0, 10.0), RUNWAY_HEADING, bp)
+	await _frames(5)
+	_check(bp_craft._model == null and bp_craft._bp_props.size() >= 1,
+		"蓝图机走零件外观路径（螺旋桨中继 %d 个）" % bp_craft._bp_props.size())
+	# 悬空修复：零件组位移应把最低零件底面锚到碰撞盒底（−GROUND_CLEARANCE）。
+	var com: Vector3 = bp.center_of_gravity()
+	var min_y := INF
+	for p: PlacedPart in bp.parts:
+		var c: Vector3 = p.local_pos() - com
+		min_y = minf(min_y, c.y - float(p.data.size.y) * 0.5 * PartData.GRID_METERS)
+	var mesh_root: Node3D = bp_craft.get_node("PartMeshes")
+	var expect_shift: float = -Aircraft.GROUND_CLEARANCE - min_y
+	_check(absf(mesh_root.position.y - expect_shift) < 0.001,
+		"P2-17：零件组底面锚到碰撞盒底（位移 %.2f，期望 %.2f）"
+			% [mesh_root.position.y, expect_shift])
+	var bp_bottom: float = bp_craft.global_position.y + mesh_root.position.y + min_y
+	var collider_bottom: float = bp_craft.global_position.y \
+		+ Aircraft.COLLIDER_CENTER.y - Aircraft.COLLIDER_SIZE.y * 0.5
+	_check(absf(bp_bottom - collider_bottom) < 0.01,
+		"P2-17：零件组底与碰撞盒底同高（世界差 %.3f m）"
+			% absf(bp_bottom - collider_bottom))
+	# 螺旋桨动画：满油门数帧，中继绕机头轴累计转角应显著（修复前桨不转）。
+	bp_craft.drive_remotely()
+	bp_craft.controls.throttle = 1.0
+	var prop_before: float = bp_craft._bp_props[0].rotation.z
+	await _frames(10)
+	var prop_after: float = bp_craft._bp_props[0].rotation.z
+	_check(absf(prop_after - prop_before) > 0.5,
+		"P2-6：蓝图机螺旋桨随油门旋转（%.2f → %.2f rad）"
+			% [prop_before, prop_after])
+	# 升降舵动画：拉杆杆量 → 升降舵网格偏转（修复前舵不摆）。
+	bp_craft.controls.throttle = 0.0
+	bp_craft.controls.brake = true
+	bp_craft.controls.pitch = 0.8
+	await _frames(3)
+	var elevator: MeshInstance3D = bp_craft._bp_elevators[0]
+	_check(absf(elevator.rotation.x + 0.4) < 0.01,
+		"P2-6：蓝图机升降舵随拉杆偏转（rotation.x = %.2f）" % elevator.rotation.x)
+	bp_craft.controls.pitch = 0.0
+	bp_craft.controls.brake = false
+	# 涂装同步：改设置后下一帧，机身（FUSELAGE）材质 albedo 变涂装 body 色。
+	FlightSettings.current().set_livery(2)
+	await get_tree().physics_frame
+	var body_ok := false
+	for i in bp_craft._bp_mats.size():
+		if bp_craft._bp_cats[i] != PartData.Category.FUSELAGE:
+			continue
+		var mat: StandardMaterial3D = bp_craft._bp_mats[i].material_override
+		if mat != null and mat.albedo_color == AircraftLivery.body_of(2):
+			body_ok = true
+	_check(body_ok, "P2-6：蓝图机机身随涂装改色（丛林绿 body）")
+	FlightSettings.current().set_livery(0)
+	# P2-5：坠机原因播报。骑乘即连接 crashed；wreck 先广播原因再弹射
+	# （弹射触发下机 → 连接断开），掉血播报把具体原因合并进去。
+	_check(not bp_craft.crashed.is_connected(hud._on_aircraft_crashed),
+		"未骑乘时 HUD 不监听该机 crashed（只连自己驾驶的那架）")
+	player.ride_aircraft(bp_craft)
+	await get_tree().physics_frame
+	_check(bp_craft.crashed.is_connected(hud._on_aircraft_crashed),
+		"P2-5：骑乘后 HUD 连接该机 crashed")
+	hud._last_crash_reason = ""
+	bp_craft.wreck("摔得太狠，机身解体")
+	await _frames(2)
+	var crash_toast := hud._toast_label.text if hud._toast_label != null else ""
+	_check(crash_toast.contains("飞机坠毁了") and crash_toast.contains("摔得太狠"),
+		"P2-5：坠机播报带具体原因（「%s」）" % crash_toast)
+	_check(not bp_craft.crashed.is_connected(hud._on_aircraft_crashed),
+		"P2-5：弹射下机后 HUD 断开连接（连接不泄漏）")
+	bp_craft.queue_free()
+	await get_tree().physics_frame
 
 	_finish()
 
@@ -750,6 +904,17 @@ func _on_crashed(reason: String) -> void:
 func _frames(count: int) -> void:
 	for i in range(count):
 		await get_tree().physics_frame
+
+
+## 合成按键事件（L 段模态互斥用）：keycode 与 physical_keycode 同时置位，
+## 覆盖 InputMap 动作事件两种登记方式（InputActions.register 只登记 physical）。
+func _key(kc: Key) -> InputEventKey:
+	var ev := InputEventKey.new()
+	ev.keycode = kc
+	ev.physical_keycode = kc
+	ev.pressed = true
+	ev.echo = false
+	return ev
 
 
 func _finish() -> void:
