@@ -271,10 +271,14 @@ func seat_transform() -> Transform3D:
 	return global_transform * Transform3D(Basis.IDENTITY, SEAT_OFFSET)
 
 
-## 鼠标操纵杆：累积杆量后限幅在单位圆内。
+## 鼠标操纵杆：累积杆量后限幅在单位圆内（P2-11）。分别钳 x/y 会让对角
+## 推满时总杆量达 √2 ≈ 1.41——滚转与俯仰同时超订；先各自钳、再按模长
+## 归一，任何方向总杆量不超过 1。
 func add_mouse_motion(relative: Vector2) -> void:
 	_stick.x = clampf(_stick.x + relative.x * MOUSE_STICK_SENSITIVITY, -1.0, 1.0)
 	_stick.y = clampf(_stick.y + relative.y * MOUSE_STICK_SENSITIVITY, -1.0, 1.0)
+	if _stick.length() > 1.0:
+		_stick = _stick.normalized()
 
 
 ## 交给脚本/探针驾驶：纳入控制通路，但控制量完全由外部写 controls。
@@ -315,6 +319,12 @@ func set_piloted(value: bool, who: Player = null) -> void:
 
 func _physics_process(delta: float) -> void:
 	if _wrecked:
+		# 残骸继续受重力坠落并滑动（P2-10）：原来直接 return——velocity 已在
+		# wreck 置零，空中解体的残骸悬停 4 秒等消散，违反直觉。撞地即由 floor
+		# 支撑停住，消散计时照常。气动/输入/跟踪全部停摆（残骸不飞行）。
+		velocity += Vector3.DOWN * AircraftFlight.GRAVITY * delta
+		move_and_slide()
+		_state.position = global_position
 		return
 
 	_prepare_input(delta)
@@ -539,12 +549,11 @@ func wreck(reason: String) -> void:
 	if rider != null:
 		var ejected := rider
 		ejected.exit_aircraft(CRASH_DAMAGE)
-	# 残骸：向一侧翻倒并沉入地面一点，避免看起来还完整。
+	# 残骸：向一侧翻倒即完成演出（P2-10：坠落交给 _physics_process 的
+	# _wrecked 分支——物理重力；原 tween 还带动 position 下沉 0.35 m，
+	# 与物理坠落互相打架，故只保留翻倒）。
 	var tween := create_tween()
-	tween.set_parallel(true)
 	tween.tween_property(self, "rotation:z", 0.9, 0.6).set_trans(Tween.TRANS_BOUNCE)
-	tween.tween_property(self, "position:y", global_position.y - 0.35, 0.6)
-	crashed.emit(reason)
 	var timer := get_tree().create_timer(WRECK_LIFETIME)
 	timer.timeout.connect(queue_free)
 

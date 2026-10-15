@@ -681,6 +681,36 @@ func _run() -> void:
 	bp_craft.queue_free()
 	await get_tree().physics_frame
 
+	# ── N 段：残骸坠落 + 鼠标杆单位圆（P2-10 / P2-11）────────────
+	# P2-10：wreck 原来把 velocity 置零后 _physics_process 直接 return——
+	# 空中解体的残骸悬停 4 秒等消散。现在残骸继续受重力坠落。
+	var wreck_craft := Aircraft.spawn(
+		main_scene, start + Vector3(6.0, 46.0, 24.0), RUNWAY_HEADING)
+	wreck_craft.drive_remotely()
+	await get_tree().physics_frame
+	var wreck_y0: float = wreck_craft.global_position.y
+	wreck_craft.wreck("测试解体")
+	await _frames(60)
+	var wreck_y1: float = wreck_craft.global_position.y
+	_check(wreck_y1 < wreck_y0 - 3.0,
+		"P2-10：空中解体后残骸受重力坠落（%.1f → %.1f m，1 s 下落 %.1f）"
+			% [wreck_y0, wreck_y1, wreck_y0 - wreck_y1])
+	wreck_craft.queue_free()
+	await get_tree().physics_frame
+	# P2-11：鼠标杆分别钳 x/y 时，对角推满总杆量达 √2 ≈ 1.41（滚转与俯仰
+	# 同时超订）。改按模长归一到单位圆。
+	var stick_craft := Aircraft.spawn(main_scene, start, RUNWAY_HEADING)
+	stick_craft.drive_remotely()
+	for i in range(20):
+		stick_craft.add_mouse_motion(Vector2(200.0, 200.0))
+	_check(stick_craft._stick.length() <= 1.001,
+		"P2-11：对角推满杆量限幅在单位圆（|%.3f| ≤ 1）" % stick_craft._stick.length())
+	_check(absf(stick_craft._stick.x - stick_craft._stick.y) < 0.01
+		and stick_craft._stick.x > 0.0,
+		"P2-11：归一化保持对角方向（x=y=%.3f）" % stick_craft._stick.x)
+	stick_craft.queue_free()
+	await get_tree().physics_frame
+
 	_finish()
 
 
@@ -753,6 +783,28 @@ func _run_flight_model_checks() -> void:
 	_check(absf(vs - 13.1) < 0.3,
 		"海平面失速速度钉死 13.1 m/s（实际 %.2f m/s，合 %.1f km/h）"
 			% [vs, vs * AircraftFlight.MPS_TO_KMH])
+
+	# ── P2-8：地面偏航门控 ─────────────────────────────────────
+	# 地面满杆偏航只由节点层前轮转向（_apply_ground_forces 的 STEER_RATE）
+	# 负责，气动层不再叠杆量偏航——修复前双重叠加 ≈77°/s（YAW_RATE_MAX
+	# 31.5°/s + 前轮 45°/s），滑跑里轻点方向舵就冲出跑道。
+	var gy := AircraftFlight.make_state(Vector3.ZERO)
+	var gc := AircraftFlight.Controls.new()
+	gc.yaw = 1.0
+	for i in range(30):
+		AircraftFlight.integrate(gy, gc, 1.0 / 60.0, true)
+	_check(rad_to_deg(gy.yaw_rate) < 5.0,
+		"P2-8：地面满杆偏航角速度受气动层门控（30 帧后 %.1f°/s，修复前 ≈31.5）"
+			% rad_to_deg(gy.yaw_rate))
+	# 空中对照：同样杆量应拿到气动舵效（证明门控只发生在地面）。
+	var ay := AircraftFlight.make_state(Vector3(0.0, 200.0, 0.0))
+	ay.velocity = -ay.basis.z * 40.0
+	var ac := AircraftFlight.Controls.new()
+	ac.yaw = 1.0
+	for i in range(30):
+		AircraftFlight.integrate(ay, ac, 1.0 / 60.0, false)
+	_check(rad_to_deg(ay.yaw_rate) > 20.0,
+		"P2-8：空中满杆偏航保留气动舵效（30 帧后 %.1f°/s）" % rad_to_deg(ay.yaw_rate))
 
 
 ## 姿态积分三轴符号回归：正滚转杆量 → 右翼下沉、正俯仰杆量 → 机头上仰、

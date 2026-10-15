@@ -47,8 +47,6 @@ const THRUST_DENSITY_EXPONENT := 0.7
 ## 基准结构极限速度（m/s），超出即解体。Airframe.aggregate 取「所有零件 vne_limit 的下限」，
 ## 故单个零件可被压低其结构限速（如高推力涡轮发动机略低于基准），其余零件默认等于本值。
 const VNE := 55.0
-## 触地垂直速度上限（m/s），超出即解体。
-const TOUCHDOWN_LIMIT := 6.0
 
 # ── 操纵 ────────────────────────────────────────────────────
 const ROLL_RATE_MAX := 2.2
@@ -284,7 +282,12 @@ static func _update_rates(
 
 	var target_roll := controls.roll * ROLL_RATE_MAX * authority
 	var target_pitch := controls.pitch * PITCH_RATE_MAX * authority
-	var target_yaw := controls.yaw * YAW_RATE_MAX * authority - weathervane + coordination
+	# 地面偏航由机轮前轮转向负责（节点层 _apply_ground_forces 的 STEER_RATE）——
+	# 气动层再叠一份杆量偏航就是双重叠加（修复前实测 ≈77°/s，滑跑里轻点一下
+	# 方向舵就冲出跑道）。真实飞机亦然：地面滑跑时方向舵无气动效用，
+	# 转向靠前轮。空中才回到气动舵面。
+	var stick_yaw := controls.yaw * YAW_RATE_MAX * authority if not on_ground else 0.0
+	var target_yaw := stick_yaw - weathervane + coordination
 
 	# 辅助稳定（仅空中、且 assist 非空时生效）：**只在松杆时接管**——玩家一旦
 	# 主动压杆，辅助立刻完全让位。放手时把坡度配平回水平（+bank·roll_level）
