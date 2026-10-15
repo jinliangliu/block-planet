@@ -23,6 +23,7 @@ func _run() -> void:
 	_check_remove_rotate()
 	_check_rotate_then_remove_mirror()
 	_check_visualizer()
+	_check_robust_io()
 
 
 ## 默认套件合法（含机身且全连通）。
@@ -91,6 +92,7 @@ func _check_symmetry_mirror() -> void:
 
 
 ## 蓝图存读：写 JSON → 读回，零件集合一致。
+## 蓝图存读：写 JSON → 读回，零件集合一致。
 func _check_save_load_roundtrip() -> void:
 	var path := "user://build_probe_test.json"
 	var e := BuildEditor.new()
@@ -109,6 +111,46 @@ func _check_save_load_roundtrip() -> void:
 			if a.data.id != b.data.id or a.cell != b.cell or a.rot != b.rot:
 				ok = false
 		_check(ok, "读回每件 id/格/旋转一致")
+
+
+## 存档健壮性（P2-13/14/15）：version 字段与旧档兼容、畸形态逐件容错
+## 不崩栈、save 返回值可判成败。
+func _check_robust_io() -> void:
+	# P2-15：to_dict 带版本号；无 version 的旧档（缺省按 1）也能读。
+	var e := BuildEditor.new()
+	e.blueprint.parts = PartRegistry.default_loadout()
+	var d := e.blueprint.to_dict()
+	_check(int(d.get("version", 0)) == Blueprint.SAVE_VERSION,
+		"P2-15：蓝图存档带 version 字段（%d）" % int(d.get("version", 0)))
+	var legacy := d.duplicate()
+	legacy.erase("version")
+	var bp_legacy := Blueprint.from_dict(legacy)
+	_check(bp_legacy != null and bp_legacy.parts.size() == 7,
+		"P2-15：无 version 的旧档按最新格式兼容读入（7 件）")
+	# P2-13：畸形态逐件容错——缺 id/cell、cell 长度不足、未知 id、类型不对
+	# 全部跳过不崩栈；缺 rot 缺省 0；合法件照常装入。
+	var broken := {
+		"title": "broken",
+		"parts": [
+			{"cell": [0, 0, 0], "rot": 0},
+			{"id": "fuselage", "rot": 0},
+			{"id": "fuselage", "cell": [0, 0], "rot": 0},
+			{"id": "no_such_part", "cell": [0, 0, 0], "rot": 0},
+			"not_a_dict",
+			{"id": "fuselage", "cell": [0, 0, 0]},
+		],
+	}
+	var bp_broken := Blueprint.from_dict(broken)
+	_check(bp_broken != null and bp_broken.parts.size() == 1,
+		"P2-13：畸形态存档只装入合法件（1 件，5 种坏件跳过不崩）")
+	if bp_broken != null and bp_broken.parts.size() == 1:
+		_check(bp_broken.parts[0].rot == 0,
+			"P2-13：缺 rot 缺省 0（实 %d）" % bp_broken.parts[0].rot)
+	# P2-14：save 返回值可判成败——好路径 true、坏路径（目录不存在）false。
+	var path := "user://build_probe_test.json"
+	_check(e.save(path), "P2-14：save 正常路径返回 true")
+	_check(not e.save("user://no_such_dir/bp.json"),
+		"P2-14：save 到不存在目录返回 false（调用方可提示玩家）")
 
 
 ## 删除与旋转：删除减少计数；旋转步进 mod 4。

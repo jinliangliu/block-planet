@@ -170,7 +170,10 @@ func _on_livery(index: int) -> void:
 
 
 func _after_change() -> void:
-	_settings.save()
+	# P2-14：设置落盘失败不静默（push_warning 进控制台；设置对本进程仍生效，
+	# 玩家下次启动会回到旧值——比无声丢失好排查）。
+	if not _settings.save():
+		push_warning("SettingsPanel: 设置保存失败（磁盘写入被拒？）")
 	refresh()
 	settings_changed.emit(
 		_settings.difficulty, _settings.assist_level, _settings.livery_index)

@@ -22,7 +22,6 @@ extends RefCounted
 ##   block_under  : 机身下方地面方块类型（降落区要求跑道面时判定；缺省 -1）
 
 signal mission_result(success: bool, result: Dictionary)
-signal progress_updated(info: Dictionary)
 
 enum Status { IDLE, RUNNING, SUCCEEDED, FAILED }
 
@@ -166,7 +165,6 @@ func _finish(success: bool, reason: String) -> void:
 		"min_dist_per_wp": _min_dist_per_wp.duplicate(),
 	}
 	mission_result.emit(success, result)
-	progress_updated.emit({"status": status, "elapsed": _elapsed, "reason": reason})
 
 
 func _score(success: bool) -> int:

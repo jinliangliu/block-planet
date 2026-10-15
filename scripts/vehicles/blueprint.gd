@@ -54,31 +54,46 @@ func to_dict() -> Dictionary:
 		if p.is_mirrored():
 			d["msrc"] = [p.mirror_src.x, p.mirror_src.y, p.mirror_src.z]
 		part_dicts.append(d)
-	return {"title": title, "parts": part_dicts}
+	return {"version": SAVE_VERSION, "title": title, "parts": part_dicts}
+
+## 存档格式版本（P2-15）：前瞻迁移占位。当前 1；读取时缺省按 1 兼容，
+## 未知更高版本仍按最新已知格式尽力解析（儿童向单机，无强制迁移需求，
+## 但版本号让将来改格式时有据可依、有处可判。
+const SAVE_VERSION := 1
+
 
 static func from_dict(d: Dictionary) -> Blueprint:
 	var bp := Blueprint.new()
 	bp.title = d.get("title", "untitled")
-	for pd in d.get("parts", []):
-		var data := PartRegistry.by_id(pd["id"])
+	# 缺键/畸形容错（P2-13）：手写或损坏的存档不该让读取崩栈——
+	# 逐件校验，缺 id/cell 或类型不对就跳过该件，其余照常装入。
+	for pd: Variant in d.get("parts", []):
+		if pd is not Dictionary:
+			continue
+		var data := PartRegistry.by_id(String(pd.get("id", "")))
 		if data == null:
 			continue
-		var c: Array = pd["cell"]
+		var c: Variant = pd.get("cell", [])
+		if c is not Array or c.size() < 3:
+			continue
 		var cell := Vector3i(int(c[0]), int(c[1]), int(c[2]))
-		var part := PlacedPart.make(data, cell, int(pd["rot"]))
-		var ms: Array = pd.get("msrc", [])
-		if ms.size() == 3:
+		var part := PlacedPart.make(data, cell, int(pd.get("rot", 0)))
+		var ms: Variant = pd.get("msrc", [])
+		if ms is Array and ms.size() == 3:
 			part.mirror_src = Vector3i(int(ms[0]), int(ms[1]), int(ms[2]))
 		bp.parts.append(part)
 	return bp
 
-func save(path: String) -> void:
+## 落盘。返回是否成功（P2-14：失败时调用方要有所呈现——静默丢失存档
+## 对儿童用户是不可理解的「我的飞机没了」）。
+func save(path: String) -> bool:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		push_error("Blueprint.save: 无法打开 %s" % path)
-		return
+		return false
 	f.store_string(JSON.stringify(to_dict()))
 	f.close()
+	return true
 
 static func load(path: String) -> Blueprint:
 	if not FileAccess.file_exists(path):

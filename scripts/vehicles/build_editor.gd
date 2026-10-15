@@ -97,8 +97,9 @@ func validate() -> Dictionary:
 
 
 ## ── 存读 ───────────────────────────────────────────────
-func save(path: String) -> void:
-	blueprint.save(path)
+## 透传 Blueprint.save 的成败（P2-14：调用方要能在失败时提示玩家）。
+func save(path: String) -> bool:
+	return blueprint.save(path)
 
 static func load(path: String) -> BuildEditor:
 	var bp := Blueprint.load(path)
