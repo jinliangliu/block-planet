@@ -137,6 +137,9 @@ var day_night_ref: DayNightCycle = null
 var stuck_rescues := 0
 ## 正在驾驶的飞行器（null 表示徒步）。驾驶期间玩家物理冻结，位置每帧贴到座舱位。
 var _aircraft: Aircraft = null
+## 飞行视角 rig（D-033，由 main 装配时注入）：驾驶中的视角切换 / 自由观察 / 缩放
+## 都经它；null 时（无头探针未装配）飞行输入退化为旧行为，不影响探针。
+var flight_camera: AircraftCamera = null
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _held_item: HeldItem = $Camera3D/HeldItem
@@ -162,13 +165,26 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if _aircraft != null:
 			# 驾驶中鼠标是操纵杆：左右滚转、上下俯仰。
-			_aircraft.add_mouse_motion(event.relative)
+			# 自由观察（V / 按住右键）激活时让位给视角环顾（D-033）。
+			if flight_camera != null \
+					and flight_camera.current_mode() == AircraftCamera.ViewMode.FREE_LOOK:
+				flight_camera.apply_look_delta(event.relative)
+			else:
+				_aircraft.add_mouse_motion(event.relative)
 		else:
 			_rotate_view(Vector2(event.relative.x, event.relative.y) * MOUSE_SENSITIVITY)
 
 	# 滚轮缩放视角：拉近回第一人称（驾驶中即座舱视角），拉远切第三人称追尾。
 	# 驾驶中上限放宽到 CAM_DISTANCE_MAX_RIDING——机身大，9 格距离会糊满屏。
+	# 装配了飞行相机后滚轮改喂它（追尾距离 / 地图高度，D-033）。
 	if event is InputEventMouseButton and event.pressed:
+		if _aircraft != null and flight_camera != null:
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				flight_camera.zoom(-1.0)
+				return
+			if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				flight_camera.zoom(1.0)
+				return
 		var max_distance := CAM_DISTANCE_MAX_RIDING if _aircraft != null else CAM_DISTANCE_MAX
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			camera_distance = maxf(0.0, camera_distance - CAM_STEP)
@@ -177,6 +193,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			camera_distance = minf(max_distance, camera_distance + CAM_STEP)
 			_apply_camera_mode()
+			return
+
+	# 驾驶中按住右键 = 自由观察（D-033）；松开自动回正。
+	if event is InputEventMouseButton and _aircraft != null and flight_camera != null:
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			flight_camera.set_free_look(event.pressed)
 			return
 
 	if event is InputEventMouseButton and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
@@ -198,9 +220,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				select_slot(i)
 		if event.is_action_pressed("jump") and _aircraft == null:
 			_handle_jump_tap()
-		# F：驾驶中下机；徒步时登上附近的飞行器。双击 F 把停着的飞机收回背包。
-		if event.is_action_pressed("aircraft_exit") and not _dead:
-			_handle_aircraft_key()
+		# 回放中（D-033）：F/X 让位给 Esc 跳过，防止运镜中被下机打断。
+		var replaying := flight_camera != null \
+			and flight_camera.current_mode() == AircraftCamera.ViewMode.REPLAY
+		# F（D-033）：驾驶中 = 发动机启停；徒步时 = 登机（双击收回）。
+		if event.is_action_pressed("aircraft_engine") and not _dead and not replaying:
+			if _aircraft != null:
+				_aircraft.toggle_engine()
+			else:
+				_handle_aircraft_key()
+		# X（D-033）：驾驶中 = 下机（双击收回）；徒步时 = 就近收回停着的飞机。
+		if event.is_action_pressed("aircraft_exit") and not _dead and not replaying:
+			if _aircraft != null:
+				_handle_aircraft_key()
+			else:
+				var near: Aircraft = _pickup_target()
+				if near != null:
+					_pick_up_aircraft(near)
+				else:
+					Events.notice.emit("附近没有停着的飞机——按 F 登机要走到机身跟前。")
 
 	if event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = (
@@ -504,6 +542,11 @@ func setup_world(world: World) -> void:
 	_world = world
 
 
+## 世界引用访问器（D-033：HUD 战术地图采样地形用）。
+func world_ref() -> World:
+	return _world
+
+
 ## 世界访问器：HUD 打开储物箱面板时经此读取箱内背包（避免直接访问私有成员）。
 func get_world() -> World:
 	return _world
@@ -578,7 +621,8 @@ func ride_aircraft(craft: Aircraft) -> void:
 	_model.visible = false
 	_held_item.visible = false
 	Events.aircraft_ride_changed.emit(true)
-	Events.notice.emit("✈️ 登机：W/S 油门，鼠标操纵杆，A/D 方向舵，空格刹车，F 下机。")
+	Events.notice.emit("✈️ 登机：F 启动发动机；W/S 油门，鼠标操纵杆，A/D 方向舵；"
+		+ "空格爬升/刹车，Shift 加速，Ctrl 下降；C 视角，V 环顾，M 地图，X 下机。")
 
 
 ## 下机：落到机身侧面。damage > 0 表示坠机抛出（照常扣血）。
@@ -623,8 +667,9 @@ func is_riding() -> bool:
 ## （D-032 玩家反馈）。
 const BOARD_MARGIN := 1.6
 
-## F 键分发：单按 = 登机 / 下机；双击 = 把停着的飞机收回背包。
-## 双击判据：距上次按 F ≤ DOUBLE_TAP_PICKUP_MS。下机后玩家被弹到机身侧旁约 5 m，
+## 登机 / 下机 / 收回分发（D-033 后由两键触发）：
+## 徒步按 F = 登机；驾驶中按 X = 下机；双击 X（驾驶中）= 把停着的飞机收回背包。
+## 双击判据：距上次按 X ≤ DOUBLE_TAP_PICKUP_MS。下机后玩家被弹到机身侧旁约 5 m，
 ## 故回收搜索用更宽松的 PICKUP_RANGE（按机体重心原点）。
 func _handle_aircraft_key() -> void:
 	var now := Time.get_ticks_msec()

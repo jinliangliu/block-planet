@@ -16,6 +16,11 @@ var _build_screen: BuildScreen
 ## 零件解锁状态（跨会话持久化 user://unlocks.json）：main 持有唯一实例，
 ## 注入 build_screen——任务赚的绿宝石买的零件，下次进游戏还在（D-032 Phase 4b-ii）。
 var _unlocks := PartUnlocks.load_or_new()
+## 飞行视角三件套（D-033）：相机 rig / 轨迹录制 / 回放。随主场景生毁；
+## 登机即激活相机并开始录制（Events.aircraft_ride_changed），HUD 路由按键。
+var _flight_camera: AircraftCamera
+var _recorder: FlightRecorder
+var _replay: FlightReplay
 
 
 func _ready() -> void:
@@ -76,6 +81,17 @@ func _ready() -> void:
 	_hud.setup(_player)
 	_hud.set_day_night(_day_night)
 	_hud.set_map_name(String(profile["title"]))
+	# 飞行视角 / 录制 / 回放（D-033）：相机为场景级独立节点（不挂飞机），
+	# 登机时按机体位姿自驱动；录制器随驾驶起止；回放由 HUD 触发。
+	_flight_camera = AircraftCamera.new()
+	add_child(_flight_camera)
+	_recorder = FlightRecorder.new()
+	add_child(_recorder)
+	_replay = FlightReplay.new()
+	add_child(_replay)
+	_player.flight_camera = _flight_camera
+	_hud.setup_flight(_flight_camera, _recorder, _replay)
+	Events.aircraft_ride_changed.connect(_on_flight_ride_changed)
 	# 飞行任务航路 / 降落区锚定机场或降落场（两者皆无才锚定出生点）：
 	# 形成「跑道起飞 → 单向绕场 → 落回跑道面」闭环。
 	if mission_anchor == Vector3.ZERO:
@@ -120,6 +136,10 @@ func _physics_process(delta: float) -> void:
 	if craft == null or not is_instance_valid(craft):
 		return
 	var snap := craft.snapshot()
+	# 轨迹录制（D-033）：驾驶中按 30 Hz 采样；回放中机体正被回放系统
+	# 重演，此时采样会把回放轨迹污染进缓冲区，必须跳过。
+	if not (_replay != null and _replay.is_playing()):
+		_recorder.sample(craft, delta)
 	# 机身下方地面方块（自机身原点向下扫首个实块）：降落任务「必须停在
 	# 跑道面」的判据。停机时机身原点离地约 2.5 m，扫 6 格必达地面。
 	var cell := Vector3i(craft.global_position.floor())
@@ -139,6 +159,19 @@ func _physics_process(delta: float) -> void:
 		"block_under": block_under,
 	}
 	_hud.feed_mission(delta, telemetry)
+
+
+## 登机 / 下机 → 飞行相机激活与轨迹录制起止（D-033）。
+func _on_flight_ride_changed(riding: bool) -> void:
+	if riding:
+		var craft := _player.aircraft()
+		if craft != null and is_instance_valid(craft):
+			_flight_camera.setup(craft, _player)
+			_flight_camera.set_active(true)
+			_recorder.start()
+	else:
+		_flight_camera.set_active(false)
+		_recorder.stop()
 
 
 ## 选图确认：记录区域并重载场景，由新实例按该区域重新生成世界。

@@ -49,6 +49,10 @@ var difficulty: int = Difficulty.NORMAL
 var assist_level: int = Assist.PARTIAL
 ## 涂装索引（AircraftLivery.LIVERIES 的下标，默认经典红白）。
 var livery_index := 0
+## 儿童友好镜头开关（D-033）：抖动默认开（微量），松手自动回正默认开——
+## 两者都可在飞行设置面板里关掉（防晕动症）。
+var camera_shake := true
+var auto_recenter := true
 
 static var _current: FlightSettings = null
 
@@ -109,7 +113,13 @@ func assist_name() -> String:
 
 
 func to_dict() -> Dictionary:
-	return {"difficulty": difficulty, "assist_level": assist_level, "livery_index": livery_index}
+	return {
+		"difficulty": difficulty,
+		"assist_level": assist_level,
+		"livery_index": livery_index,
+		"camera_shake": camera_shake,
+		"auto_recenter": auto_recenter,
+	}
 
 
 static func from_dict(d: Dictionary) -> FlightSettings:
@@ -119,6 +129,8 @@ static func from_dict(d: Dictionary) -> FlightSettings:
 	var a: int = int(d.get("assist_level", s.assist_level))
 	s.set_assist_level(a)
 	s.set_livery(int(d.get("livery_index", 0)))
+	s.camera_shake = bool(d.get("camera_shake", true))
+	s.auto_recenter = bool(d.get("auto_recenter", true))
 	return s
 
 

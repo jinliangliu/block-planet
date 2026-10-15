@@ -332,8 +332,11 @@ func _make_bar_button(text: String, handler: Callable) -> Button:
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
 		# 模态栈只允许一层：HUD 已有面板/窗口打开时让位（P2-1）。
+		# 驾驶飞行器中 V 让位给自由观察（D-033）：不拦这里，建造界面会在
+		# 飞行中被 V 唤出（BuildScreen 比 HUD 更早收到输入，HUD 消费拦不住）。
 		if event.is_action_pressed("toggle_build") \
-				and (_hud == null or not _hud.is_any_panel_open()):
+				and (_hud == null or not _hud.is_any_panel_open()) \
+				and not (_player != null and _player.is_riding()):
 			open()
 		return
 
@@ -353,7 +356,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_BRACKETRIGHT:
 			_build_layer = clampi(_build_layer + 1, -LAYER_RANGE, LAYER_RANGE)
 			_refresh()
-		elif event.is_action_pressed("aircraft_exit"):  # F 试飞
+		elif event.is_action_pressed("aircraft_exit"):  # X 试飞（D-033：F 改为发动机）
 			_on_test_fly()
 
 	if event is InputEventMouseButton:

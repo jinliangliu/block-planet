@@ -118,6 +118,11 @@ func is_running() -> bool:
 	return _mm.status == MissionManager.Status.RUNNING
 
 
+## 任务管理器访问器（D-033：HUD 战术地图读当前任务航点用）。
+func mission_manager() -> MissionManager:
+	return _mm
+
+
 ## 开始第 index 个任务（已在其他任务进行中则忽略）。
 func start_mission(index: int) -> void:
 	if _mm.status == MissionManager.Status.RUNNING:

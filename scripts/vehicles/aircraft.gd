@@ -13,7 +13,10 @@ extends CharacterBody3D
 ## 驾驶输入（use_player_input = true 且 piloted 时）：
 ##   鼠标 → 操纵杆（俯仰 / 滚转，松手缓慢回中）
 ##   W / S → 油门增减    A / D → 方向舵（地面即前轮转向）
-##   空格 → 机轮刹车     F → 下机
+##   F → 发动机启停（熄火后油门锁 0，滑翔仍可操纵）
+##   空格 → 地面机轮刹车 / 空中拉升（上升）
+##   Shift → 空中加速    Ctrl → 空中下降
+##   X → 下机（徒步时就近按 F 登机，X 收回停着的飞机）
 ## 探针把 use_player_input 置否、直接写 controls，走同一条物理路径。
 
 ## 每帧读数变化时广播（节流到 READINGS_INTERVAL），HUD 仪表监听。
@@ -55,6 +58,8 @@ const MOUSE_STICK_SENSITIVITY := 0.006
 const STICK_CENTER_RATE := 0.55
 ## 油门变化速率（每秒）。
 const THROTTLE_RATE := 0.55
+## 空中加速（Shift）油门变化速率（每秒）：比 W 推油快一倍以上，「按一下就走」。
+const BOOST_RATE := 1.4
 ## 骑乘者受伤（解体时抛出）。
 const CRASH_DAMAGE := 6
 
@@ -81,6 +86,9 @@ var _touch_throttle := 0.0
 var _touch_brake := false
 ## 是否有人驾驶（决定输入来源与座位跟随）。
 var piloted := false
+## 发动机状态（F 键启停）：熄火时油门锁 0、无推力，螺旋桨停转；
+## 舵面仍可操纵（滑翔降高）。下机自动熄火。
+var engine_running := false
 ## 当前骑乘者（Player），未骑乘为 null。
 var rider: Player = null
 
@@ -254,6 +262,8 @@ func snapshot() -> Dictionary:
 	# 油门读数取「飞行员指令」(controls) 而非滞后一帧的集成状态 (state)，
 	# 让油门条实时跟手；其余气动读数（空速/失速）仍取自物理状态。
 	data["throttle"] = controls.throttle
+	# 发动机状态：HUD 仪表据此显示「熄火」并置灰油门条。
+	data["engine"] = engine_running
 	return data
 
 
@@ -300,6 +310,26 @@ func set_touch_flight_input(pitch: float, roll: float, yaw: float, throttle: flo
 	_touch_brake = brake
 
 
+## 发动机启停（F 键，仅有人驾驶时有效）。启动无附加条件（儿童友好：
+## 停在跑道上也能直接点火）；熄火后油门锁 0、无推力，滑翔仍可操纵舵面。
+func set_engine(on: bool) -> bool:
+	if not piloted:
+		return engine_running
+	if on == engine_running:
+		return engine_running
+	engine_running = on
+	if on:
+		Events.notice.emit("🔧 发动机已启动：W/S 油门，空格爬升，Shift 加速。")
+	else:
+		controls.throttle = 0.0
+		Events.notice.emit("🔧 发动机已熄火：按 F 重新启动，舵面仍可滑翔。")
+	return engine_running
+
+
+func toggle_engine() -> bool:
+	return set_engine(not engine_running)
+
+
 func set_piloted(value: bool, who: Player = null) -> void:
 	piloted = value
 	rider = who if value else null
@@ -308,6 +338,7 @@ func set_piloted(value: bool, who: Player = null) -> void:
 		controls.pitch = 0.0
 		controls.roll = 0.0
 		controls.yaw = 0.0
+		engine_running = false
 		_stick = Vector2.ZERO
 		_touch_active = false
 		_touch_pitch = 0.0
@@ -519,20 +550,34 @@ func _prepare_input(delta: float) -> void:
 		controls.pitch = _touch_pitch
 		controls.roll = _touch_roll
 		controls.yaw = _touch_yaw
-		controls.throttle = _touch_throttle
+		controls.throttle = _touch_throttle if engine_running else 0.0
 		controls.brake = _touch_brake
 		return
 
 	_stick = _stick.lerp(Vector2.ZERO, clampf(STICK_CENTER_RATE * delta, 0.0, 1.0))
 	var kbd_pitch := Input.get_axis("aircraft_pitch_down", "aircraft_pitch_up")
 	var kbd_roll := Input.get_axis("aircraft_roll_left", "aircraft_roll_right")
-	controls.pitch = clampf(-_stick.y + kbd_pitch, -1.0, 1.0)
+	# 空格 / Ctrl 在飞行上下文里重新定义（儿童友好的「上升 / 下降」）：
+	# 地面时空格仍是机轮刹车；离地后空格=拉升、Ctrl=推杆下降。
+	var on_floor := is_on_floor()
+	var climb_cmd := 1.0 if Input.is_action_pressed("jump") and not on_floor else 0.0
+	var descend_cmd := 1.0 if Input.is_action_pressed("fly_down") and not on_floor else 0.0
+	controls.pitch = clampf(-_stick.y + kbd_pitch + climb_cmd - descend_cmd, -1.0, 1.0)
 	controls.roll = clampf(_stick.x + kbd_roll, -1.0, 1.0)
 	controls.yaw = Input.get_axis("move_left", "move_right")
-	controls.brake = Input.is_action_pressed("jump")
+	controls.brake = Input.is_action_pressed("jump") and on_floor
 	var throttle_axis := Input.get_axis("move_back", "move_forward")
+	# Shift 空中加速：油门快速推满（地面无效——玩家在机上，sprint 无冲突）。
+	var boost := Input.is_action_pressed("sprint") and not on_floor
+	# 发动机熄火：油门锁 0、无推力；舵面照常（上面已写入），滑翔仍可操纵。
+	if not engine_running:
+		controls.throttle = 0.0
+		return
 	controls.throttle = clampf(
 		controls.throttle + throttle_axis * THROTTLE_RATE * delta, 0.0, 1.0)
+	if boost:
+		controls.throttle = clampf(
+			controls.throttle + BOOST_RATE * delta, 0.0, 1.0)
 
 
 ## 解体：抛出乘员、喷出碎屑、残骸翻倒后消散。

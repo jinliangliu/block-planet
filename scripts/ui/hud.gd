@@ -107,6 +107,21 @@ var _ft_throttle := 0.0
 ## 下机断开——wreck 先广播原因再弹射玩家，连接在广播时仍有效。
 var _ridden_craft: Aircraft = null
 var _ft_brake := false
+## 飞行视角三件套（D-033，main 装配时经 setup_flight 注入）：相机 rig /
+## 轨迹录制器 / 回放。驾驶中的 C/V/M/R、任务成功自动回放、P 手动回放都经它们。
+var _flight_camera: AircraftCamera = null
+var _recorder: FlightRecorder = null
+var _replay: FlightReplay = null
+## 飞行仪表的两行新读数（D-033）：当前视角模式 + 发动机状态。
+var _flight_view: Label
+var _flight_engine: Label
+## 回放提示条（回放期间居中显示，Esc 跳过）。
+var _replay_hint: Label
+## 触屏飞行层新增按钮（D-033）：视角切换 / 发动机启停。
+var _ft_view: Button
+var _ft_engine: Button
+## 飞行战术地图（D-033，M 键）：_build 时创建，默认隐藏。
+var _tactical_map: FlightTacticalMap
 
 
 func setup(player: Player) -> void:
@@ -139,6 +154,18 @@ func set_day_night(day_night: DayNightCycle) -> void:
 		day_night.time_changed.connect(_on_time_changed)
 		day_night.day_changed.connect(_on_day_changed)
 		_refresh_time()
+
+
+## 飞行视角三件套注入（D-033，main._ready 调用）：相机 / 录制 / 回放。
+func setup_flight(camera: AircraftCamera, recorder: FlightRecorder,
+		replay: FlightReplay) -> void:
+	_flight_camera = camera
+	_recorder = recorder
+	_replay = replay
+	if _replay != null:
+		_replay.replay_finished.connect(_on_replay_finished)
+	if _flight_camera != null:
+		_flight_camera.view_mode_changed.connect(_on_view_mode_changed)
 
 
 func _build() -> void:
@@ -179,6 +206,10 @@ func _build() -> void:
 	_build_toast(root)
 	_build_death_overlay(root)
 	_build_flight_panel(root)
+	_build_replay_hint(root)
+	# 飞行战术地图（D-033，M 键）：默认隐藏，驾驶中按 M 打开。
+	_tactical_map = FlightTacticalMap.new()
+	add_child(_tactical_map)
 	_connect_progress()
 	_build_map_name(root)
 	_build_map_selector(root)
@@ -189,6 +220,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	# E/B/J/K/O/M 会在建造界上叠面板，关闭顺序错乱会扯乱鼠标捕获与
 	# input_locked（P2-1）。建造界面自己的按键由它自身的 _unhandled_input 处理。
 	if _build_screen != null and _build_screen.visible:
+		return
+	# 回放中（D-033）：Esc / P 跳过，其余热键一律让位（电影运镜不被面板打断）。
+	if _replay != null and _replay.is_playing():
+		if event is InputEventKey and event.pressed and not event.echo \
+				and (event.is_action_pressed("ui_cancel") or event.is_action_pressed("replay_play")):
+			_replay.skip()
+			get_viewport().set_input_as_handled()
 		return
 	# 地图选择器为模态界面：仅响应 ESC 关闭，其余热键一律让位。
 	if _map_selector != null and _map_selector.is_open():
@@ -232,7 +270,32 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.is_action_pressed("toggle_craft"):
+		# ── 飞行视角键（D-033，仅驾驶中）────────────────────────
+		# C 切第一/三人称、V 自由观察（消费事件以阻止建造界面打开）、
+		# R 后视、M 战术俯视地图；P 在停机状态手动回放最近一段飞行。
+		var flying := _player != null and _player.is_riding()
+		if flying and event.is_action_pressed("aircraft_view"):
+			if _flight_camera != null:
+				_flight_camera.toggle_first_third()
+			get_viewport().set_input_as_handled()
+		elif flying and event.is_action_pressed("aircraft_freelook"):
+			if _flight_camera != null:
+				_flight_camera.set_free_look(
+					_flight_camera.current_mode() != AircraftCamera.ViewMode.FREE_LOOK)
+			get_viewport().set_input_as_handled()
+		elif flying and event.is_action_pressed("aircraft_rear"):
+			if _flight_camera != null:
+				_flight_camera.toggle_rear()
+			get_viewport().set_input_as_handled()
+		elif flying and event.is_action_pressed("toggle_map"):
+			_toggle_tactical_map()
+			get_viewport().set_input_as_handled()
+		elif not flying and event.is_action_pressed("replay_play") \
+				and _recorder != null and _recorder.sample_count() > 1 \
+				and not (_replay != null and _replay.is_playing()):
+			_start_replay()
+			get_viewport().set_input_as_handled()
+		elif event.is_action_pressed("toggle_craft"):
 			_toggle_craft_panel()
 		elif event.is_action_pressed("toggle_mode"):
 			_toggle_game_mode()
@@ -264,9 +327,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	# 回放推进（D-033）：电影运镜 + 机体重演。
+	if _replay != null and _replay.is_playing():
+		_replay.process_replay(delta)
+	# 战术地图跟随（D-033）：打开期间每帧刷新本机与信息条。
+	if _tactical_map != null and _tactical_map.is_open():
+		_tactical_map.process_map(delta)
 	if _tip_panel != null and _tip_panel.visible and _tip_mesh != null:
-		_tip_mesh.rotation.y += _delta * 1.5
+		_tip_mesh.rotation.y += delta * 1.5
 	_refresh_flight_panel()
 	if _player == null or _break_bar == null:
 		return
@@ -531,6 +600,9 @@ func _build_flight_panel(root: Control) -> void:
 	_flight_throttle = _flight_line(box, Color(1.0, 0.84, 0.45))
 	_flight_stall = _flight_line(box, Color(1.0, 0.42, 0.36))
 	_flight_stall.visible = false
+	# D-033：视角模式 + 发动机状态两行新读数。
+	_flight_view = _flight_line(box, Color(0.80, 0.90, 1.0))
+	_flight_engine = _flight_line(box, Color(0.55, 0.95, 0.65))
 
 
 func _flight_line(box: VBoxContainer, color: Color) -> Label:
@@ -539,6 +611,92 @@ func _flight_line(box: VBoxContainer, color: Color) -> Label:
 	label.add_theme_color_override("font_color", color)
 	box.add_child(label)
 	return label
+
+
+## 回放提示条（D-033）：回放期间居中顶部显示，Esc / P 跳过。
+func _build_replay_hint(root: Control) -> void:
+	var label := Label.new()
+	label.text = "🎬 飞行回放中 — Esc 跳过"
+	label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	label.offset_top = 64.0
+	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_color_override("font_color", Color(0.85, 0.95, 1.0))
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.visible = false
+	root.add_child(label)
+	_replay_hint = label
+
+
+## 当前视角模式的中文名（飞行仪表「视角」行）。
+func _view_mode_name() -> String:
+	if _flight_camera == null:
+		return "追尾"
+	match _flight_camera.current_mode():
+		AircraftCamera.ViewMode.FIRST_PERSON:
+			return "座舱"
+		AircraftCamera.ViewMode.CHASE:
+			return "追尾"
+		AircraftCamera.ViewMode.REAR:
+			return "后视"
+		AircraftCamera.ViewMode.FREE_LOOK:
+			return "环顾"
+		AircraftCamera.ViewMode.MAP:
+			return "地图"
+		AircraftCamera.ViewMode.REPLAY:
+			return "回放"
+	return "追尾"
+
+
+## ── 回放控制（D-033）────────────────────────────────────────
+
+## 开始一段回放（任务成功自动 / P 手动）：相机交给回放系统，显示提示条。
+func _start_replay() -> void:
+	if _replay == null or _recorder == null or _recorder.sample_count() < 2:
+		return
+	var craft: Aircraft = _player.aircraft() if _player != null else null
+	if craft == null or craft.is_wrecked():
+		return
+	if _flight_camera != null:
+		_flight_camera.set_mode(AircraftCamera.ViewMode.REPLAY)
+	_replay.begin(_recorder, craft, _flight_camera)
+	if _replay_hint != null:
+		_replay_hint.visible = true
+	# 回放期间鼠标不抓取（运镜不需要操纵杆）。
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## 回放结束 / 跳过：相机退回到飞行视角，恢复鼠标捕获。
+func _on_replay_finished() -> void:
+	if _flight_camera != null:
+		_flight_camera.exit_replay()
+	if _replay_hint != null:
+		_replay_hint.visible = false
+	if _player != null and _player.is_riding():
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_refresh_flight_panel()
+
+
+## 视角模式变化：即时刷新飞行仪表（其余每帧刷新，这里只是让切换「零延迟」）。
+func _on_view_mode_changed(_mode: AircraftCamera.ViewMode) -> void:
+	_refresh_flight_panel()
+
+
+## M 键（驾驶中）：飞行战术俯视地图开 / 关（D-033）。
+## 战术地图自行从世界识别机场 / 降落场（COBBLESTONE 聚类），无需传锚点。
+func _toggle_tactical_map() -> void:
+	if _tactical_map == null:
+		return
+	if _tactical_map.is_open():
+		_tactical_map.close_map()
+		return
+	var craft: Aircraft = _player.aircraft() if _player != null else null
+	if craft == null or craft.is_wrecked():
+		return
+	var world: World = _player.world_ref() if _player != null else null
+	# 传任务面板（Control）：战术地图内部经 mission_manager() / _mm 取真正的
+	# MissionManager（其 open_map 的 mission_mgr 形参收型 Node）。
+	var panel: Node = _mission_panel
+	_tactical_map.open_map(craft, panel, world)
 
 
 ## 触屏飞行控制层（P1-3 最小飞行 UI）：单杆俯仰/滚转 + 油门竖滑 + 方向舵 + 刹车 + 下机。
@@ -620,21 +778,36 @@ func _build_flight_touch(root: Control) -> void:
 	brake.button_up.connect(func(): _ft_brake = false; _push_touch_flight())
 	col.add_child(brake)
 
-	# 右上：下机（等价于键盘 F）。
+	# 右上：视角切换 + 发动机 + 下机（横排，D-033；分别等价于键盘 C / F / X）。
+	var row := HBoxContainer.new()
+	row.anchor_left = 1.0
+	row.anchor_top = 0.0
+	row.anchor_right = 1.0
+	row.anchor_bottom = 0.0
+	row.offset_right = -16.0
+	row.offset_top = 16.0
+	row.add_theme_constant_override("separation", 8)
+	pad.add_child(row)
+	var view_btn := Button.new()
+	view_btn.text = "视角"
+	view_btn.custom_minimum_size = Vector2(72, 56)
+	view_btn.focus_mode = Control.FOCUS_NONE
+	view_btn.pressed.connect(_on_ft_view)
+	row.add_child(view_btn)
+	_ft_view = view_btn
+	var engine_btn := Button.new()
+	engine_btn.text = "发动机"
+	engine_btn.custom_minimum_size = Vector2(88, 56)
+	engine_btn.focus_mode = Control.FOCUS_NONE
+	engine_btn.pressed.connect(_on_ft_engine)
+	row.add_child(engine_btn)
+	_ft_engine = engine_btn
 	var exit := Button.new()
 	exit.text = "下机"
-	exit.custom_minimum_size = Vector2(96, 56)
+	exit.custom_minimum_size = Vector2(72, 56)
 	exit.focus_mode = Control.FOCUS_NONE
-	exit.anchor_left = 1.0
-	exit.anchor_top = 0.0
-	exit.anchor_right = 1.0
-	exit.anchor_bottom = 0.0
-	exit.offset_right = -16.0
-	exit.offset_top = 16.0
-	exit.offset_left = -112.0
-	exit.offset_bottom = 72.0
 	exit.pressed.connect(_on_ft_exit)
-	pad.add_child(exit)
+	row.add_child(exit)
 
 
 func _on_ft_joystick(value: Vector2) -> void:
@@ -672,6 +845,19 @@ func _on_aircraft_crashed(reason: String) -> void:
 func _on_ft_exit() -> void:
 	if _player != null and _player.is_riding():
 		_player.exit_aircraft()
+
+
+## 触屏「视角」按钮（D-033）：等价于键盘 C。
+func _on_ft_view() -> void:
+	if _flight_camera != null:
+		_flight_camera.toggle_first_third()
+
+
+## 触屏「发动机」按钮（D-033）：等价于键盘 F。
+func _on_ft_engine() -> void:
+	var craft: Aircraft = _player.aircraft() if _player != null else null
+	if craft != null:
+		craft.toggle_engine()
 
 
 func _on_aircraft_ride_changed(_riding: bool) -> void:
@@ -727,6 +913,14 @@ func _refresh_flight_panel() -> void:
 	]
 	_flight_stall.visible = warning
 	_flight_stall.text = "⚠️ 失速！推杆加速" if bool(reading["stalled"]) else "⚠️ 接近失速"
+	# 视角模式 + 发动机状态（D-033）：视角随 C/V/R/M 实时切换，熄火时油门条置灰提示。
+	if _flight_view != null:
+		_flight_view.text = "视角  %s" % _view_mode_name()
+	if _flight_engine != null:
+		var engine_on := bool(reading.get("engine", false))
+		_flight_engine.text = "发动机  %s" % ("运转" if engine_on else "熄火（按 F）")
+		_flight_engine.add_theme_color_override(
+			"font_color", Color(0.55, 0.95, 0.65) if engine_on else Color(1.0, 0.55, 0.45))
 
 
 ## 油门条：10 格实心/空心，比纯数字更快读出推杆位置。
@@ -2389,6 +2583,11 @@ func feed_mission(dt: float, telemetry: Dictionary) -> void:
 func _on_mission_panel_reward(emeralds: int, success: bool, result: Dictionary) -> void:
 	if not success:
 		return
+	# D-033：任务成功 → 1.2 s 后自动回放本段飞行（先让奖励 Toast 读完）。
+	# repeat（重复挑战）同样回放——演出与奖励脱钩；仅要求仍在驾驶（未下机）。
+	if _replay != null and _recorder != null and _recorder.sample_count() > 1 \
+			and _player != null and _player.is_riding():
+		get_tree().create_timer(1.2).timeout.connect(_start_replay)
 	if bool(result.get("repeat", false)):
 		_show_toast("任务完成！奖励已在本进程内领取，本次不再发放")
 		return

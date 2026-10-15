@@ -25,12 +25,20 @@ const ACTIONS := {
 	"toggle_settings": [KEY_O],
 	# 飞行器驾驶：鼠标给操纵杆（俯仰/滚转），方向键为键盘替代；
 	# W/S 复用 move_forward/back（油门），A/D 复用 move_left/right（方向舵），
-	# 空格复用 jump（机轮刹车），F 上机/下机。
+	# 空格复用 jump（地面机轮刹车 / 空中拉升），Shift 复用 sprint（空中加速），
+	# Ctrl 复用 fly_down（空中下降），F 发动机启停，X 下机，
+	# C 切换第一/第三人称，V 自由观察，R 后视，M 战术地图（复用 toggle_map）。
 	"aircraft_pitch_up": [KEY_UP],
 	"aircraft_pitch_down": [KEY_DOWN],
 	"aircraft_roll_left": [KEY_LEFT],
 	"aircraft_roll_right": [KEY_RIGHT],
-	"aircraft_exit": [KEY_F],
+	"aircraft_engine": [KEY_F],
+	"aircraft_exit": [KEY_X],
+	"aircraft_view": [KEY_C],
+	"aircraft_freelook": [KEY_V],
+	"aircraft_rear": [KEY_R],
+	# 回放（D-033）：P 手动回放最近一段飞行；回放中 P / Esc 跳过。
+	"replay_play": [KEY_P],
 }
 
 const SLOT_ACTION_COUNT := 9
