@@ -22,7 +22,8 @@ var _pitch := 6.0
 var _mesh_instance: MeshInstance3D
 var _pole_markers: Array[Node3D] = []
 var _region_labels: Array[Label3D] = []
-## 机场标记：带跑道区域的红色小球，钉在区域名称旁，提示玩家该区可起飞。
+## 飞行旗帜：带跑道区域的旗标（机场红 / 降落场琥珀），钉在区域名称旁，
+## 取代文字标注，提示该区可起飞。
 var _airport_markers: Array[Node3D] = []
 var _field_markers: Array[Node3D] = []
 
@@ -116,8 +117,7 @@ func _add_pole_markers() -> void:
 	_pole_markers.append(_make_pole_marker("北极", Color(0.95, 0.35, 0.30), RADIUS + POLE_MARKER_LIFT))
 	_pole_markers.append(_make_pole_marker("南极", Color(0.94, 0.96, 0.99), -(RADIUS + POLE_MARKER_LIFT)))
 	_add_region_labels()
-	_add_airport_markers()
-	_add_field_markers()
+	_add_flight_flags()
 
 
 ## 七大洲四大洋名称贴在球面对应位置：锚点经纬度经 lat_lon_to_dir 映射到球面
@@ -133,80 +133,80 @@ func _add_region_labels() -> void:
 		var pos: Vector3 = RegionAtlas.lat_lon_to_dir(anchor.x, anchor.y) * (RADIUS + REGION_LABEL_LIFT)
 		var is_land: bool = region_id >= RegionAtlas.ASIA
 		var label_text := RegionAtlas.title_of(region_id)
-		if RegionAtlas.has_airport(region_id):
-			label_text += "（机场）"
-		elif RegionAtlas.has_landing_field(region_id):
-			label_text += "（降落场）"
 		_region_labels.append(_make_region_label(label_text, pos, is_land))
 
 
-## 机场标记：给每个带跑道区域在名称旁钉一颗红色小球，提示该区可起飞。
-## 与区域标签共用锚点经纬度，球背面的标记会被球面自身遮挡（默认深度测试）。
+## 飞行旗帜：给每个带跑道区域在名称旁插一面小旗（杆 + 旗布），
+## 取代原先叠加在区域名上的「（机场）/（降落场）」文字，让飞行地图一眼可辨。
+## 旗杆沿球面外法线立起，旗布向切向伸展；机场旗布红、降落场旗布琥珀，
+## 与介绍页文案一致。球背面的旗子会被球面自身遮挡（默认深度测试）。
 ## 可重复调用（幂等）。
-func _add_airport_markers() -> void:
+func _add_flight_flags() -> void:
 	for marker in _airport_markers:
 		marker.queue_free()
 	_airport_markers.clear()
-	for region_id in RegionAtlas.COUNT:
-		if not RegionAtlas.has_airport(region_id):
-			continue
-		var anchor: Vector2 = RegionAtlas.REGION_ANCHORS[region_id]
-		var dir: Vector3 = RegionAtlas.lat_lon_to_dir(anchor.x, anchor.y)
-		var pos: Vector3 = dir * (RADIUS + REGION_LABEL_LIFT + 0.02)
-		# 沿球面切线方向偏移一小段，避免与名称标签重叠。
-		var tangent := dir.cross(Vector3(0.0, 1.0, 0.0))
-		if tangent.length_squared() < 0.001:
-			tangent = Vector3(1.0, 0.0, 0.0)
-		pos += tangent.normalized() * 0.05
-		_airport_markers.append(_make_airport_marker(pos))
-
-
-func _make_airport_marker(pos: Vector3) -> MeshInstance3D:
-	var mesh := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.035
-	sphere.height = 0.07
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.95, 0.20, 0.18)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mesh.material_override = mat
-	mesh.position = pos
-	add_child(mesh)
-	return mesh
-
-
-## 降落场标记：非机场区域（大洋岛上 / 极地冰面）的简易跑道，钉琥珀色小球，
-## 与机场红点区分。可重复调用（幂等）。
-func _add_field_markers() -> void:
 	for marker in _field_markers:
 		marker.queue_free()
 	_field_markers.clear()
 	for region_id in RegionAtlas.COUNT:
-		if not RegionAtlas.has_landing_field(region_id):
-			continue
 		var anchor: Vector2 = RegionAtlas.REGION_ANCHORS[region_id]
 		var dir: Vector3 = RegionAtlas.lat_lon_to_dir(anchor.x, anchor.y)
-		var pos: Vector3 = dir * (RADIUS + REGION_LABEL_LIFT + 0.02)
-		# 沿球面切线方向偏移一小段，避免与名称标签重叠。
 		var tangent := dir.cross(Vector3(0.0, 1.0, 0.0))
 		if tangent.length_squared() < 0.001:
 			tangent = Vector3(1.0, 0.0, 0.0)
-		pos += tangent.normalized() * 0.05
-		_field_markers.append(_make_field_marker(pos))
+		tangent = tangent.normalized()
+		# 旗杆根部落在球面略上方，整体向名称标签的切向侧挪开一点，避免压字。
+		var pos := dir * (RADIUS + 0.012) + tangent * 0.06
+		if RegionAtlas.has_airport(region_id):
+			_airport_markers.append(_make_flight_flag(pos, dir, Color(0.95, 0.20, 0.18)))
+		elif RegionAtlas.has_landing_field(region_id):
+			_field_markers.append(_make_flight_flag(pos, dir, Color(0.98, 0.72, 0.15)))
 
 
-func _make_field_marker(pos: Vector3) -> MeshInstance3D:
-	var mesh := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.03
-	sphere.height = 0.06
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.98, 0.72, 0.15)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mesh.material_override = mat
-	mesh.position = pos
-	add_child(mesh)
-	return mesh
+## 一面立在地表的飞行小旗：Node3D 作根，本地 +Y 对齐球面外法线（dir），
+## 旗杆（圆柱）自根部立起，旗布（平面）挂在杆顶向 +X 切向伸展、面朝 +Z 切向
+## （双面可见）。机场/降落场由 cloth_color 区分。
+func _make_flight_flag(pos: Vector3, dir: Vector3, cloth_color: Color) -> Node3D:
+	var flag := Node3D.new()
+	flag.position = pos
+	var up := dir.normalized()
+	var x_axis := up.cross(Vector3(0.0, 1.0, 0.0))
+	if x_axis.length_squared() < 0.001:
+		x_axis = Vector3(1.0, 0.0, 0.0)
+	x_axis = x_axis.normalized()
+	var z_axis := up.cross(x_axis).normalized()
+	flag.basis = Basis(x_axis, up, z_axis)
+
+	var pole := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.006
+	cyl.bottom_radius = 0.008
+	cyl.height = 0.13
+	var pole_mat := StandardMaterial3D.new()
+	pole_mat.albedo_color = Color(0.86, 0.86, 0.89)
+	pole_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pole.mesh = cyl
+	pole.material_override = pole_mat
+	pole.position = Vector3(0.0, 0.065, 0.0)
+	flag.add_child(pole)
+
+	var cloth := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(0.075, 0.05)
+	# 默认 FACE_Y 是平躺的桌面；旗布要竖着挂在杆侧、面朝本地 +Z 才能被相机看见。
+	plane.orientation = PlaneMesh.FACE_Z
+	var cloth_mat := StandardMaterial3D.new()
+	cloth_mat.albedo_color = cloth_color
+	cloth_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cloth_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	cloth.mesh = plane
+	cloth.material_override = cloth_mat
+	# 旗布挂在杆顶、向 +X 伸展，面朝 +Z（双面可见）。
+	cloth.position = Vector3(0.0375, 0.115, 0.0)
+	flag.add_child(cloth)
+
+	add_child(flag)
+	return flag
 
 
 func _process(_delta: float) -> void:

@@ -47,15 +47,20 @@ func _ready() -> void:
 	# 跑道旁。位置均避开村庄（机场在村庄东南角，降落场搜索半径 ≤ 10），
 	# 互不重叠。
 	var airport_spawn := Vector3.ZERO
+	var craft_park := Vector3.ZERO
 	var mission_anchor := Vector3.ZERO
 	var region := GameState.current_region
 	if RegionAtlas.has_airport(region):
 		var center := _airport_center(region)
-		airport_spawn = AirportBuilder.new().build(_world, center)
+		var builder := AirportBuilder.new()
+		airport_spawn = builder.build(_world, center)
+		craft_park = builder.parking_spot()
 		mission_anchor = Vector3(center)
 	elif RegionAtlas.has_landing_field(region):
 		var site := _find_field_site()
-		airport_spawn = AirportBuilder.new().build_field(_world, site)
+		var builder := AirportBuilder.new()
+		airport_spawn = builder.build_field(_world, site)
+		craft_park = builder.parking_spot()
 		mission_anchor = Vector3(site)
 	# 村庄先于出生点生成：亚洲出生点锚定在村庄整平区内，扫描时读到的
 	# 必须是整平后的 GRASS+空气（set_block_deferred 的数据写入是同步的）。
@@ -76,6 +81,15 @@ func _ready() -> void:
 	if mission_anchor == Vector3.ZERO:
 		mission_anchor = Vector3(spawn_pos.x, 0.0, spawn_pos.z)
 	_hud.set_mission_anchor(mission_anchor)
+	# 探索模式飞行地图：开局即在跑道上摆一架可见飞机（停于出生点以北约 19 格、
+	# 机头朝 +Z 北端，沿跑道进近方向的反向即起飞方向），玩家走到跟前按 F 即可
+	# 登机，不必先打开背包、选中飞机右键放机——出生点已在跑道旁，落地即可起飞。
+	# 仅窗口运行摆机（沿用 main._ready 既有 headless 守卫），避免干扰无头探针
+	# 里的飞机相关断言。
+	if GameState.is_explore() and craft_park != Vector3.ZERO \
+			and DisplayServer.get_name() != "headless":
+		Aircraft.spawn(self, craft_park, PI)
+		Events.notice.emit("✈️ 跑道上停着你的飞机，走到跟前按 F 登机。")
 	_mob_spawner.setup(_player, _world, _day_night)
 	_mob_spawner.set_region(profile)
 	_player.died.connect(func(): Events.player_died.emit())

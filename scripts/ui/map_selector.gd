@@ -254,7 +254,7 @@ func _build_backdrop() -> void:
 	add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；标「机场」的区域带跑道，标「降落场」的区域有简易跑道"
+	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；插有飞行旗帜的区域带跑道（红）/ 有简易跑道（琥珀）"
 	subtitle.add_theme_font_size_override("font_size", 16)
 	subtitle.add_theme_color_override("font_color", Color(0.72, 0.80, 0.92))
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

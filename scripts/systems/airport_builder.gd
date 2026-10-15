@@ -169,3 +169,14 @@ func _end() -> void:
 func _spawn_point() -> Vector3:
 	return Vector3(
 		origin.x + 0.5, float(base_y + 1), float(origin.z - _len / 2 + 3) + 0.5)
+
+
+## 停机位：跑道南段、出生点（南端 center-25）以北约 19 格（center-6）处，
+## 机头朝 +Z（北端，沿跑道进近方向的反向 = 起飞方向，对齐红端/北端导航灯）。
+## 与出生点拉开 ≥19 格（≈9.5 m）以避开机身碰撞盒半长 7.8 m，否则玩家开局
+## 会生成在机体碰撞盒内被物理挤出；同时距北端仍有整条跑道余量供满油门滑跑抬轮。
+## 返回点为跑道铺面 y；Aircraft.spawn 会据 place() 自行沉降到
+## base_y + GROUND_CLEARANCE，与手持右键放机共用同一条落位路径。
+func parking_spot() -> Vector3:
+	return Vector3(
+		origin.x + 0.5, float(base_y), float(origin.z - _len / 2 + 22) + 0.5)
