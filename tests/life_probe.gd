@@ -10,6 +10,16 @@ var _failed := 0
 var _grown_events := 0
 ## 掉血来源记录（同上：lambda 捕获局部变量是拷贝，必须用成员）。
 var _damage_reasons: PackedStringArray = []
+## 存档隔离（D-010 铁律 3）：_run() 开头（任何 notify 之前）快照 user://
+## progress.json 文本 + 进度内存态，quit 前原样还原。内存态必须一并还原——
+## Progress._exit_tree 退出时会 _save() 把内存态写盘，只还文件会被覆盖。
+## 教训来源（2026-10-15 实测）：原有小节级局部快照（阶段 L / S 各自备份）
+## 覆盖不到小节之间的 gameplay 计数（成长/击杀/挖掘/交易），退出落盘把
+## user://progress.json 写脏——违铁律 3。
+var _saved_progress := ""
+var _saved_counters: Dictionary = {}
+var _saved_states: Dictionary = {}
+var _saved_quiz_streak := 0
 ## 受保护名录里「不算图鉴物种」的三项：村民是人不是物种；蜻蜓、蝴蝶是游戏里
 ## 陪伴玩家的益虫，图鉴未收录它们的资料。给它们补条目时请一并删掉这条豁免。
 const PROTECTED_WITHOUT_ENTRY := [
@@ -24,6 +34,11 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# 存档隔离（D-010 铁律 3）：在任何 Progress.notify 之前快照，quit 前还原。
+	_saved_progress = _read_user_text("user://progress.json")
+	_saved_counters = Progress.counters.duplicate()
+	_saved_states = Progress.states.duplicate()
+	_saved_quiz_streak = Progress._quiz_correct_since_reward
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(60):
@@ -2094,12 +2109,9 @@ func _run() -> void:
 	# 图鉴是纯数据驱动的（data/bestiary/*.json），写错一个字段不会有编译错误，
 	# 只会在 UI 上静默少显示一行。这一节把「读盘时说得出哪里不对」变成硬断言。
 	#
-	# 本节末尾会真的答一道题（验证问答计入进度），因此先备份进度、结束时还原并落盘，
-	# 否则这份测试态会留在 user://progress.json 里，让下一次运行阶段 L 的
-	# 「答对 2 题尚未触发连对奖励」凭空失败——探针给自己下毒，排查起来极费时间。
-	var s_saved_counters: Dictionary = Progress.counters.duplicate()
-	var s_saved_states: Dictionary = Progress.states.duplicate()
-	var s_saved_quiz_streak: int = Progress._quiz_correct_since_reward
+	# 本节末尾会真的答一道题（验证问答计入进度）。全局存档隔离在 _run() 开头
+	# 快照、quit 前还原（D-010 铁律 3）：这份测试态不会留在 user:// 里，否则
+	# 下一轮「答对 2 题尚未触发连对奖励」会凭空失败——探针给自己下毒。
 	var bestiary_problems := BestiaryData.load_problems
 	_check(
 		BestiaryData.is_loaded and bestiary_problems.is_empty(),
@@ -2476,11 +2488,13 @@ func _run() -> void:
 				manual_mentions = true
 	_check(manual_mentions, "说明书里写明了图鉴的打开方式")
 
-	# 还原进度：本页的问答测试不留在存档里（见本节开头的说明）。
-	Progress.counters = s_saved_counters
-	Progress.states = s_saved_states
-	Progress._quiz_correct_since_reward = s_saved_quiz_streak
-	Progress._save()
+	# 还原进度存档（D-010 铁律 3）：文件文本 + 内存态一并还原——Progress 退出时
+	# _exit_tree 会 _save()，只还文件会被内存态覆盖（flight_probe 同款教训）。
+	# 阶段 L/S 的问答测试态由此不落盘（见阶段 S 开头的说明）。
+	_write_user_text("user://progress.json", _saved_progress)
+	Progress.counters = _saved_counters.duplicate()
+	Progress.states = _saved_states.duplicate()
+	Progress._quiz_correct_since_reward = _saved_quiz_streak
 
 	if _failed == 0:
 		print("LIFE_TEST_OK")
@@ -2643,6 +2657,31 @@ func _find_slot(inv: Inventory, item: int) -> int:
 ## 阶段 P 的成长事件统计回调（成员变量，供 lambda/connect 使用）。
 func _on_probe_grown(_mob_type: int, _stage: int) -> void:
 	_grown_events += 1
+
+
+## 存档隔离（D-010）：读 user:// 文本；不存在返回空串。
+func _read_user_text(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return ""
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return ""
+	var text := f.get_as_text()
+	f.close()
+	return text
+
+
+## 存档隔离（D-010）：写 user:// 文本；空串表示原文件不存在，还原即删除。
+func _write_user_text(path: String, text: String) -> void:
+	if text == "":
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+		return
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(text)
+	f.close()
 
 
 func _check(cond: bool, label: String) -> void:
