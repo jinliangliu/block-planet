@@ -21,6 +21,12 @@ var _unlocks := PartUnlocks.load_or_new()
 var _flight_camera: AircraftCamera
 var _recorder: FlightRecorder
 var _replay: FlightReplay
+## 飞行仪表 3D 视图（D-034）：座舱 3D 面板（挂飞机下）/ 世界标注（挂世界下），
+## 随登机创建、下机释放；注册到屏幕仪表 HUD 以便每帧收到同一份读数。
+var _cockpit_panel: CockpitPanel = null
+var _flight_markers: FlightMarkers = null
+## 飞行导航锚点（机场中心 / 出生点）：登机时同时注入 HSI/CDI 与 3D 标注。
+var _mission_anchor := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -96,6 +102,7 @@ func _ready() -> void:
 	# 形成「跑道起飞 → 单向绕场 → 落回跑道面」闭环。
 	if mission_anchor == Vector3.ZERO:
 		mission_anchor = Vector3(spawn_pos.x, 0.0, spawn_pos.z)
+	_mission_anchor = mission_anchor
 	_hud.set_mission_anchor(mission_anchor)
 	# 探索模式飞行地图：开局即在跑道上摆一架可见飞机（停于出生点以北约 19 格、
 	# 机头朝 +Z 北端，沿跑道进近方向的反向即起飞方向），玩家走到跟前按 F 即可
@@ -161,7 +168,7 @@ func _physics_process(delta: float) -> void:
 	_hud.feed_mission(delta, telemetry)
 
 
-## 登机 / 下机 → 飞行相机激活与轨迹录制起止（D-033）。
+## 登机 / 下机 → 飞行相机激活、轨迹录制起止、座舱 3D 面板与世界标注增删（D-033/D-034）。
 func _on_flight_ride_changed(riding: bool) -> void:
 	if riding:
 		var craft := _player.aircraft()
@@ -169,9 +176,39 @@ func _on_flight_ride_changed(riding: bool) -> void:
 			_flight_camera.setup(craft, _player)
 			_flight_camera.set_active(true)
 			_recorder.start()
+			# D-034：座舱 3D 面板挂飞机下（蓝图机自动隐藏）；世界标注挂世界下。
+			if _cockpit_panel == null:
+				_cockpit_panel = CockpitPanel.new()
+				craft.add_child(_cockpit_panel)
+				_cockpit_panel.setup(craft)
+			if _flight_markers == null:
+				_flight_markers = FlightMarkers.new()
+				add_child(_flight_markers)
+				_flight_markers.setup(craft, self)
+			_hud.instrument_hud().register_view(_cockpit_panel)
+			_hud.instrument_hud().register_view(_flight_markers)
+			# 导航目标 = 任务锚点（机场/出生点）：HSI/CDI 与 3D 标注同步标出。
+			_hud.set_flight_navigation(_mission_anchor, "机场/任务")
+			_flight_markers.set_target(_mission_anchor, "机场/任务")
+			# 进近引导：以当前机头方向为进近轴，在目标后方铺箭头 + 3° 下滑道。
+			var fwd := -craft.global_transform.basis.z
+			fwd.y = 0.0
+			if fwd.length_squared() > 1e-4:
+				fwd = fwd.normalized()
+				_flight_markers.set_runway_guide(_mission_anchor, fwd)
 	else:
 		_flight_camera.set_active(false)
 		_recorder.stop()
+		# 释放座舱面板与世界标注，并从其屏幕 HUD 注销。
+		if _cockpit_panel != null:
+			_hud.instrument_hud().unregister_view(_cockpit_panel)
+			_cockpit_panel.queue_free()
+			_cockpit_panel = null
+		if _flight_markers != null:
+			_hud.instrument_hud().unregister_view(_flight_markers)
+			_flight_markers.queue_free()
+			_flight_markers = null
+		_hud.instrument_hud().clear_navigation()
 
 
 ## 选图确认：记录区域并重载场景，由新实例按该区域重新生成世界。

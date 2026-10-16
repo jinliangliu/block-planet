@@ -122,6 +122,10 @@ var _last_attack_ms := 0
 var _last_jump_ms := 0
 ## 上次按 F 的时间戳（ms）：用于双击 F 收起飞机。
 var _last_aircraft_f_ms := 0
+## 上次飞行中左键单击的时间戳（ms）：双击 = 自动改平（D-034）。
+var _last_flight_click_ms := 0
+## 飞行中 Esc 解锁了鼠标（D-034）：点游戏画面重新捕获继续驾驶。
+var _esc_released := false
 var _last_hunger_int := MAX_HUNGER
 var _stuck_frames := 0
 var _hurt_invuln := 0.0
@@ -164,21 +168,31 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if _aircraft != null:
-			# 驾驶中鼠标是操纵杆：左右滚转、上下俯仰。
-			# 自由观察（V / 按住右键）激活时让位给视角环顾（D-033）。
+			# 驾驶中鼠标是操纵杆：左右滚转、上下俯仰（仅第一人称座舱生效，
+			# D-034——追尾/后视/地图模式用键盘方向键，避免视线外鼠标一晃、
+			# 飞机就跟着歪）。自由观察（V / 按住右键）激活时让位给视角环顾（D-033）。
 			if flight_camera != null \
 					and flight_camera.current_mode() == AircraftCamera.ViewMode.FREE_LOOK:
 				flight_camera.apply_look_delta(event.relative)
-			else:
+			elif flight_camera != null \
+					and flight_camera.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON:
 				_aircraft.add_mouse_motion(event.relative)
 		else:
 			_rotate_view(Vector2(event.relative.x, event.relative.y) * MOUSE_SENSITIVITY)
 
 	# 滚轮缩放视角：拉近回第一人称（驾驶中即座舱视角），拉远切第三人称追尾。
 	# 驾驶中上限放宽到 CAM_DISTANCE_MAX_RIDING——机身大，9 格距离会糊满屏。
-	# 装配了飞行相机后滚轮改喂它（追尾距离 / 地图高度，D-033）。
+	# 装配了飞行相机后滚轮改喂它（追尾距离 / 地图高度，D-033）；
+	# 第一人称座舱内滚轮改作油门微调 ±5%（D-034 PC 鼠标操控）。
 	if event is InputEventMouseButton and event.pressed:
 		if _aircraft != null and flight_camera != null:
+			if flight_camera.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON:
+				if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+					_aircraft.adjust_throttle(0.05)
+					return
+				if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+					_aircraft.adjust_throttle(-0.05)
+					return
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 				flight_camera.zoom(-1.0)
 				return
@@ -200,6 +214,37 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_RIGHT:
 			flight_camera.set_free_look(event.pressed)
 			return
+		# 鼠标中键 = 视角回正（D-034）：环顾偏移与追尾距离一键归位。
+		if event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
+			flight_camera.recenter()
+			return
+		# 双击左键 = 自动改平（D-034）：约 2 秒内增强增益把坡度摆回水平；
+		# 期间重新移动鼠标即刻接管。
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			# Esc 解锁后首次点击先恢复捕获（D-034）：不当改平输入，也避免
+			# 与下面的双击判定抢同一个点击。
+			if _esc_released:
+				_esc_released = false
+				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+				return
+			var now := Time.get_ticks_msec()
+			if now - _last_flight_click_ms <= DOUBLE_TAP_FLY_MS:
+				# 受「自动改平」设置门控（设置面板可关）：关掉后双击不再触发摆平。
+				if FlightSettings.current().auto_level:
+					_aircraft.request_level()
+				_last_flight_click_ms = 0
+			else:
+				_last_flight_click_ms = now
+			return
+
+	# Esc 解锁鼠标后（D-034）：点游戏画面重新捕获、继续驾驶。HUD 按钮自身
+	# 会消费点击，不会走到这里——只有点空白处才重捕。
+	if event is InputEventMouseButton and event.pressed \
+			and event.button_index == MOUSE_BUTTON_LEFT \
+			and _esc_released and _aircraft != null:
+		_esc_released = false
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		return
 
 	if event is InputEventMouseButton and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 			and _aircraft == null:
@@ -239,13 +284,29 @@ func _unhandled_input(event: InputEvent) -> void:
 					_pick_up_aircraft(near)
 				else:
 					Events.notice.emit("附近没有停着的飞机——按 F 登机要走到机身跟前。")
+		# Z（D-034）：襟翼单键循环 0→1→2→0（儿童友好：不必记两个键；
+		# Toast 播报档位，VFE 30 m/s 软门限在机体侧提示）。
+		if event.is_action_pressed("aircraft_flaps") and not _dead and not replaying:
+			if _aircraft != null:
+				_aircraft.cycle_flaps()
+		# H（D-034）：HUD 简单/详细模式切换（默认简单，随 settings.json 落盘）。
+		if event.is_action_pressed("hud_detail") and not _dead and not replaying:
+			if _aircraft != null:
+				var s := FlightSettings.current()
+				s.hud_detail = not s.hud_detail
+				s.save()
+				Events.notice.emit("📋 HUD %s模式" % ("详细" if s.hud_detail else "简单"))
 
 	if event.is_action_pressed("ui_cancel"):
+		var was_captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 		Input.mouse_mode = (
 			Input.MOUSE_MODE_VISIBLE
-			if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+			if was_captured
 			else Input.MOUSE_MODE_CAPTURED
 		)
+		# 飞行中 Esc 解锁（D-034）：释放指针后可点 HUD 按钮（简单/详细模式、
+		# 发动机、视角等），点游戏画面重新捕获继续驾驶。
+		_esc_released = _aircraft != null and was_captured
 
 
 ## 双击跳跃键在允许飞行的模式（创造 / 探索）下切换飞行。
@@ -617,12 +678,17 @@ func ride_aircraft(craft: Aircraft) -> void:
 	camera_distance = CAM_DISTANCE_MAX_RIDING
 	# 驾驶中鼠标让位给操纵杆，弹簧臂俯仰不再由视角驱动——设一个越过垂尾的默认值。
 	_spring_arm.rotation.x = CHASE_PITCH_RIDING
+	# 登机即回到捕获态（D-034）：Esc 解锁过鼠标再登机也不能带着自由指针开飞机。
+	_esc_released = false
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_apply_camera_mode()
 	_model.visible = false
 	_held_item.visible = false
 	Events.aircraft_ride_changed.emit(true)
-	Events.notice.emit("✈️ 登机：F 启动发动机；W/S 油门，鼠标操纵杆，A/D 方向舵；"
-		+ "空格爬升/刹车，Shift 加速，Ctrl 下降；C 视角，V 环顾，M 地图，X 下机。")
+	Events.notice.emit("✈️ 登机：F 启动发动机；W/S 油门（座舱内滚轮也行），鼠标操纵杆，"
+		+ "A/D 方向舵；空格爬升/刹车，Shift 加速，Ctrl 下降；C 视角，V 环顾，M 地图，"
+		+ "双击左键改平，X 下机。")
 
 
 ## 下机：落到机身侧面。damage > 0 表示坠机抛出（照常扣血）。
@@ -642,6 +708,10 @@ func exit_aircraft(damage: int = 0) -> void:
 	velocity = Vector3.ZERO
 	_fall_speed = 0.0
 	camera_distance = 0.0
+	# 下机恢复徒步的鼠标捕获（飞行中 Esc 解锁过的话，见 D-034）。
+	if _esc_released:
+		_esc_released = false
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	# 弹簧臂俯仰恢复与第一人称相机一致（登机时曾设成越尾仰角）。
 	_spring_arm.rotation.x = _camera.rotation.x
 	# 第一人称下 PlayerModel 由 set_third_person(false) 自行隐藏，勿再强行置可见。

@@ -37,6 +37,10 @@ const ACTIONS := {
 	"aircraft_view": [KEY_C],
 	"aircraft_freelook": [KEY_V],
 	"aircraft_rear": [KEY_R],
+	# 襟翼单键循环（D-034）：Z 走 0→1→2→0（左手小指区，右手管鼠标时可盲按）。
+	"aircraft_flaps": [KEY_Z],
+	# HUD 简单/详细模式切换（D-034）：H 从未被占用（D-008 只列为帮助预留）。
+	"hud_detail": [KEY_H],
 	# 回放（D-033）：P 手动回放最近一段飞行；回放中 P / Esc 跳过。
 	"replay_play": [KEY_P],
 }

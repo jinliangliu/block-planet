@@ -48,6 +48,30 @@ const THRUST_DENSITY_EXPONENT := 0.7
 ## 故单个零件可被压低其结构限速（如高推力涡轮发动机略低于基准），其余零件默认等于本值。
 const VNE := 55.0
 
+# ── 襟翼与燃油（D-034，gameplay-designer Phase A 数值）────────
+## 三档襟翼：0 档 = 洁净构型（乘数 1.0 / 加数 0.0 恒等），与 D-031 标定逐位
+## 一致——flight_probe 128 项断言的前提；1/2 档放大升力上限、增大零升阻力，
+## 失速速度 13.1 → 11.7 → 10.7 m/s（乘数直接开方生效）。
+static func flap_cl_factor(flaps: int) -> float:
+	match clampi(flaps, 0, 2):
+		1: return 1.25
+		2: return 1.5
+		_: return 1.0
+
+
+static func flap_cd_add(flaps: int) -> float:
+	match clampi(flaps, 0, 2):
+		1: return 0.010
+		2: return 0.022
+		_: return 0.0
+
+
+## 襟翼标速 VFE（m/s）：超过此速度放襟翼，节点层只提示不硬拦（Toast 说明）。
+const FLAP_VFE := 30.0
+## 燃油兜底值：零件聚合不到油箱/发动机时用（默认套件 1 油箱 = 55 L）。
+const FUEL_CAPACITY_DEFAULT := 55.0
+const FUEL_BURN_DEFAULT := 0.10
+
 # ── 操纵 ────────────────────────────────────────────────────
 const ROLL_RATE_MAX := 2.2
 const PITCH_RATE_MAX := 1.1
@@ -97,6 +121,10 @@ class Airframe extends RefCounted:
 	var com := Vector3.ZERO
 	## 升力中心（机体局部坐标，米）：升力面面积加权平均；无升力面时退回重心。
 	var lift_center := Vector3.ZERO
+	## 燃油容量（升）与满油门油耗（升/秒，D-034）：由油箱/发动机零件聚合，
+	## 聚合不到时兜底默认值（「造得大飞得远」：蓝图装 2 油箱 = 110 L）。
+	var fuel_capacity := FUEL_CAPACITY_DEFAULT
+	var fuel_burn := FUEL_BURN_DEFAULT
 
 	## 由零件清单聚合整机特性（Phase 1 核心：物理按零件求和）。
 	static func aggregate(parts: Array[PlacedPart]) -> Airframe:
@@ -107,12 +135,16 @@ class Airframe extends RefCounted:
 		var cd0_sum := CD0_BASE
 		var com_weighted := Vector3.ZERO
 		var lift_weighted := Vector3.ZERO
+		var fuel_sum := 0.0
+		var burn_sum := 0.0
 		for placed in parts:
 			var data: PartData = placed.data
 			var pos := placed.local_pos()
 			mass_sum += data.mass
 			thrust_sum += data.thrust
 			cd0_sum += data.parasite_drag
+			fuel_sum += data.fuel_capacity
+			burn_sum += data.fuel_burn
 			# 结构限速取零件下限：高推力/轻结构件可拉低整机 VNE。
 			af.vne = minf(af.vne, data.vne_limit)
 			com_weighted += pos * data.mass
@@ -123,6 +155,8 @@ class Airframe extends RefCounted:
 		af.wing_area = area_sum
 		af.thrust_max = thrust_sum
 		af.cd0 = cd0_sum
+		af.fuel_capacity = fuel_sum if fuel_sum > 0.0 else FUEL_CAPACITY_DEFAULT
+		af.fuel_burn = burn_sum if burn_sum > 0.0 else FUEL_BURN_DEFAULT
 		if mass_sum > 0.0:
 			af.com = com_weighted / mass_sum
 		af.lift_center = lift_weighted / area_sum if area_sum > 0.0 else af.com
@@ -144,6 +178,10 @@ class State extends RefCounted:
 	var roll_rate := 0.0
 	var pitch_rate := 0.0
 	var yaw_rate := 0.0
+	## 襟翼档位（0/1/2）：0 档 = 洁净构型，与 D-031 标定逐项一致；
+	## 放下襟翼提升升力上限、增大零升阻力（D-034）。挂在 State 上随飞机走，
+	## 回放/存档如需构型还原一并带走。
+	var flaps := 0
 	## 本机的聚合特性（零件拼装结果）；未指定时用默认套件。
 	var airframe: Airframe
 	## 结算读数（HUD 与探针共用同一份来源）。
@@ -171,24 +209,27 @@ static func air_density(altitude: float) -> float:
 	return SEA_LEVEL_DENSITY * exp(-maxf(altitude, 0.0) / DENSITY_SCALE_HEIGHT)
 
 
-## 失速速度（m/s）：升力恰好等于重力的速度，随整机质量/翼面积/空气密度变化。
-static func stall_speed(density: float, airframe: Airframe) -> float:
-	var denom := density * airframe.wing_area * CL_MAX
+## 失速速度（m/s）：升力恰好等于重力的速度，随整机质量/翼面积/空气密度/
+## 襟翼档位变化（襟翼放大升力上限，失速速度按 1/√倍率 下降）。
+static func stall_speed(density: float, airframe: Airframe, flaps: int = 0) -> float:
+	var denom := density * airframe.wing_area * CL_MAX * flap_cl_factor(flaps)
 	if denom <= 0.0:
 		return 0.0
 	return sqrt(2.0 * airframe.mass * GRAVITY / denom)
 
 
 ## 升力系数曲线：线性段到临界攻角，之后升力平缓下滑（简化的失速平台）。
-static func lift_coefficient(alpha: float) -> float:
+## cl_max 为升力上限（襟翼档位经 flap_cl_factor 放大）；默认 = CL_MAX 恒等，
+## 保住 D-031 标定与 flight_probe 既有断言（0 档襟翼路径逐位不变）。
+static func lift_coefficient(alpha: float, cl_max: float = CL_MAX) -> float:
 	var magnitude := absf(alpha)
 	if magnitude <= STALL_ALPHA:
-		return clampf(CL_ALPHA * alpha, -CL_MAX, CL_MAX)
+		return clampf(CL_ALPHA * alpha, -cl_max, cl_max)
 	# 失速后：从 CLmax 起按更陡的斜率下滑，保留 35% 残余升力。
 	# 残余升力不为零是为了避免「一失速就直接坠地」——真机也是抖振后逐渐掉头，
 	# 儿童向更要留出改出的余地。
 	var over := magnitude - STALL_ALPHA
-	return signf(alpha) * maxf(CL_MAX * 0.35, CL_MAX - over * 2.4)
+	return signf(alpha) * maxf(cl_max * 0.35, cl_max - over * 2.4)
 
 
 ## 动压 q = ½ρV²（Pa）。
@@ -224,8 +265,9 @@ static func acceleration(state: State, controls: Controls) -> Vector3:
 	var q_dyn := dynamic_pressure(state)
 	var alpha := angle_of_attack(state)
 	var beta := sideslip(state)
-	var cl := lift_coefficient(alpha)
-	var cd := af.cd0 + af.induced_k * cl * cl + absf(beta) * af.sideslip_drag
+	var cl := lift_coefficient(alpha, CL_MAX * flap_cl_factor(state.flaps))
+	var cd := af.cd0 + flap_cd_add(state.flaps) \
+		+ af.induced_k * cl * cl + absf(beta) * af.sideslip_drag
 	var q_area := q_dyn * af.wing_area
 
 	# 升力垂直于速度、位于机体的对称面内（机背方向去掉速度分量）。
@@ -252,11 +294,13 @@ static func acceleration(state: State, controls: Controls) -> Vector3:
 ## 推进一帧：先按杆量更新机体角速度与姿态，再积分速度与位置，最后刷新读数。
 ## assist 为辅助增益表（FlightSettings.gains）；留空字典表示「无辅助」，逐帧行为
 ## 与重构前完全一致——既有 flight_probe 断言守护，不在此分支被改动。
-static func integrate(state: State, controls: Controls, delta: float, on_ground: bool, assist: Dictionary = {}) -> void:
+static func integrate(
+	state: State, controls: Controls, delta: float, on_ground: bool,
+	assist: Dictionary = {}, level_time: float = 0.0) -> void:
 	var q_dyn := dynamic_pressure(state)
 	var authority := clampf(
 		q_dyn / CONTROL_Q_REF, CONTROL_AUTHORITY_MIN, 1.0) if not on_ground else 1.0
-	_update_rates(state, controls, delta, authority, on_ground, assist)
+	_update_rates(state, controls, delta, authority, on_ground, assist, level_time)
 	_integrate_attitude(state, delta, on_ground)
 	state.throttle = controls.throttle
 
@@ -269,7 +313,7 @@ static func integrate(state: State, controls: Controls, delta: float, on_ground:
 
 static func _update_rates(
 	state: State, controls: Controls, delta: float, authority: float, on_ground: bool,
-	assist: Dictionary = {}
+	assist: Dictionary = {}, level_time: float = 0.0
 ) -> void:
 	var blend := clampf(RATE_RESPONSE * delta, 0.0, 1.0)
 	var beta := sideslip(state)
@@ -303,6 +347,17 @@ static func _update_rates(
 			var bank := asin(clampf(state.basis.x.y, -1.0, 1.0))
 			target_roll += bank * roll_level * authority
 			target_yaw += -state.yaw_rate * yaw_damp * authority
+
+	# 自动改平（D-034 双击左键）：显式指令，**优先于杆量**——时限内以增强增益
+	# 把坡度与俯仰一并摆回水平。与上面的松杆配平刻意区分：这里故意含俯仰，
+	# 它是「帮我改平」的一键求助，不是松杆回中；增益取辅助档与保底值的较大者，
+	# 硬核档（assist 全 0）下也能生效，避免儿童按了没反应。
+	if not on_ground and level_time > 0.0 and not state.stalled:
+		var level_gain: float = maxf(float(assist.get("roll_level", 0.0)), 0.9) * 2.5
+		var bank2 := asin(clampf(state.basis.x.y, -1.0, 1.0))
+		var pitch2 := asin(clampf((-state.basis.z).y, -1.0, 1.0))
+		target_roll += bank2 * level_gain * authority
+		target_pitch += -pitch2 * level_gain * authority
 
 	# 接近俯仰限位时先收杆，避免积分越界后姿态解算出现奇异（机头朝上为正）。
 	# 地面用机轮限位（12°）而非空中限位（83°）：不然拉杆会把机头抬到 19° 卡在
@@ -350,18 +405,24 @@ static func _refresh_readings(state: State) -> void:
 	state.stall_warning = absf(alpha) > STALL_WARN_ALPHA and speed > 3.0
 	state.overspeed = speed > af.vne
 	# 载荷系数：升力 / 重力。失速后升力掉下去，读数自然回落。
-	var cl := lift_coefficient(alpha)
+	var cl := lift_coefficient(alpha, CL_MAX * flap_cl_factor(state.flaps))
 	var weight := af.mass * GRAVITY
 	state.load_factor = (dynamic_pressure(state) * af.wing_area * absf(cl)) / weight \
 		if weight > 0.0 else 0.0
 
 
 ## 一帧读数快照：HUD 仪表与探针断言共用同一套字段名。
+## D-034 起补三轴角速度（转弯协调仪/姿态变化率用）、襟翼档位透传、
+## 垂直速度与侧滑角（垂直速度表/协调仪小球用）；失速速度随襟翼档位。
+## 姿态三角（附录 A 契约）：pitch 抬头为正；bank 右转为正（±90 钳位，
+## 供坡度尺用——姿态仪全量程倒飞由 FlightInstruments 的 atan2 版算）；
+## heading 0-360、+Z = 北顺时针（与 D-033 战术地图/罗盘同约定）。
 static func snapshot(state: State) -> Dictionary:
+	var nose := -state.basis.z
 	return {
 		"airspeed": state.airspeed,
 		"kmh": state.airspeed * MPS_TO_KMH,
-		"stall_speed": stall_speed(air_density(state.position.y), state.airframe),
+		"stall_speed": stall_speed(air_density(state.position.y), state.airframe, state.flaps),
 		"altitude": state.position.y,
 		"alpha_deg": rad_to_deg(state.alpha),
 		"load_factor": state.load_factor,
@@ -369,4 +430,14 @@ static func snapshot(state: State) -> Dictionary:
 		"stalled": state.stalled,
 		"stall_warning": state.stall_warning,
 		"overspeed": state.overspeed,
+		"roll_rate": state.roll_rate,
+		"pitch_rate": state.pitch_rate,
+		"yaw_rate": state.yaw_rate,
+		"yaw_rate_dps": rad_to_deg(state.yaw_rate),
+		"vertical_speed": state.velocity.y,
+		"sideslip_deg": rad_to_deg(sideslip(state)),
+		"pitch_deg": rad_to_deg(asin(clampf(nose.y, -1.0, 1.0))),
+		"bank_deg": rad_to_deg(-asin(clampf(state.basis.x.y, -1.0, 1.0))),
+		"heading_deg": fposmod(rad_to_deg(atan2(nose.x, nose.z)), 360.0),
+		"flaps": state.flaps,
 	}

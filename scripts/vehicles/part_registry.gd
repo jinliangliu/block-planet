@@ -66,7 +66,9 @@ static func all() -> Array[PartData]:
 	engine.cost = 12
 	engine.durability = 80.0
 	engine.thrust = 1650.0
-	engine.fuel_burn = 0.02
+	# 满油门油耗（升/秒，D-034）：burn = Σ发动机 fuel_burn × 油门，默认机 0.10 →
+	# 满油 55 L 续航 9.2 min；涡轮 0.18 是推力的代价（1750 > 1650 N）。
+	engine.fuel_burn = 0.10
 	parts.append(engine)
 
 	var propeller := PartData.new()
@@ -99,7 +101,9 @@ static func all() -> Array[PartData]:
 	tank.mass = 20.0
 	tank.cost = 4
 	tank.durability = 30.0
-	tank.fuel_capacity = 40.0
+	# 油箱容量（升，D-034）：默认套件 1 个 = 55 L；蓝图装 2 个 = 110 L，
+	# 「造得大飞得远」可感知。燃油不进气动（质量恒定），保 D-031 标定。
+	tank.fuel_capacity = 55.0
 	parts.append(tank)
 
 	# ── 进阶零件（默认套件之外，需花绿宝石解锁）──────────────
@@ -118,7 +122,9 @@ static func all() -> Array[PartData]:
 	turbine.thrust = 1750.0
 	# 不弱于默认件(55)；若以后加入更脆的零件，整机 VNE 会取零件下限（Airframe.aggregate）。
 	turbine.vne_limit = 55.0
-	turbine.fuel_burn = 0.035
+	# 满油门油耗（升/秒）：默认机的 1.8 倍——推力 1750 > 1650 N 的代价，
+	# 满油续航 ≈5.1 min（「强力但费油」的 Trade-off，儿童可感知）。
+	turbine.fuel_burn = 0.18
 	parts.append(turbine)
 
 	var long_wing := PartData.new()

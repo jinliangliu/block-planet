@@ -53,6 +53,13 @@ var livery_index := 0
 ## 两者都可在飞行设置面板里关掉（防晕动症）。
 var camera_shake := true
 var auto_recenter := true
+## HUD 详细模式（D-034）：默认简单（儿童优先，信息少 = 不晕），H 键切换，
+## 随 settings.json 落盘（与涂装/抖动同机制）。
+var hud_detail := false
+## 自动改平开关（D-034 双击左键）：默认开，设置面板可关。
+var auto_level := true
+## 警告蜂鸣码开关（D-034）：默认开（听到也能玩）；设置面板可关。
+var beeper_enabled := true
 
 static var _current: FlightSettings = null
 
@@ -119,6 +126,9 @@ func to_dict() -> Dictionary:
 		"livery_index": livery_index,
 		"camera_shake": camera_shake,
 		"auto_recenter": auto_recenter,
+		"hud_detail": hud_detail,
+		"auto_level": auto_level,
+		"beeper_enabled": beeper_enabled,
 	}
 
 
@@ -131,6 +141,9 @@ static func from_dict(d: Dictionary) -> FlightSettings:
 	s.set_livery(int(d.get("livery_index", 0)))
 	s.camera_shake = bool(d.get("camera_shake", true))
 	s.auto_recenter = bool(d.get("auto_recenter", true))
+	s.hud_detail = bool(d.get("hud_detail", false))
+	s.auto_level = bool(d.get("auto_level", true))
+	s.beeper_enabled = bool(d.get("beeper_enabled", true))
 	return s
 
 

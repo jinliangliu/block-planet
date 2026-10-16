@@ -122,6 +122,10 @@ var _ft_view: Button
 var _ft_engine: Button
 ## 飞行战术地图（D-033，M 键）：_build 时创建，默认隐藏。
 var _tactical_map: FlightTacticalMap
+## 飞行屏幕仪表 HUD（D-034）：座舱玻璃 HUD / 追尾四角 / 小地图 / 警告 / 详细清单。
+var _instrument_hud: FlightInstrumentHUD
+## 警告蜂鸣码播放器（D-034）：程序生成音，落地儿童友好「语音提示」。
+var _alert_beeper: AlertBeeper
 
 
 func setup(player: Player) -> void:
@@ -210,6 +214,13 @@ func _build() -> void:
 	# 飞行战术地图（D-033，M 键）：默认隐藏，驾驶中按 M 打开。
 	_tactical_map = FlightTacticalMap.new()
 	add_child(_tactical_map)
+	# 飞行屏幕仪表 HUD（D-034）：全屏覆盖层，登机后才显形。
+	_instrument_hud = FlightInstrumentHUD.new()
+	add_child(_instrument_hud)
+	# 警告蜂鸣码播放器（D-034）：程序生成音，无 TTS / 无语音资产依赖。
+	_alert_beeper = AlertBeeper.new()
+	add_child(_alert_beeper)
+	_instrument_hud.set_beeper(_alert_beeper)
 	_connect_progress()
 	_build_map_name(root)
 	_build_map_selector(root)
@@ -337,6 +348,9 @@ func _process(delta: float) -> void:
 	if _tip_panel != null and _tip_panel.visible and _tip_mesh != null:
 		_tip_mesh.rotation.y += delta * 1.5
 	_refresh_flight_panel()
+	# 飞行屏幕仪表 HUD（D-034）：驾驶中每帧驱动（读快照→加工→分发）。
+	if _instrument_hud != null and _player != null and _player.is_riding():
+		_instrument_hud.tick(delta)
 	if _player == null or _break_bar == null:
 		return
 	var breaking := _player.is_breaking()
@@ -887,6 +901,11 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 		else:
 			_touch_walk.visible = true
 			_flight_touch.visible = false
+	# 飞行屏幕仪表 HUD（D-034）：登机时绑定飞机与相机、清空语音去重状态。
+	if _riding and _instrument_hud != null and _flight_camera != null:
+		var cr := _player.aircraft()
+		if cr != null and is_instance_valid(cr):
+			_instrument_hud.setup(cr, _flight_camera)
 	_refresh_flight_panel()
 
 
@@ -2515,6 +2534,17 @@ func _build_mission_panel(root: Control) -> void:
 func set_mission_anchor(center: Vector3) -> void:
 	if _mission_panel != null:
 		_mission_panel.set_mission_anchor(center)
+
+
+## 飞行屏幕仪表 HUD 实例（main 装配座舱 3D 面板 / 世界标注时注册 3D 视图用）。
+func instrument_hud() -> FlightInstrumentHUD:
+	return _instrument_hud
+
+
+## 设置飞行 HSI/CDI 直飞导航目标（main 在登机时注入机场/任务锚点）。
+func set_flight_navigation(target: Vector3, name: String = "") -> void:
+	if _instrument_hud != null:
+		_instrument_hud.set_navigation(target, name)
 
 
 func open_mission_panel() -> void:

@@ -973,6 +973,118 @@ MVP 核心循环：**建造 → 试飞 → 任务 → 奖励 → 改造 → 再�
 
 ---
 
+## D-034 飞行仪表系统与 HUD（Phase 7）
+
+**日期**：2026-10-16
+
+**背景**：D-030~D-033 已闭环飞行玩法（登机/起飞/任务/降落）并交付六模式相机与
+回放运镜，但座舱只有 4 行原始 HUD（空速 / 离地高度 / 油门 / 失速告警）。
+用户（dylan）要求一套「可读的飞行仪表」+ 分视角的 HUD + 世界导航标注，并由
+gameplay-designer 在 Phase A 交付了数值契约（失速/油耗/告警阈值与滞环/优先级）。
+D-034 把这套契约落成代码：**单一纯逻辑数据层 `FlightInstruments` 加工 12 项仪表**
++ **三种屏幕 HUD 布局** + **座舱 3D 仪表盘** + **世界 3D 标注** + **程序生成
+蜂鸣器**，且座舱盘、屏幕 HUD、无头探针共用同一份数字（避免三处各算一套、互相对不上）。
+
+**键位 / 设置新增（无冲突，沿用 D-008 预留位）**：
+- **Z = 襟翼单键循环 0→1→2→0**（左手小指区，右手管鼠标时可盲按）。
+- **H = HUD 简单/详细模式切换**（H 在 D-008 仅列为帮助预留、未曾占用）。
+- **双击左键 = 自动改平**（约 2 秒增强增益摆平坡度；受 `auto_level` 设置门控）。
+- 三项持久化设置（随 `settings.json` 落盘，默认：简单模式 off / 自动改平 on /
+  蜂鸣 on）：`hud_detail` / `auto_level` / `beeper_enabled`。
+
+**决策**：
+1. **单一纯逻辑数据层**（`scripts/flight/flight_instruments.gd`，
+   `class_name FlightInstruments extends RefCounted`）：每帧 `update(snapshot,
+   craft_basis, delta)` 把 `Aircraft.snapshot()` 的原始读数加工成 12 项仪表的
+   显示值与告警；`alerts()` 返回按优先级排序的生效告警，`take_voice_cues(delta)`
+   返回「本次该响」的蜂鸣提示（边沿触发 + 重播 cadence，只播最高级那条、取一次即
+   清除）。**所有阈值/滞环/优先级以此文件为唯一事实来源**，节点层只喂原始读数。
+2. **12 项仪表数值契约**（Phase A 结论，钉死）：
+   - 空速表：失速 13.1 / 11.7 / 10.7 m/s（襟翼 0/1/2）；结构限速 VNE 55 m/s；
+     显示空速与失速余量（km/h）。
+   - 姿态仪：pitch 抬头正、roll 全量程含倒飞（右转为正）。
+   - 高度表：MSL + 离地（AGL 用向下射线实测）。
+   - 转弯协调仪：转弯率（°/s）+ 标准率标记（3°/s，±0.6）+ 侧滑球（±10° 满偏）。
+   - 航向指示器：0–360°，**+Z = 北**（与 D-033 战术地图实证一致）。
+   - 垂直速度表：`VSI_TAU=0.3` 平滑，压住单帧噪声。
+   - HSI / CDI：目标方位角 + 直飞偏差（`CDI_DEG_PER_DOT=10`，儿童向取 10°/点，
+     真机 5°）+ TO 旗；MVP 直飞导航恒为 TO。
+   - 雷达高度表：= AGL。
+   - 发动机转速：怠速 600 → 上限 2700 rpm（`RPM_TAU=0.4`），百分比读数。
+   - 燃油表：容量 55 L、平飞油耗 0.10 L/s；**低油滞环 ≤20% 触发 / >25% 清除**
+     （防边界抖闪）；**≤0.05 L 判耗尽熄火**。
+   - 襟翼 / 起落架指示灯：襟翼 0/1/2 档；起落架固定式恒放下锁定（绿）。
+   - 警告：六类告警，级别 注意(黄)/警告(红)，**优先级 失速=超速=耗尽 > 过低 > 低油**；
+     同刻多警只播最高级声音，其余留灯光（防声音叠加成噪音）。
+3. **三种屏幕 HUD 布局**（`scripts/ui/flight_instrument_hud.gd`，
+   `class_name FlightInstrumentHUD extends Control`，按 `AircraftCamera.current_mode`
+   分发）：
+   - **第一人称座舱玻璃 HUD**：中心准星 + 底部三行（速度 / 高度·离地 / 航向·坡度）。
+   - **第三人称追尾 HUD**：四角读数（TL 空速·航向 / TR 高度·升降 / BL 油门%·燃油% /
+     BR 目标方位·距离）+ 右下角**小地图**（北朝上，本机三角指航向、导航绿点指目标）。
+   - **详细模式（H 键）**：左侧 12 仪表全清单 + 始终显示小地图。
+   - **警告横幅**：顶部居中，600 ms 闪烁，显示最高级告警文字并驱动蜂鸣器；地图/回放时
+     隐藏（交给战术地图/回放覆盖层）。
+4. **座舱 3D 仪表盘**（`scripts/flight/cockpit_panel.gd`，`class_name CockpitPanel
+   extends Node3D`）：把 12 仪表画进 `SubViewport` 再经 `ViewportTexture` 贴到座舱
+   仪表板平面——低头可见会转动的指针。上排 4 圆（空速/姿态/高度/航向）、下排 3 圆
+   （转弯协调/垂直速度/HSI+CDI）、底部 4 数字条（雷达高度/转速/燃油/襟翼·起落架）；
+   自发光（不依赖外部光）。**蓝图试飞机（blueprint_built）无座舱罩，按契约隐藏本节点**。
+5. **世界 3D 标注**（`scripts/flight/flight_markers.gd`，
+   `class_name FlightMarkers extends Node3D`，main 登机时加入世界、下机释放）：
+   目标点金色双环（贴地、空中与接近段都看得见）+ 悬浮 `Label3D` 名称/距离；
+   跑道引导 = 地面箭头列（指向目标）+ 3° 下滑道双轨（从约 250 m 外、高 +13 m 处
+   沿 3° 走廊引向目标），儿童向「跟着线飞就能落地」；距目标 < 50 m 整体淡出。
+   目标/跑道坐标由飞行系统经 `set_target` / `set_runway_guide` 注入（任务/机场）。
+6. **程序生成蜂鸣器**（`scripts/flight/alert_beeper.gd`，
+   `class_name AlertBeeper extends Node`）：Godot 无跨平台 TTS、工程无语音资产，
+   故用**程序合成音**——每种告警一段固定音色的蜂鸣码（`BEEP_CODES`，330–880 Hz、
+   单条 ≤1.2 s，落在该范围避免刺耳），配屏幕文字呼号，听感可区分、零资产依赖；
+   主音量压到 0.22 避免惊到儿童。预留采样覆盖：`user://voice/<id>.wav` 存在即优先播
+   （后续录儿童语音无需改代码）。**唯一事实来源 = `FlightInstruments.take_voice_cues`
+   的去重**，蜂鸣器只负责渲染。
+7. **控制/设置落地**：Z 循环襟翼（`Aircraft.cycle_flaps` → `set_flaps`，VFE 软门限：
+   >30 m/s 放襟翼仅提示不硬拦）；H 切换 `hud_detail` 并即时生效（Toast 提示）；
+   双击左键 `request_level()`（`LEVEL_ASSIST_TIME=2.0 s`，受 `auto_level` 门控，关掉
+   后双击不再摆平）；三项设置随 `settings.json` 落盘。初始 `FlightSettings` 默认值：
+   `hud_detail=false`（儿童优先、信息少=不晕）、`auto_level=true`、`beeper_enabled=true`。
+
+**代价与边界**：
+- **默认简单 HUD**：儿童向优先，信息少=不晕动；详细清单需 H 主动开启。
+- **防警报疲劳**：过低告警要求「AGL<阈值 且 下沉率>阈值」才触发（否则降落进近全程
+  报警，儿童会学会忽略）；同刻只一条声音。
+- **座舱 3D 盘仅真机显示**：蓝图试飞机隐藏（无座舱罩几何）。
+- **Godot 4.6.3 API 差异（本轮实测并解决）**：① `ConeMesh` 已移除 → 用锥化
+  `CylinderMesh`（底粗顶细）近似箭头；② `Label3D.BillboardMode` 枚举未作为脚本常量
+  导出、`billboard` 为整型枚举 → 直接用值 `2`（Y-Billboard，仅绕 Y 朝相机）；
+  ③ `AudioStreamGeneratorPlayback.push_buffer` 期望 `PackedVector2Array`（每帧一个
+  立体声 `Vector2`），非 `PackedFloat32Array`；④ GDScript 无 `cosf/sinf` → 用 `cos/sin`；
+  ⑤ 新增 `class_name` 须编辑器重扫全局类缓存（`godot --headless --path . --editor
+  --quit`），否则 headless 报 "not declared"；`look_at/global_position` 必须在 `add_child`
+  之后调用。
+- **回归代价**：截图类探针须 Vulkan **窗口模式**；批量回归必须串行（并行读写 user://
+  竞态污染存档，D-010 铁律）。
+
+**验证**：`tests/flight_instruments_probe.gd` 无头 **58 项全 PASS**（FLIGHT_INSTRUMENTS_
+PROBE_OK）：① 襟翼失速 13.1/11.7/10.7；② 燃油 55 L/0.10 L/s + 低油滞环（15% 触发 /
+22% 保持 / 30% 清除）+ 耗尽（0.03 L 判零+低油灯）；③ RPM 600/2700 → 百分比 + 节点
+`_rpm()`；④ VFE（>30 放襟翼被拒、收襟翼不限）；⑤ 滚轮油门（0.5±0.05、钳 1.0/0.0、
+熄火无效）；⑥ 改平 2.0 s；⑦ 六告警优先级（失速压低油/耗尽、过低两级、着地清除）；
+⑧ 语音边沿+重播（40×0.05 s 逐帧累计≈2.0 s 才重播）；⑨ 姿态/航向（+Z 北、机头朝北
+航向 0、抬头 pitch 正、右滚 roll 正）；⑩ HSI/CDI（正北 bearing 0、偏差 0、距离 100、
+航向东偏差 −90°/dots −1）；⑪ HUD 默认（hud_detail=false、beeper_enabled=true、
+NORMAL 辅助 PARTIAL）。`tests/flight_panel_shot.gd` **窗口（Vulkan）9 项全 PASS**
+（FLIGHT_PANEL_SHOT_OK）：座舱玻璃 HUD + 3D 仪表盘 / 追尾四角 + 小地图 / 详细模式，
+三截图 `tmp/flight_panel_{cockpit,chase,detail}.png` 目检通过。
+全量串行回归（`tmp/run_regression.sh`，24 探针）：**0 FAIL**；存档四件套
+（progress/unlocks/blueprint/settings）逐字节还原 pre-run 备份，仅良性 Vulkan 管线
+缓存差异。注：airport/life/flight 三个探针在 `get_tree().quit()` 后的 Vulkan 清理阶段
+偶发 rc=139 段错误——其断言已**全部完成且 PASS 计数与基线一致**（17/409/128），且
+SaveGuard 还原早于退出，属 Godot 4.6.3 headless-on-Intel-Iris-Xe 的退出期已知行为，
+不影响结论。
+
+---
+
 ## 附：待定/开放问题
 
 | 编号 | 问题 | 现状 |

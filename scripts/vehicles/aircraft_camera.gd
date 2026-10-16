@@ -201,6 +201,15 @@ func zoom(delta: float) -> void:
 		chase_distance = clampf(chase_distance + delta * 0.8, CHASE_DISTANCE_MIN, CHASE_DISTANCE_MAX)
 
 
+## 视角回正（D-034 鼠标中键）：清除环顾偏移、追尾距离与地图高度归默认。
+## 自由观察松手本就会自动回正（auto_recenter），本入口给「一键归位」用。
+func recenter() -> void:
+	_look_yaw = 0.0
+	_look_pitch = 0.0
+	chase_distance = CHASE_DISTANCE_DEFAULT
+	map_height = MAP_HEIGHT_DEFAULT
+
+
 ## 回放系统直写相机位姿（REPLAY 模式，无阻尼）。
 func set_replay_transform(xform: Transform3D) -> void:
 	global_transform = xform

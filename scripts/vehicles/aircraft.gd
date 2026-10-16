@@ -73,6 +73,25 @@ const ALT_MILESTONE_STEP := 20.0
 ## 累计飞行距离里程碑步长（m）。
 const DIST_MILESTONE_STEP := 100.0
 
+# ── 燃油与发动机参数（D-034，gameplay-designer Phase A 数值）────
+## 燃油：容量与油耗取自聚合气动框（Airframe.fuel_capacity / fuel_burn，单位
+## 升 / 升每秒满油门）；burn = fuel_burn × 油门，熄火不耗。默认套件 55 L +
+## 0.10 L/s → 满油满油门续航 9.2 min、半油门巡航 18.3 min（单局任务足够）。
+## 耗尽自动熄火（油门锁 0、无推力），舵面仍可滑翔降落——不坠毁不爆炸。
+const FUEL_CAPACITY := 55.0
+## 低油警告阈值（比例）：与 FlightInstruments 低油滞环一致（≤20% 触发）。
+const FUEL_LOW_RATIO := 0.2
+## RPM 模型：转速 = RPM_IDLE + RPM_RANGE × 油门（熄火 = 0），
+## 仪表显示 600–2700 转/分（大数字百分比 + 小字转速）。
+const RPM_IDLE := 600.0
+const RPM_RANGE := 2100.0
+## 转速表量程上限（转/分）：百分比读数与刻度盘共用。
+const RPM_MAX := RPM_IDLE + RPM_RANGE
+## RPM 表滞后时间常数（秒）：转速不瞬变，指针才像真的。
+const RPM_TAU := 0.4
+## 自动改平持续时间（秒）：双击左键后以增强辅助增益摆平（D-034 鼠标操控）。
+const LEVEL_ASSIST_TIME := 2.0
+
 @export var use_player_input := true
 
 var controls := AircraftFlight.Controls.new()
@@ -123,6 +142,16 @@ var _alt_milestone := 0.0
 var _dist_milestone := 0.0
 ## 累计空中飞行距离（m）。
 var _flight_distance := 0.0
+## 燃油（升，D-034）：容量与油耗随聚合气动框（蓝图 2 油箱 = 110 L）；
+## 出生 / 蓝图装配 / 每次登机补满（_refuel_full），耗尽自动熄火。
+var fuel_liters := FUEL_CAPACITY
+var fuel_capacity := FUEL_CAPACITY
+## RPM 平滑值（转/分，0..2700，发动机参数表用；探针与仪表读 snapshot 的 "rpm"）。
+var _rpm_value := 0.0
+## 自动改平剩余时间（秒，双击左键触发；>0 时 integrate 用增强摆平增益）。
+var _level_timer := 0.0
+## 襟翼档位（0/1/2）是否在本次驾驶中变动过（HUD 指示灯用）。
+var _flaps_moved := false
 
 
 ## 在世界里落下一架飞行器：机轮贴地、机头朝 heading。
@@ -146,6 +175,7 @@ static func from_loadout(
 	parent.add_child(craft)              # _ready 读到 _blueprint → 建零件体素外观
 	craft.place(at, heading)             # 落位并建默认气动框
 	craft._state.airframe = blueprint.aggregate()  # 覆盖为零件聚合结果
+	craft._refuel_full()                 # 蓝图油箱容量可能不同（2 油箱 = 110 L）
 	return craft
 
 
@@ -155,6 +185,7 @@ func place(at: Vector3, heading: float = 0.0) -> void:
 		at + Vector3(0.0, GROUND_CLEARANCE + 0.05, 0.0), heading)
 	global_transform = Transform3D(_state.basis, _state.position)
 	velocity = Vector3.ZERO
+	_refuel_full()
 
 
 ## 按蓝图零件生成体素块外观。纯视觉、无碰撞，不改变飞行。
@@ -264,6 +295,18 @@ func snapshot() -> Dictionary:
 	data["throttle"] = controls.throttle
 	# 发动机状态：HUD 仪表据此显示「熄火」并置灰油门条。
 	data["engine"] = engine_running
+	# D-034 仪表契约：世界位置（HSI/CDI 直飞偏差用）、着地状态（地面屏蔽
+	# 高度警告）、燃油与 RPM（燃油表/发动机参数）、襟翼与起落架。
+	data["position"] = global_position
+	data["on_ground"] = is_on_floor()
+	data["fuel_liters"] = fuel_liters
+	data["fuel_capacity"] = fuel_capacity
+	data["fuel_ratio"] = fuel_ratio()
+	data["rpm"] = _rpm()
+	data["rpm_pct"] = clampf(_rpm() / RPM_MAX, 0.0, 1.0)
+	data["flaps"] = _state.flaps
+	data["flaps_moved"] = _flaps_moved
+	data["gear_down"] = true  # 固定起落架：恒放下锁定向
 	return data
 
 
@@ -297,6 +340,93 @@ func add_mouse_motion(relative: Vector2) -> void:
 func drive_remotely() -> void:
 	use_player_input = false
 	set_piloted(true)
+
+
+## 燃油比例（0..1；容量为 0 视为 0）。
+func fuel_ratio() -> float:
+	return clampf(fuel_liters / fuel_capacity, 0.0, 1.0) if fuel_capacity > 0.0 else 0.0
+
+
+## 补满燃油：容量取聚合气动框（蓝图 2 油箱 = 110 L，D-034 Phase A）。
+## 出生 / 蓝图装配 / 每次登机都调它——油是「这一程」的资源，不是飞机耐久
+## （防挫败设计，与 D-031 赠机不落盘同哲学）。
+func _refuel_full() -> void:
+	fuel_capacity = _state.airframe.fuel_capacity
+	fuel_liters = fuel_capacity
+
+
+## 转速（转/分，绝对量，D-034）：运转时 RPM_IDLE + RPM_RANGE × 平滑油门
+## （怠速 600 / 满油门 2700）；熄火后无怠速底数，按平滑值自旋减速到 0
+## （螺旋桨惯性观感）。屏幕大数字百分比走 snapshot 的 rpm_pct。
+func _rpm() -> float:
+	var base := RPM_IDLE if (engine_running and fuel_liters > 0.0) else 0.0
+	return base + RPM_RANGE * _rpm_value
+
+
+## 燃油消耗与 RPM 平滑（D-034）：熄火/无油不耗；耗尽即自动熄火并播报。
+## 油耗 = 聚合气动框 fuel_burn（默认发动机 0.10 L/s，涡轮 0.18）× 油门——
+## Phase A 线性模型：儿童一句话能懂「油门越大越费油」，怠速不耗。
+func _update_fuel(delta: float) -> void:
+	if engine_running and fuel_liters > 0.0:
+		var burn := _state.airframe.fuel_burn * controls.throttle * delta
+		fuel_liters = maxf(fuel_liters - burn, 0.0)
+		if fuel_liters <= 0.0:
+			# 直接置熄火而非 set_engine(false)：避免叠发两条通知，油尽一句就够。
+			engine_running = false
+			controls.throttle = 0.0
+			Events.notice.emit("⛽ 燃油耗尽，发动机熄火了——尽快找地方降落！")
+	var rpm_target := controls.throttle if (engine_running and fuel_liters > 0.0) else 0.0
+	var k := 1.0 - exp(-delta / RPM_TAU) if delta > 0.0 else 1.0
+	_rpm_value = lerpf(_rpm_value, rpm_target, clampf(k, 0.0, 1.0))
+
+
+## 滚轮油门微调（D-034 PC 鼠标操控）：步长 5%（±0.05），钳 0..1；
+## 熄火或无人驾驶时忽略（油门锁 0 的语义不变）。
+func adjust_throttle(step: float) -> void:
+	if not piloted or not engine_running:
+		return
+	controls.throttle = clampf(controls.throttle + step, 0.0, 1.0)
+
+
+## 自动改平（D-034 双击左键）：LEVEL_ASSIST_TIME 秒内以增强增益摆平。
+func request_level() -> void:
+	if piloted:
+		_level_timer = LEVEL_ASSIST_TIME
+
+
+## 襟翼档位（0/1/2，D-034）：0 = 洁净构型（与 D-031 标定一致）。放下提升
+## 升力上限、增大阻力——起飞/着陆更慢更稳，巡航收起。气动系数见
+## AircraftFlight 的 FLAP_* 常量（Phase A 结论回订）。
+func set_flaps(detent: int) -> void:
+	var d := clampi(detent, 0, 2)
+	if d == _state.flaps:
+		return
+	# VFE 软门限（D-034 Phase A §1.4）：放襟翼仅限空速 < 30 m/s；超速下放
+	# 只提示不硬拦（D-014「失败必须可解释」），收襟翼不限速度。
+	if d > _state.flaps and _state.airspeed > AircraftFlight.FLAP_VFE:
+		if piloted:
+			Events.notice.emit("🐌 太快啦，先减速再放襟翼")
+		return
+	_state.flaps = d
+	_flaps_moved = true
+	if piloted:
+		Events.notice.emit("🛬 襟翼 %s" % _flaps_name(d))
+
+
+## 襟翼循环（一个键走完 0→1→2→0，儿童友好：不必记两个键）。
+func cycle_flaps() -> void:
+	set_flaps((_state.flaps + 1) % 3)
+
+
+func flaps_detent() -> int:
+	return _state.flaps
+
+
+static func _flaps_name(d: int) -> String:
+	match d:
+		1: return "1 档（起飞）"
+		2: return "2 档（着陆）"
+		_: return "收起"
 
 
 ## 上机 / 下机。
@@ -333,19 +463,26 @@ func toggle_engine() -> bool:
 func set_piloted(value: bool, who: Player = null) -> void:
 	piloted = value
 	rider = who if value else null
-	if not value:
-		controls.throttle = 0.0
-		controls.pitch = 0.0
-		controls.roll = 0.0
-		controls.yaw = 0.0
-		engine_running = false
-		_stick = Vector2.ZERO
-		_touch_active = false
-		_touch_pitch = 0.0
-		_touch_roll = 0.0
-		_touch_yaw = 0.0
-		_touch_throttle = 0.0
-		_touch_brake = false
+	if value:
+		# 登机：满油 + 襟翼回 0 档（D-034 Phase A：油是「这一程」的资源；
+		# 避免「上飞机就是 2 档」的困惑）。
+		_refuel_full()
+		_state.flaps = 0
+		_flaps_moved = false
+		return
+	controls.throttle = 0.0
+	controls.pitch = 0.0
+	controls.roll = 0.0
+	controls.yaw = 0.0
+	engine_running = false
+	_state.flaps = 0
+	_stick = Vector2.ZERO
+	_touch_active = false
+	_touch_pitch = 0.0
+	_touch_roll = 0.0
+	_touch_yaw = 0.0
+	_touch_throttle = 0.0
+	_touch_brake = false
 
 
 func _physics_process(delta: float) -> void:
@@ -359,10 +496,13 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_prepare_input(delta)
+	_update_fuel(delta)
+	if _level_timer > 0.0:
+		_level_timer = maxf(_level_timer - delta, 0.0)
 	var on_ground := is_on_floor()
 	# 辅助稳定增益（FlightSettings 单例）；无设置/关闭档即纯气动模型。
 	var assist := FlightSettings.current().gains()
-	AircraftFlight.integrate(_state, controls, delta, on_ground, assist)
+	AircraftFlight.integrate(_state, controls, delta, on_ground, assist, _level_timer)
 	_sync_livery()
 	if on_ground:
 		_apply_ground_forces(delta)
@@ -554,7 +694,12 @@ func _prepare_input(delta: float) -> void:
 		controls.brake = _touch_brake
 		return
 
-	_stick = _stick.lerp(Vector2.ZERO, clampf(STICK_CENTER_RATE * delta, 0.0, 1.0))
+	# 自动改平进行中：杆量快速回中，让位给 integrate 的摆平增益（否则鼠标
+	# 杆量会把改平指令抵掉）。玩家重新移动鼠标即刻接管（_stick 又被写回）。
+	var center_rate := STICK_CENTER_RATE
+	if _level_timer > 0.0:
+		center_rate = 6.0
+	_stick = _stick.lerp(Vector2.ZERO, clampf(center_rate * delta, 0.0, 1.0))
 	var kbd_pitch := Input.get_axis("aircraft_pitch_down", "aircraft_pitch_up")
 	var kbd_roll := Input.get_axis("aircraft_roll_left", "aircraft_roll_right")
 	# 空格 / Ctrl 在飞行上下文里重新定义（儿童友好的「上升 / 下降」）：
