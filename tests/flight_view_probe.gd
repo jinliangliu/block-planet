@@ -127,7 +127,8 @@ func _run() -> void:
 	var chase_dist := cam.global_position.distance_to(craft.global_position)
 	_check(chase_dist > 9.0 and chase_dist < 18.0,
 		"④ 追尾距离更远更宽（%.1f m，默认 13 m，旧值 9 m）" % chase_dist)
-	_check(absf(cam.fov - 75.0) < 1.0, "④ 追尾 FOV 更宽（%.0f°，旧值 70°）" % cam.fov)
+	_check(absf(cam.fov - 82.0) < 1.0,
+		"④ 追尾 FOV 更宽（%.0f°，D-035 由 75° 加宽）" % cam.fov)
 	await _shot("flight_view_chase.png")
 
 	# ── ⑤ V 自由观察：鼠标偏移生效 + 松手自动回正 ──

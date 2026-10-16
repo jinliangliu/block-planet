@@ -170,6 +170,9 @@ func _physics_process(delta: float) -> void:
 
 ## 登机 / 下机 → 飞行相机激活、轨迹录制起止、座舱 3D 面板与世界标注增删（D-033/D-034）。
 func _on_flight_ride_changed(riding: bool) -> void:
+	# 飞行流式加载窗口：登机时切到「沿机头方向的偏置矩形 + 时间预算」，
+	# 下机切回徒步的 5×5 方形（D-035）。
+	_world.set_flight_stream(riding)
 	if riding:
 		var craft := _player.aircraft()
 		if craft != null and is_instance_valid(craft):

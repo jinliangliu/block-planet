@@ -92,7 +92,7 @@ const OCCLUSION_INTERVAL := 0.1
 func setup(craft: Aircraft, player: Node3D) -> void:
 	_craft = craft
 	_player = player
-	fov = 75.0
+	fov = FOV_FLIGHT
 	_ray_query.collide_with_areas = false
 	_ray_query.collide_with_bodies = true
 	_ray_exclude = [craft.get_rid()]
@@ -343,10 +343,19 @@ func _apply_occlusion_cache(target: Transform3D) -> void:
 	target.origin = from + dir.normalized() * _occl_dist
 
 
+## 飞行视场：俯视战术地图 70°（要的是「图上比例稳定」），其余视角 82°。
+## 75° → 82° 是 dylan「视场不够宽」的定量化落地：飞行需要的是周边感知——
+## 地平线、侧向地标、进近跑道与目标点都要进画面，而徒步时 75° 的窄视场在
+## 座舱里被仪表盘与舱框一挡就只剩一条缝。82° 仍是儿童友好的安全区间
+## （≥90° 边缘拉伸明显，长时间注视容易累）。
+const FOV_FLIGHT := 82.0
+const FOV_MAP := 70.0
+
+
 func _mode_fov() -> float:
 	if _mode == ViewMode.MAP:
-		return 70.0
-	return 75.0
+		return FOV_MAP
+	return FOV_FLIGHT
 
 
 ## 镜头抖动：发动机运转时的微量平移噪声（幅度 < 8 cm，低频），可整项关闭。

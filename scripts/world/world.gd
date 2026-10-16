@@ -7,6 +7,21 @@ const LOAD_RADIUS := 2
 # 每帧加载 2 个并按距玩家距离优先：缩短玩家到达未生成区域的窗口，
 # 配合玩家防卡死检测（嵌入实心方块自动重生脱困）形成双保险。
 const CHUNKS_PER_FRAME := 2
+# ── 飞行流式加载（D-035）────────────────────────────────────────────────
+# 徒步的 5×5 区块 = 40 m 见方对步行够用；飞行满油门 50 m/s 时每 0.16 s 就要
+# 换一行区块，前方地形会永远慢半拍。故飞行时把预算集中到真正会被看到的
+# 方向：以机头为 +u 轴的偏置矩形——前方 5 块（48 m）、侧向 2 块、后方 1 块，
+# 共 35 块，比各向同性的 9×9（81 块）省一半以上，前方视距反而更远。
+const FLIGHT_FORWARD := 5
+const FLIGHT_SIDE := 2
+const FLIGHT_BACK := 1
+## 卸载滞后（区块）：超出加载范围再外扩这么多圈才卸载。飞行时中心区块随速度
+## 频繁变化，没有滞后会在边界反复装卸，每次卸载还要触发邻居补面重建。
+const UNLOAD_PAD := 1
+## 飞行时每帧的加载时间预算（ms）：按耗时限量而非按块数——低端机单块更慢时
+## 不会因「固定 N 块」吃掉整帧；每帧至少加载 1 块，保证队列一定在推进。
+const FLIGHT_BUDGET_MS := 8.0
+const FLIGHT_CHUNKS_PER_FRAME := 6
 const SEA_LEVEL := 22
 
 ## 水体分类：按连通水面格数区分「大河/湖泊」与「小池塘」。
@@ -34,6 +49,11 @@ var _noise := FastNoiseLite.new()
 # 极地冰山噪声：低频成团，决定哪里隆起露出海面的冰山（D-028）。
 var _iceberg_noise := FastNoiseLite.new()
 var _player: Player
+## 飞行流式开关（main 在登机 / 下机时切换）：开启后加载窗口改为沿机头方向
+## 的偏置矩形，并把每帧限量改为时间预算。
+var _flight_stream := false
+## 飞行时的机头水平方向（单位向量）：偏置窗口与加载优先级都以它为 +u 轴。
+var _stream_dir := Vector3(0.0, 0.0, -1.0)
 var _neighbor_lookup: Callable
 # 储物箱内容物：按方块坐标记录独立 36 格背包，破坏时散落至地面。
 var box_contents: Dictionary[Vector3i, Inventory] = {}
@@ -287,7 +307,59 @@ func spill_box(cell: Vector3i, player: Player) -> void:
 func _rebuild_chunk(coord: Vector3i) -> void:
 	var chunk: Chunk = _chunks.get(coord)
 	if chunk:
+		if chunk.pristine:
+			chunk.compute_col_top()
+		_prepare_columns(coord, chunk)
 		chunk.rebuild(_atlas_material, _emissive_material, _neighbor_lookup)
+
+
+## 刷新区块的列顶扩展表（rebuild 的快路径输入）：(SIZE.x+2)×(SIZE.z+2)，
+## 中心是本区块，外圈是四邻区块贴边的那一列；未知（邻块未加载、被改动过）
+## 记 255，对应列退回全量扫描。本区块非 pristine 时两张表清空，直接走全量。
+## 区块刚生成时尚未进 _chunks，故由参数带入。
+func _prepare_columns(coord: Vector3i, chunk: Chunk) -> void:
+	if not chunk.pristine or chunk.col_top.is_empty():
+		chunk.tops_ext = PackedByteArray()
+		chunk.grounds_ext = PackedByteArray()
+		return
+	var n := CHUNK_SIZE.x
+	var w := n + 2
+	var tops := PackedByteArray()
+	var grounds := PackedByteArray()
+	tops.resize(w * w)
+	grounds.resize(w * w)
+	tops.fill(255)
+	grounds.fill(255)
+	for z in n:
+		for x in n:
+			var i := x + z * n
+			tops[(z + 1) * w + (x + 1)] = chunk.col_top[i]
+			grounds[(z + 1) * w + (x + 1)] = chunk.col_ground[i]
+	for z in n:
+		var nb: Chunk = _chunks.get(coord + Vector3i(-1, 0, 0))
+		if _has_columns(nb):
+			tops[(z + 1) * w] = nb.col_top[(n - 1) + z * n]
+			grounds[(z + 1) * w] = nb.col_ground[(n - 1) + z * n]
+		nb = _chunks.get(coord + Vector3i(1, 0, 0))
+		if _has_columns(nb):
+			tops[(z + 1) * w + (n + 1)] = nb.col_top[z * n]
+			grounds[(z + 1) * w + (n + 1)] = nb.col_ground[z * n]
+	for x in n:
+		var nbz: Chunk = _chunks.get(coord + Vector3i(0, 0, -1))
+		if _has_columns(nbz):
+			tops[x + 1] = nbz.col_top[x + (n - 1) * n]
+			grounds[x + 1] = nbz.col_ground[x + (n - 1) * n]
+		nbz = _chunks.get(coord + Vector3i(0, 0, 1))
+		if _has_columns(nbz):
+			tops[(n + 1) * w + (x + 1)] = nbz.col_top[x]
+			grounds[(n + 1) * w + (x + 1)] = nbz.col_ground[x]
+	chunk.tops_ext = tops
+	chunk.grounds_ext = grounds
+
+
+## 该邻块的列顶表是否可用（已加载、未被改动且已计算）。
+func _has_columns(chunk: Chunk) -> bool:
+	return chunk != null and chunk.pristine and not chunk.col_top.is_empty()
 
 
 ## 树干砍完后让树冠「落下消失」：由 Player 在破坏 WOOD 后调用。
@@ -442,14 +514,22 @@ func _build_emissive_material() -> void:
 
 func _update_chunks() -> void:
 	var center := world_to_chunk(_player.global_position)
+	_update_stream_dir()
+
 	var wanted := {}
-	for x in range(-LOAD_RADIUS, LOAD_RADIUS + 1):
-		for z in range(-LOAD_RADIUS, LOAD_RADIUS + 1):
-			wanted[center + Vector3i(x, 0, z)] = true
+	var reach := LOAD_RADIUS + UNLOAD_PAD
+	if _flight_stream:
+		reach = maxi(FLIGHT_FORWARD, maxi(FLIGHT_SIDE, FLIGHT_BACK)) + UNLOAD_PAD
+	for ex in range(-reach, reach + 1):
+		for ez in range(-reach, reach + 1):
+			var off := Vector3i(ex, 0, ez)
+			if _in_stream_window(off, 0):
+				wanted[center + off] = true
 
 	var to_unload := []
 	for key in _chunks:
-		if not wanted.has(key):
+		# 用外扩 UNLOAD_PAD 圈的窗口判定卸载：刚划出加载范围的区块不立即卸载。
+		if not _in_stream_window(key - center, UNLOAD_PAD):
 			to_unload.append(key)
 	for key in to_unload:
 		_unload_chunk(key)
@@ -463,22 +543,82 @@ func _update_chunks() -> void:
 			_pending_load[key] = true
 
 	var loaded := 0
-	# 按曼哈顿距离升序加载：玩家脚下与前进方向区块优先，减少高速移动时
-	# 前方地形尚未生成的窗口期。
+	# 飞行时按「前方越远越优先」排序（马上要飞到），徒步按曼哈顿距离升序
+	# （脚下与近处优先）；两者都是为了缩短高速移动时前方地形未生成的窗口期。
 	var keys := _pending_load.keys()
 	keys.sort_custom(func(a: Vector3i, b: Vector3i) -> bool:
-		var da := absi(a.x - center.x) + absi(a.z - center.z)
-		var db := absi(b.x - center.x) + absi(b.z - center.z)
-		return da < db
+		return _load_priority(a, center) < _load_priority(b, center)
 	)
+	var max_chunks := FLIGHT_CHUNKS_PER_FRAME if _flight_stream else CHUNKS_PER_FRAME
+	var budget_us := int(FLIGHT_BUDGET_MS * 1000.0)
+	var t0 := Time.get_ticks_usec()
 	for key in keys:
-		if loaded >= CHUNKS_PER_FRAME:
+		if loaded >= max_chunks:
 			break
 		if _chunks.has(key):
 			continue
 		_pending_load.erase(key)
 		_load_chunk(key)
 		loaded += 1
+		# 时间预算只作用于飞行：徒步维持「每帧 2 块」的既有节奏。
+		if _flight_stream and Time.get_ticks_usec() - t0 >= budget_us:
+			break
+
+
+## 飞行流式开关：main 在登机 / 下机时切换。关闭后下一帧即回落到徒步窗口，
+## 多出的待加载区块随之从队列清除、超出的已载区块逐步卸载。
+func set_flight_stream(enabled: bool) -> void:
+	if _flight_stream == enabled:
+		return
+	_flight_stream = enabled
+	if enabled:
+		_update_stream_dir()
+
+
+## 取当前机头的水平方向作为流式窗口的 +u 轴（未骑乘时保持上一次方向，
+## 窗口退化为各向同性也不影响正确性——只是失去前方偏置）。
+func _update_stream_dir() -> void:
+	if not _flight_stream or _player == null:
+		return
+	var craft := _player.aircraft()
+	if craft == null or not is_instance_valid(craft):
+		return
+	var fwd := -craft.global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() > 1e-4:
+		_stream_dir = fwd.normalized()
+
+
+## 该偏移（相对中心区块）是否落在保留窗口内：徒步是 LOAD_RADIUS 方形（外扩
+## pad 圈）；飞行是以机头为 +u 轴的偏置矩形——前方 FLIGHT_FORWARD、侧向
+## FLIGHT_SIDE、后方 FLIGHT_BACK，再整体外扩 pad 圈。
+func _in_stream_window(offset: Vector3i, pad: int) -> bool:
+	if not _flight_stream:
+		return absi(offset.x) <= LOAD_RADIUS + pad and absi(offset.z) <= LOAD_RADIUS + pad
+	var u := float(offset.x) * _stream_dir.x + float(offset.z) * _stream_dir.z
+	var v := float(offset.x) * -_stream_dir.z + float(offset.z) * _stream_dir.x
+	var p := float(pad)
+	return (
+		u >= -float(FLIGHT_BACK) - p
+		and u <= float(FLIGHT_FORWARD) + p
+		and absf(v) <= float(FLIGHT_SIDE) + p
+	)
+
+
+## 加载优先级（越小越先）：
+## - 徒步：曼哈顿距离（脚下与近处优先）。
+## - 飞行：机体系曼哈顿距离 − 0.6·前向量，即「近处优先，同距离时前方优先」。
+##   不能反过来只按「前方越远越先」：登机瞬间队列里有整窗三十余块，而每帧时间
+##   预算只够一两块，纯前方优先会把玩家脚下的区块排到队尾——实测飞机因此悬在
+##   半空（脚下区块迟迟未加载、跑道尚未回填）。近处优先保证机体周围先落地，
+##   前方偏置只在同一距离档内起作用。
+func _load_priority(coord: Vector3i, center: Vector3i) -> float:
+	if not _flight_stream:
+		return float(absi(coord.x - center.x) + absi(coord.z - center.z))
+	var off := coord - center
+	var u := float(off.x) * _stream_dir.x + float(off.z) * _stream_dir.z
+	var v := float(off.x) * -_stream_dir.z + float(off.z) * _stream_dir.x
+	return absf(u) + absf(v) - 0.6 * u
 
 	var rebuilt := 0
 	while rebuilt < 2 and not _pending_rebuilds.is_empty():
@@ -497,8 +637,12 @@ func _load_chunk(coord: Vector3i) -> void:
 
 	if _modified_data.has(coord):
 		chunk.data = _modified_data[coord]
+		# 玩家改动过的区块：列结构不再由高度图决定，走全量遍历。
+		chunk.pristine = false
 	else:
 		_generate_chunk(chunk, coord)
+		chunk.compute_col_top()
+	_prepare_columns(coord, chunk)
 	chunk.rebuild(_atlas_material, _emissive_material, _neighbor_lookup)
 	_chunks[coord] = chunk
 
@@ -516,15 +660,55 @@ func _unload_chunk(coord: Vector3i) -> void:
 		_pending_rebuilds.append(coord + offset)
 
 
+## 区块数据生成（判据与 _block_at 同源，逐格结果一致）。
+## 区域参数与逐列量提到循环外：原先每格都要做 3~5 次 _profile 字典查询、
+## 极地列还要每格再算一次冰山噪声，16384 格累计占数据生成耗时的一半以上。
 func _generate_chunk(chunk: Chunk, coord: Vector3i) -> void:
 	var origin := chunk_to_world(coord)
-	for x in CHUNK_SIZE.x:
-		for z in CHUNK_SIZE.z:
+	var water_policy := String(_profile.get("water", "normal"))
+	var low_line := int(_profile.get("low_line", SEA_LEVEL))
+	var surface_high := int(_profile.get("surface", BlockTypes.Block.GRASS))
+	var surface_low := int(_profile.get("surface_low", BlockTypes.Block.SAND))
+	var sub_high := int(_profile.get("sub", BlockTypes.Block.DIRT))
+	var sub_low := int(_profile.get("sub_low", BlockTypes.Block.SAND))
+	var is_dry := water_policy == "dry"
+	var is_iceberg := water_policy == "iceberg"
+	var sx := CHUNK_SIZE.x
+	var sz := CHUNK_SIZE.z
+	var sy := CHUNK_SIZE.y
+	var plane := sx * sz
+	var data := chunk.data
+	for x in sx:
+		for z in sz:
 			var wx := origin.x + x
 			var wz := origin.z + z
 			var height := _terrain_height(wx, wz)
-			for y in CHUNK_SIZE.y:
-				chunk.set_block_local(Vector3i(x, y, z), _block_at(wx, y, wz, height))
+			var high := height > low_line
+			var surface_id := surface_high if high else surface_low
+			var sub_id := sub_high if high else sub_low
+			var ice_top := _iceberg_top(wx, wz) if is_iceberg else 0
+			var col := x + z * sx
+			for y in sy:
+				var id: int
+				if y > height:
+					if is_dry:
+						id = BlockTypes.Block.AIR
+					elif is_iceberg and height < SEA_LEVEL:
+						if ice_top > 0 and y <= ice_top:
+							id = BlockTypes.Block.SNOW if y == ice_top else BlockTypes.Block.ICE
+						elif y == SEA_LEVEL:
+							id = BlockTypes.Block.ICE
+						else:
+							id = BlockTypes.Block.WATER if y < SEA_LEVEL else BlockTypes.Block.AIR
+					else:
+						id = BlockTypes.Block.WATER if y <= SEA_LEVEL else BlockTypes.Block.AIR
+				elif y == height:
+					id = surface_id
+				elif y >= height - 3:
+					id = sub_id
+				else:
+					id = _ore_or_stone(wx, y, wz)
+				data[col + y * plane] = id
 
 	_generate_trees(chunk, origin)
 	_generate_water_life(chunk, origin)
