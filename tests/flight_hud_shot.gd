@@ -102,8 +102,8 @@ func _run() -> void:
 		" panel=", _hud._flight_panel.visible)
 	_check(_hud._flight_panel.visible, "登机后飞行仪表盘显示")
 	_check(not _hud._hotbar_bar.visible, "登机后底部物品栏隐藏（截图取证）")
-	_check(not _hud._name_label.visible, "登机后左上角姓名隐藏（截图取证）")
-	_check(not _hud._hearts.visible, "登机后左上角生命爱心隐藏（截图取证）")
+	_check(not _hud._stats_box.visible,
+		"登机后左上角状态块隐藏（姓名 + 生命 + 饥饿，截图取证）")
 
 	# ── ① 地面满油门滑跑 ────────────────────────────────
 	# 注意：pitch 锁 0 时飞机永不抬头离地，满油门约 4~5 s 就会冲出 64 格跑道尽头
@@ -214,8 +214,7 @@ func _run() -> void:
 		await get_tree().physics_frame
 	_check(not _hud._flight_panel.visible, "下机后飞行仪表盘隐藏")
 	_check(_hud._hotbar_bar.visible, "下机后底部物品栏恢复显示")
-	_check(_hud._name_label.visible, "下机后左上角姓名恢复显示")
-	_check(_hud._hearts.visible, "下机后左上角生命爱心恢复显示")
+	_check(_hud._stats_box.visible, "下机后左上角状态块恢复显示")
 
 	SaveGuard.restore()
 	print("FLIGHT_HUD_DONE fails=%d" % _fails)

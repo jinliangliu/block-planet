@@ -437,10 +437,10 @@ func _run() -> void:
 	await _frames(30)
 	_check(not hud._hotbar_bar.visible,
 		"登机后底部物品栏隐藏（飞行中不放置方块，底部让给飞行 UI）")
-	_check(not hud._name_label.visible,
-		"登机后左上角姓名隐藏（飞行中不显示身份信息）")
-	_check(not hud._hearts.visible,
-		"登机后左上角生命爱心隐藏（飞行中不显示生命状态）")
+	# 状态块按容器整块显隐：三个子节点 visible 标记仍是 true，只有容器的
+	# visible=false 才代表真正不显示，故断言落在 _stats_box 上。
+	_check(not hud._stats_box.visible,
+		"登机后左上角状态块隐藏（姓名 + 生命 + 饥饿，飞行中不显示生存读数）")
 	var mm_riding: float = panel._mm.elapsed()
 	_check(mm_riding > mm_before + 0.2,
 		"骑乘时真实遥测喂进任务管理器（elapsed %.2f → %.2f s）"
@@ -449,8 +449,8 @@ func _run() -> void:
 	player.exit_aircraft()
 	await _frames(10)
 	_check(hud._hotbar_bar.visible, "下机后底部物品栏恢复显示")
-	_check(hud._name_label.visible, "下机后左上角姓名恢复显示")
-	_check(hud._hearts.visible, "下机后左上角生命爱心恢复显示")
+	_check(hud._stats_box.visible, "下机后左上角状态块恢复显示")
+	_check(hud._hunger_label.visible, "下机后饥饿读数仍在状态块内可见")
 	_check(absf(panel._mm.elapsed() - mm_riding) < 0.001,
 		"下机后遥测停喂，elapsed 定格（%.2f s）" % panel._mm.elapsed())
 	_check(not panel.is_running(),

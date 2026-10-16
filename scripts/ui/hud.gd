@@ -25,6 +25,9 @@ var _recipe_group: ButtonGroup
 var _slot_buttons: Array[Button] = []
 ## 快捷栏整条容器：创造/生存模式格数不同，刷新时按可见格数重新居中。
 var _hotbar_bar: Control
+## 左上角状态块容器（姓名 + 爱心 + 饥饿）：驾驶飞行器时整块隐藏，
+## 按容器而非逐个节点控制——三个读数都随容器走，日后新增状态行自动跟随。
+var _stats_box: Control
 var _hunger_label: Label
 var _name_label: Label
 var _hearts: Control
@@ -892,16 +895,16 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 	#（含飞行任务奖励入包）都不会把驾驶中的它放出来。
 	if _hotbar_bar != null:
 		_hotbar_bar.visible = not _riding
-	# 左上角身份与生命（姓名 + 爱心）：驾驶飞行器时一并隐藏——飞行中玩家
-	# 就是飞机本身（3D 角色模型在 ride_aircraft 里已隐藏），左上角让位给飞行
-	# 信息；坠机弹射与死亡退机都走 exit_aircraft，下机经同一信号恢复，状态
-	# 不会漏恢复。饥饿不属于生命状态且飞行中仍在消耗，保留可见。
-	# _refresh_stats 只重画爱心/改饥饿文本、不动这两个节点的显隐：掉血、
-	# 饥饿变化都不会把驾驶中的它们放出来。
-	if _name_label != null:
-		_name_label.visible = not _riding
-	if _hearts != null:
-		_hearts.visible = not _riding
+	# 左上角状态块（姓名 + 爱心 + 饥饿）：驾驶飞行器时整块隐藏——飞行中玩家
+	# 就是飞机本身（3D 角色模型在 ride_aircraft 里已隐藏），身份与生存读数
+	# 都让位给飞行信息；坠机弹射与死亡退机都走 exit_aircraft，下机经同一信号
+	# 恢复，状态不会漏恢复。饥饿读数虽然藏了，但「快见底」提醒走顶部 Toast，
+	# 不会因隐藏读数而丢失警告。
+	# 按容器而非逐节点控制：三个读数随容器一起走，日后新增状态行自动跟随，
+	# 不会出现「藏了姓名忘了饥饿」。_refresh_stats 只重画爱心/改饥饿文本、
+	# 不动本容器显隐：掉血、饥饿变化都不会把驾驶中的它放出来。
+	if _stats_box != null:
+		_stats_box.visible = not _riding
 	# P1-3：触屏设备上，驾驶时隐藏步行触控、显示飞行触控层。
 	if DisplayServer.is_touchscreen_available() and _flight_touch != null:
 		if _riding:
@@ -970,6 +973,7 @@ func _build_stats(root: Control) -> void:
 	box.position = Vector2(16, 16)
 	box.add_theme_constant_override("separation", 6)
 	root.add_child(box)
+	_stats_box = box
 
 	_name_label = Label.new()
 	_name_label.text = "小方块"
