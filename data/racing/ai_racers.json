@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "_note": "机器人难度参数与命名。speed_factor 缩放极速；steering_accuracy 越高越贴线；reaction_time 是犯错后的恢复秒数；mistake_chance 是每秒犯错概率。",
+  "difficulties": [
+    {
+      "id": "easy",
+      "name_zh": "简单",
+      "name_en": "Easy",
+      "speed_factor": 0.7,
+      "steering_accuracy": 0.6,
+      "reaction_time": 0.5,
+      "mistake_chance": 0.15
+    },
+    {
+      "id": "normal",
+      "name_zh": "普通",
+      "name_en": "Normal",
+      "speed_factor": 0.85,
+      "steering_accuracy": 0.8,
+      "reaction_time": 0.3,
+      "mistake_chance": 0.08
+    },
+    {
+      "id": "hard",
+      "name_zh": "困难",
+      "name_en": "Hard",
+      "speed_factor": 0.95,
+      "steering_accuracy": 0.9,
+      "reaction_time": 0.15,
+      "mistake_chance": 0.03
+    },
+    {
+      "id": "expert",
+      "name_zh": "专家",
+      "name_en": "Expert",
+      "speed_factor": 1.0,
+      "steering_accuracy": 1.0,
+      "reaction_time": 0.05,
+      "mistake_chance": 0.0
+    }
+  ],
+  "ai_names": [
+    "闪电兔", "岩石龟", "风之子", "小星尘", "铁皮狗", "彩虹狐"
+  ],
+  "ai_vehicles": [
+    "tricycle",
+    "buggy",
+    "racer"
+  ]
+}

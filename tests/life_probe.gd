@@ -1042,7 +1042,13 @@ func _run() -> void:
 	Progress.states.clear()
 	Progress._quiz_correct_since_reward = 0
 
-	_check(QuestData.quests().size() == 8, "新手任务链共 8 环")
+	# 只数「新手链」本身（id 前缀 newbie_），不数总任务数——钓鱼/竞速等分支链
+	# 会各自往 quests() 里追加，按总数断言会随新玩法上线而误报。
+	var newbie_chain := 0
+	for q: Dictionary in QuestData.quests():
+		if String(q["id"]).begins_with("newbie_"):
+			newbie_chain += 1
+	_check(newbie_chain == 8, "新手任务链共 8 环（现 %d 环）" % newbie_chain)
 	_check(QuestData.achievements().size() == 28, "成就共 28 枚（现 %d 枚）" % QuestData.achievements().size())
 	var first_q := QuestData.quests()[0]
 	var second_q := QuestData.quests()[1]

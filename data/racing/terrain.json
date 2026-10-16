@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "_note": "地形材质表。grip 决定侧向抓地（越低越容易打滑甩尾）；speed_factor 缩放极速；brake_factor 缩放刹车力；两者都在 CarPhysics.step 内生效。",
+  "terrains": [
+    {
+      "id": "asphalt",
+      "name_zh": "铺装路面",
+      "name_en": "Asphalt",
+      "grip": 1.0,
+      "rolling_resistance": 0.02,
+      "speed_factor": 1.1,
+      "brake_factor": 1.0,
+      "dust": false,
+      "wet": false,
+      "color": "#4A4A4A"
+    },
+    {
+      "id": "gravel",
+      "name_zh": "沙石",
+      "name_en": "Gravel",
+      "grip": 0.7,
+      "rolling_resistance": 0.08,
+      "speed_factor": 0.85,
+      "brake_factor": 0.7,
+      "dust": true,
+      "wet": false,
+      "color": "#B89B72"
+    },
+    {
+      "id": "wetland",
+      "name_zh": "湿地",
+      "name_en": "Wetland",
+      "grip": 0.4,
+      "rolling_resistance": 0.12,
+      "speed_factor": 0.75,
+      "brake_factor": 0.5,
+      "dust": false,
+      "wet": true,
+      "color": "#3B5E4A"
+    },
+    {
+      "id": "hill",
+      "name_zh": "山坡",
+      "name_en": "Hill",
+      "grip": 0.8,
+      "rolling_resistance": 0.1,
+      "speed_factor": 0.7,
+      "brake_factor": 0.8,
+      "dust": false,
+      "wet": false,
+      "slope": true,
+      "color": "#6B8E4E"
+    },
+    {
+      "id": "forest",
+      "name_zh": "森林",
+      "name_en": "Forest",
+      "grip": 0.75,
+      "rolling_resistance": 0.1,
+      "speed_factor": 0.9,
+      "brake_factor": 0.8,
+      "dust": false,
+      "wet": false,
+      "obstacles": true,
+      "color": "#2E5B2E"
+    },
+    {
+      "id": "grass",
+      "name_zh": "草地",
+      "name_en": "Grass",
+      "grip": 0.8,
+      "rolling_resistance": 0.06,
+      "speed_factor": 0.95,
+      "brake_factor": 0.9,
+      "dust": false,
+      "wet": false,
+      "color": "#5C8A3C"
+    }
+  ]
+}

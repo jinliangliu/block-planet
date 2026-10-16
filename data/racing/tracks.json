@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "_note": "赛道定义。除文档字段外，本工程额外用 shape 描述闭合环线的形状（r(θ)=R·(1+amp·sin(lobes·θ+phase)+amp2·sin(lobes2·θ+phase2))），seed 供形状微扰与 AI 犯错的确定性随机源；half_width_m 是路面半宽。unlock 取值：default（恒开）/ wins:N（赢 N 场）/ record:N（破 N 次记录）。",
+  "tracks": [
+    {
+      "id": "desert_ring",
+      "name_zh": "沙丘环线",
+      "name_en": "Desert Ring",
+      "theme": "desert",
+      "difficulty": 2,
+      "laps": 3,
+      "length_m": 1200,
+      "half_width_m": 6.0,
+      "seed": 1101,
+      "shape": { "lobes": 3, "amp": 0.10, "phase": 0.4, "lobes2": 5, "amp2": 0.04, "phase2": 1.2 },
+      "terrain_segments": [
+        { "terrain_id": "gravel", "start": 0.0, "end": 0.6 },
+        { "terrain_id": "grass", "start": 0.6, "end": 0.8 },
+        { "terrain_id": "gravel", "start": 0.8, "end": 1.0 }
+      ],
+      "ai_count": 3,
+      "ai_difficulty": "easy",
+      "unlock": "default"
+    },
+    {
+      "id": "forest_trail",
+      "name_zh": "林间小径",
+      "name_en": "Forest Trail",
+      "theme": "forest",
+      "difficulty": 3,
+      "laps": 3,
+      "length_m": 1500,
+      "half_width_m": 5.5,
+      "seed": 2202,
+      "shape": { "lobes": 4, "amp": 0.13, "phase": 0.9, "lobes2": 7, "amp2": 0.05, "phase2": 2.1 },
+      "terrain_segments": [
+        { "terrain_id": "forest", "start": 0.0, "end": 0.5 },
+        { "terrain_id": "grass", "start": 0.5, "end": 0.7 },
+        { "terrain_id": "gravel", "start": 0.7, "end": 1.0 }
+      ],
+      "ai_count": 4,
+      "ai_difficulty": "normal",
+      "unlock": "default"
+    },
+    {
+      "id": "wetland_cross",
+      "name_zh": "沼泽穿越",
+      "name_en": "Wetland Cross",
+      "theme": "wetland",
+      "difficulty": 4,
+      "laps": 2,
+      "length_m": 1800,
+      "half_width_m": 5.0,
+      "seed": 3303,
+      "shape": { "lobes": 5, "amp": 0.15, "phase": 0.2, "lobes2": 3, "amp2": 0.06, "phase2": 0.7 },
+      "terrain_segments": [
+        { "terrain_id": "wetland", "start": 0.0, "end": 0.4 },
+        { "terrain_id": "grass", "start": 0.4, "end": 0.6 },
+        { "terrain_id": "wetland", "start": 0.6, "end": 0.9 },
+        { "terrain_id": "gravel", "start": 0.9, "end": 1.0 }
+      ],
+      "ai_count": 4,
+      "ai_difficulty": "hard",
+      "unlock": "wins:1"
+    },
+    {
+      "id": "mountain_road",
+      "name_zh": "盘山公路",
+      "name_en": "Mountain Road",
+      "theme": "mountain",
+      "difficulty": 5,
+      "laps": 2,
+      "length_m": 2200,
+      "half_width_m": 4.5,
+      "seed": 4404,
+      "shape": { "lobes": 6, "amp": 0.16, "phase": 1.5, "lobes2": 9, "amp2": 0.05, "phase2": 0.3 },
+      "terrain_segments": [
+        { "terrain_id": "asphalt", "start": 0.0, "end": 0.3 },
+        { "terrain_id": "hill", "start": 0.3, "end": 0.7 },
+        { "terrain_id": "asphalt", "start": 0.7, "end": 1.0 }
+      ],
+      "ai_count": 5,
+      "ai_difficulty": "expert",
+      "unlock": "wins:3"
+    },
+    {
+      "id": "city_circuit",
+      "name_zh": "城市街道",
+      "name_en": "City Circuit",
+      "theme": "city",
+      "difficulty": 2,
+      "laps": 4,
+      "length_m": 1000,
+      "half_width_m": 6.5,
+      "seed": 5505,
+      "shape": { "lobes": 2, "amp": 0.08, "phase": 0.0, "lobes2": 4, "amp2": 0.02, "phase2": 0.5 },
+      "terrain_segments": [
+        { "terrain_id": "asphalt", "start": 0.0, "end": 1.0 }
+      ],
+      "ai_count": 3,
+      "ai_difficulty": "easy",
+      "unlock": "default"
+    },
+    {
+      "id": "all_terrain",
+      "name_zh": "全地形挑战",
+      "name_en": "All-Terrain Challenge",
+      "theme": "mixed",
+      "difficulty": 4,
+      "laps": 3,
+      "length_m": 2500,
+      "half_width_m": 5.5,
+      "seed": 6606,
+      "shape": { "lobes": 5, "amp": 0.14, "phase": 2.3, "lobes2": 8, "amp2": 0.06, "phase2": 1.1 },
+      "terrain_segments": [
+        { "terrain_id": "asphalt", "start": 0.0, "end": 0.2 },
+        { "terrain_id": "gravel", "start": 0.2, "end": 0.4 },
+        { "terrain_id": "forest", "start": 0.4, "end": 0.6 },
+        { "terrain_id": "wetland", "start": 0.6, "end": 0.75 },
+        { "terrain_id": "hill", "start": 0.75, "end": 0.9 },
+        { "terrain_id": "asphalt", "start": 0.9, "end": 1.0 }
+      ],
+      "ai_count": 5,
+      "ai_difficulty": "hard",
+      "unlock": "record:1"
+    }
+  ]
+}

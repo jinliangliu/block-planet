@@ -78,6 +78,8 @@ var load_problems: PackedStringArray = PackedStringArray()
 var state: int = State.IDLE
 ## 持久化日志：records / gear / lessons_seen / replay / stats。
 var journal: Dictionary = {}
+## 读档是否成功：失败时禁止回写，避免用默认模板覆盖真实存档（见 _load_journal）。
+var journal_ok := false
 
 var _spot_id := ""
 var _gear_set: Dictionary = {}
@@ -618,27 +620,45 @@ func session_info() -> Dictionary:
 func _load_journal() -> void:
 	journal = {"version": 1, "records": {}, "gear": [], "lessons_seen": [], "replay": [],
 		"stats": {}}
+	# 读档成功与否要记住：读失败（文件被写坏 / 半截 JSON）时绝不能再把默认状态
+	# 写回盘——否则一次瞬时读失败就会永久抹掉孩子的钓鱼图鉴（实测踩过）。
+	journal_ok = false
 	if not FileAccess.file_exists(JOURNAL_PATH):
 		_grant_default_gear()
+		journal_ok = true
 		return
 	var file := FileAccess.open(JOURNAL_PATH, FileAccess.READ)
 	if file == null:
 		return
 	var parsed: Variant = JSON.parse_string(file.get_as_text())
 	if typeof(parsed) != TYPE_DICTIONARY:
+		push_error("FishingSystem: %s 解析失败，本次不回写以保护原档" % JOURNAL_PATH)
 		return
 	var data: Dictionary = parsed
 	for key: String in ["records", "gear", "lessons_seen", "replay", "stats"]:
 		if data.has(key):
 			journal[key] = data[key]
 	_grant_default_gear()
+	journal_ok = true
 
 
+## 落盘。原子写（先写 .tmp 再改名覆盖）+ 读档失败时拒写：
+##   · 原子写：FileAccess WRITE 会先把原文件截成 0 字节，若此刻进程被信号打断
+##     （本工程 headless 退出期偶发段错误），存档就被清空了——改成先写临时文件、
+##     再 rename 覆盖，任何时刻盘上都有一份完整存档。
+##   · 拒写：_load_journal 失败时 journal 只是默认模板，回写等于抹档，直接跳过。
 func _save_journal() -> void:
-	var file := FileAccess.open(JOURNAL_PATH, FileAccess.WRITE)
+	if not journal_ok:
+		return
+	var text := JSON.stringify(journal)
+	var tmp := JOURNAL_PATH + ".tmp"
+	var file := FileAccess.open(tmp, FileAccess.WRITE)
 	if file == null:
 		return
-	file.store_string(JSON.stringify(journal))
+	file.store_string(text)
+	file.close()
+	DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp),
+		ProjectSettings.globalize_path(JOURNAL_PATH))
 
 
 func _bump_stat(key: String) -> void:

@@ -132,6 +132,13 @@ func _ready() -> void:
 	# 无头环境（探针 / CI）不自动弹出：模态界面会冻结玩家，阻塞自动化流程。
 	if GameState.needs_region_pick and DisplayServer.get_name() != "headless":
 		_hud.open_map_selector()
+	# 从竞速场景返回：RaceSystem 里的一次性标记要求「回来就直接再开赛道选择器」，
+	# 省得「比完 → 想换条赛道」还要先绕回地图页。标记无论是否开窗都要清掉，
+	# 无头环境下只清标记不开窗（同 needs_region_pick 的守卫）。
+	if RaceSystem.open_selector_on_return:
+		RaceSystem.open_selector_on_return = false
+		if DisplayServer.get_name() != "headless":
+			_hud.open_track_selector()
 
 
 ## 飞行任务遥测：玩家在机上时，每物理帧把真实飞行状态喂给 HUD 任务面板

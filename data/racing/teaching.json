@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "_note": "竞速教学：首次进入赛道、首次过检查点、首次完赛时各弹一次，进度落盘 user://race_teaching.json。",
+  "teaching": [
+    {
+      "id": "race_start",
+      "trigger": "first_race_start",
+      "title": "倒计时起跑",
+      "body": "看到 3-2-1-GO 就可以踩油门了。抢跑不会罚，但车不动也别急——倒计时结束才真正开始计时。"
+    },
+    {
+      "id": "race_checkpoint",
+      "trigger": "first_checkpoint",
+      "title": "按顺序过检查点",
+      "body": "沿着路面上的彩色拱门跑，必须按顺序经过每个检查点，这一圈才算数。抄近道会漏掉检查点，成绩就不算啦。"
+    },
+    {
+      "id": "race_lap",
+      "trigger": "first_lap",
+      "title": "圈数与最快圈",
+      "body": "跑完一圈，屏幕右上角会记下这一圈用的时间。所有圈里最快的那次叫「最快圈速」，是赛道记录的依据。"
+    },
+    {
+      "id": "race_terrain",
+      "trigger": "first_race_start",
+      "title": "不同路面不一样",
+      "body": "深色的柏油路最抓地、也最快；黄褐色的沙石会打滑、扬尘；深绿色的湿地最滑，刹车距离会变长，要早点减速。"
+    },
+    {
+      "id": "race_hill",
+      "trigger": "first_race_start",
+      "title": "上坡更费油",
+      "body": "爬坡时发动机要出更多力，油表掉得更快。小技巧：下坡时松开油门滑行，能省下不少油。"
+    }
+  ]
+}

@@ -184,6 +184,41 @@ static func _build() -> void:
 			"goal": {"type": "count", "key": "fish_released", "count": 3},
 			"reward": {"item": 204, "count": 3},
 		},
+		# ── 竞速（feature_car_racing）──────────────────────────────────────
+		# 与钓鱼链并列，同接在新手链之后：一条线出海钓鱼，一条线上赛道飙车。
+		# 计数键由 Progress 监听 Events.race_finished / RaceSystem.new_record 累加，
+		# 键名带维度后缀（race_win_<track> / race_clean_<track> / race_win_vehicle_<id>），
+		# 加新赛道不用改这里的目标逻辑。
+		{
+			"id": "q_race_first", "category": Category.QUEST, "prerequisite": "newbie_smelt",
+			"title": "首战告捷", "desc": "从地图页进入赛道选择器，完成你的第一场竞速比赛。",
+			"goal": {"type": "count", "key": "race_finished_any", "count": 1},
+			"reward": {"item": 204, "count": 2},
+		},
+		{
+			"id": "q_race_win_desert", "category": Category.QUEST, "prerequisite": "q_race_first",
+			"title": "沙漠之王", "desc": "在「沙丘环线」赢得第一名。",
+			"goal": {"type": "count", "key": "race_win_desert_ring", "count": 1},
+			"reward": {"item": 204, "count": 3},
+		},
+		{
+			"id": "q_race_record", "category": Category.QUEST, "prerequisite": "q_race_first",
+			"title": "更快一圈", "desc": "打破一条赛道的最快圈速记录。",
+			"goal": {"type": "count", "key": "race_new_record", "count": 1},
+			"reward": {"item": 204, "count": 4},
+		},
+		{
+			"id": "q_race_wetland_clean", "category": Category.QUEST, "prerequisite": "q_race_first",
+			"title": "湿地不拉手刹", "desc": "在「沼泽穿越」赛道比赛中，全程不使用手刹并完成比赛。",
+			"goal": {"type": "count", "key": "race_clean_wetland_cross", "count": 1},
+			"reward": {"item": 204, "count": 5},
+		},
+		{
+			"id": "q_race_tricycle_win", "category": Category.QUEST, "prerequisite": "q_race_first",
+			"title": "三轮车冠军", "desc": "骑着自己的三轮车，赢得一场竞速比赛。",
+			"goal": {"type": "count", "key": "race_win_vehicle_tricycle", "count": 1},
+			"reward": {"item": 204, "count": 5},
+		},
 	]
 
 	_achievements = [

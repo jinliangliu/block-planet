@@ -13,6 +13,10 @@ signal closed
 signal bestiary_requested(region_id: int)
 ## 在介绍页请求去钓鱼（四大洋）：HUD 关掉本窗口后打开钓具界面。
 signal fishing_requested(region_id: int)
+## 在「地图页」请求去赛车：HUD 关掉本窗口后打开赛道选择器。
+## 与竞速无关区域——赛道自带主题，不绑定地理区域，故在地球页全局可见，
+## 不像钓鱼那样只在有钓点的介绍页出现。
+signal race_requested
 
 enum Page {
 	GLOBE,
@@ -261,7 +265,7 @@ func _build_backdrop() -> void:
 	add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；插有飞行旗帜的区域带跑道（红）/ 有简易跑道（琥珀）；带 🎣 的海域可以钓鱼"
+	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；插有飞行旗帜的区域带跑道（红）/ 有简易跑道（琥珀）；带 🎣 的海域可以钓鱼，左下角 🏁 进入赛道竞速"
 	subtitle.add_theme_font_size_override("font_size", 16)
 	subtitle.add_theme_color_override("font_color", Color(0.72, 0.80, 0.92))
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -319,6 +323,7 @@ func _build_globe_page() -> void:
 
 	_build_legend(_globe_page)
 	_build_mode_row(_globe_page)
+	_build_race_entry(_globe_page)
 
 
 ## 区域图例：11 个色块 + 名称，界面左侧竖列排布。
@@ -426,6 +431,23 @@ func _refresh_mode_row() -> void:
 ## 当前选中的模式（探针据此断言三选一已写入 GameState）。
 func selected_mode() -> int:
 	return int(GameState.mode)
+
+
+## 竞速入口：贴在左栏图例下方（图例只占中段竖排，左下角这片留白正好放一枚
+## 全宽按钮）。赛道不绑地理区域，故与地球页同显、不随选中区域变化。
+func _build_race_entry(parent: Control) -> void:
+	var btn := Button.new()
+	btn.text = "🏁 赛道竞速"
+	btn.custom_minimum_size = Vector2(170, 48)
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.add_theme_font_size_override("font_size", 18)
+	btn.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	btn.offset_left = 24.0
+	btn.offset_right = 194.0
+	btn.offset_top = -76.0
+	btn.offset_bottom = -28.0
+	btn.pressed.connect(func(): race_requested.emit())
+	parent.add_child(btn)
 
 
 func _build_intro_panel() -> void:

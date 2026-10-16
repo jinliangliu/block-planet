@@ -46,6 +46,8 @@ var _settings_panel: SettingsPanel
 var _fishing_gear: FishingGearUI
 var _fishing_ui: FishingUI
 var _fishing_teaching: FishingTeachingUI
+## 赛道选择器（feature_car_racing）：模态窗口，选完切到竞速场景（独立场景）。
+var _track_selector: TrackSelectorUI
 ## 工坊台建造界面（main 持有、挂在 $UI 下）：模态互斥与冻结态广播用。
 var _build_screen: BuildScreen
 var _inventory_panel: InventoryPanel
@@ -216,6 +218,7 @@ func _build() -> void:
 	_build_mission_panel(root)
 	_build_settings_panel(root)
 	_build_fishing(root)
+	_build_racing(root)
 	_build_toast(root)
 	_build_death_overlay(root)
 	_build_flight_panel(root)
@@ -271,6 +274,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 			_fishing_gear.close()
 			_on_fishing_gear_closed()
+			get_viewport().set_input_as_handled()
+		return
+	# 赛道选择器同为模态窗口：ESC 关闭，其余热键让位。
+	if _track_selector != null and _track_selector.is_open():
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			close_track_selector()
 			get_viewport().set_input_as_handled()
 		return
 	# 说明书同为模态窗口：ESC / F1 关闭，其余热键让位。
@@ -2398,6 +2407,7 @@ func _build_map_selector(root: Control) -> void:
 	_map_selector.closed.connect(_on_region_closed)
 	_map_selector.bestiary_requested.connect(_on_map_bestiary_requested)
 	_map_selector.fishing_requested.connect(_on_fishing_requested)
+	_map_selector.race_requested.connect(_on_map_race_requested)
 	root.add_child(_map_selector)
 
 
@@ -2493,7 +2503,8 @@ func _any_overlay_open() -> bool:
 		or (_settings_panel != null and _settings_panel.is_open()) \
 		or (_fishing_gear != null and _fishing_gear.is_open()) \
 		or (_fishing_ui != null and _fishing_ui.is_open()) \
-		or (_fishing_teaching != null and _fishing_teaching.is_open())
+		or (_fishing_teaching != null and _fishing_teaching.is_open()) \
+		or (_track_selector != null and _track_selector.is_open())
 
 
 ## 是否有任一窗口/面板打开（对外的模态互斥查询）：覆盖层 + 地图选择器 + 背包。
@@ -2755,6 +2766,54 @@ func _on_fish_caught(fish_id: String, _spot_id: String, _gear: Dictionary) -> vo
 func _on_new_species(fish_id: String) -> void:
 	var entry := FishingSystem.get_fish(fish_id)
 	Events.notice.emit("新鱼种：%s 已收入生物图鉴" % String(entry.get("name_zh", fish_id)))
+
+
+# ────────────────────────── 竞速（feature_car_racing） ──────────────────────────
+## 赛道选择器挂在同一 UI 层；开始比赛时切到独立竞速场景（scenes/racing/race_scene.tscn），
+## 与钓鱼「同场景内开界面」不同：竞速要换掉整个世界（地形/相机/物理），走场景切换最干净。
+func _build_racing(root: Control) -> void:
+	_track_selector = TrackSelectorUI.new()
+	_track_selector.closed.connect(_on_track_selector_closed)
+	_track_selector.race_requested.connect(_on_race_requested)
+	root.add_child(_track_selector)
+
+
+## 从地图选择器点「🏁 赛道竞速」进来：先关地图选择器（它会解冻玩家），再冻结。
+func _on_map_race_requested() -> void:
+	if _map_selector != null and _map_selector.is_open():
+		_map_selector.close()
+	open_track_selector()
+
+
+func open_track_selector() -> void:
+	if _track_selector == null:
+		return
+	# 模态互斥：AI 竞速是独占式界面，先把地图选择器收掉，避免叠窗。
+	if _map_selector != null and _map_selector.is_open():
+		_map_selector.close()
+	_track_selector.open()
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_track_selector() -> void:
+	if _track_selector == null:
+		return
+	_track_selector.close_panel()
+
+
+func _on_track_selector_closed() -> void:
+	_set_player_frozen(false)
+	_on_manual_closed()
+
+
+## 选完赛道 → 把选择寄存在 RaceSystem → 切到竞速场景开赛。
+## 记录/结算/返回都在竞速场景里完成（RaceSystem.submit_result + change_scene_to_file）。
+func _on_race_requested(track_id: String, vehicle_id: String, ai_count: int, ai_difficulty: String) -> void:
+	RaceSystem.select_race(track_id, vehicle_id, ai_count, ai_difficulty)
+	close_track_selector()
+	get_tree().change_scene_to_file("res://scenes/racing/race_scene.tscn")
 
 
 ## main 每物理帧调用：把飞行遥测透传给任务面板（仅 RUNNING 时生效）。

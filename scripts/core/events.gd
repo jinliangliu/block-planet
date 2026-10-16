@@ -56,3 +56,13 @@ signal notice(text: String)
 ## 生物长大一个阶段后广播，进度核心据此累计「观察成长」类成就。
 signal mob_grown(mob_type: int, stage: int)
 
+## 一场竞速比赛结算后广播（track_id / vehicle_id / 名次 rank / 圈数 laps /
+## 最快圈 best_lap / 完赛时间 total_time / 是否全程未用脚刹 clean）。
+## 进度核心据此累计竞速任务与成就；记录落盘由 RaceSystem 负责。
+signal race_finished(track_id: String, vehicle_id: String, rank: int, laps: int,
+	best_lap: float, total_time: float, clean: bool)
+
+## 刷新某条赛道记录时广播（record_type 取 "best_lap" / "best_time"）。
+## 与 race_finished 分开：破纪录才发，进度核心据此累计「更快一圈」类任务。
+signal race_record_beaten(track_id: String, record_type: String)
+

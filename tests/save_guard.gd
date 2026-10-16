@@ -17,9 +17,18 @@ class_name SaveGuard
 ## 快照内容与 flight_probe / life_probe / flight_e2e_shot / flight_view_probe 的
 ## 内联实现完全一致（progress + settings 文本 + counters/states/quiz 内存态）；
 ## 那四个探针保留各自验证过的内联范式，新探针统一走本助手，别再各抄一份。
+## 竞速相关三份（records / replay / teaching）也纳入快照：竞速探针会真实完赛写盘。
+
+## 除 progress/settings 外，还需原样备份的 user:// 文本文件（竞速探针用）。
+const EXTRA_FILES := [
+	"user://race_records.json",
+	"user://race_replay.jsonl",
+	"user://race_teaching.json",
+]
 
 static var _progress := ""
 static var _settings := ""
+static var _extra: Dictionary = {}
 static var _counters: Dictionary = {}
 static var _states: Dictionary = {}
 static var _quiz := 0
@@ -29,16 +38,21 @@ static var _quiz := 0
 static func snapshot() -> void:
 	_progress = _read_user_text("user://progress.json")
 	_settings = _read_user_text("user://settings.json")
+	_extra = {}
+	for path: String in EXTRA_FILES:
+		_extra[path] = _read_user_text(path)
 	_counters = Progress.counters.duplicate()
 	_states = Progress.states.duplicate()
 	_quiz = Progress._quiz_correct_since_reward
 
 
-## quit 前调用：user:// 两个存档文件写回快照原样，Progress 内存态一并还原。
+## quit 前调用：user:// 存档文件写回快照原样，Progress 内存态一并还原。
 ## 空串 = 原文件不存在，还原即删除（避免「探针凭空建了个新存档」的污染）。
 static func restore() -> void:
 	_write_user_text("user://progress.json", _progress)
 	_write_user_text("user://settings.json", _settings)
+	for path: String in EXTRA_FILES:
+		_write_user_text(path, String(_extra.get(path, "")))
 	Progress.counters = _counters.duplicate()
 	Progress.states = _states.duplicate()
 	Progress._quiz_correct_since_reward = _quiz

@@ -43,6 +43,13 @@ const ACTIONS := {
 	"hud_detail": [KEY_H],
 	# 回放（D-033）：P 手动回放最近一段飞行；回放中 P / Esc 跳过。
 	"replay_play": [KEY_P],
+	# 赛道竞速（Racing）：油门/刹车/转向复用 move_forward / move_back /
+	# move_left / move_right（WASD，方向键另有映射），手刹复用 jump（空格）。
+	# 这里只补三个竞速专属键。
+	"race_lights": [KEY_C],
+	"race_horn": [KEY_F],
+	"race_restart": [KEY_R],
+	"race_exit": [KEY_ESCAPE],
 }
 
 const SLOT_ACTION_COUNT := 9

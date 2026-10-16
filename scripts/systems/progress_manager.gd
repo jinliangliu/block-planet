@@ -33,6 +33,9 @@ func _ready() -> void:
 	Events.aircraft_took_off.connect(_on_aircraft_took_off)
 	Events.aircraft_altitude.connect(_on_aircraft_altitude)
 	Events.aircraft_distance.connect(_on_aircraft_distance)
+	# 竞速（feature_car_racing）：完赛与破纪录各走独立信号，键名带赛道/载具维度。
+	Events.race_finished.connect(_on_race_finished)
+	Events.race_record_beaten.connect(_on_race_record_beaten)
 	_reevaluate()
 
 
@@ -196,6 +199,25 @@ func _on_aircraft_altitude(altitude: float) -> void:
 ## 飞行器累计飞行距离每满 100 m 一段（「空中漫游」累计 1000 m）。
 func _on_aircraft_distance(meters: float) -> void:
 	notify("flew_distance", int(meters))
+
+
+## 竞速完赛：累计总场次，并按名次/赛道/载具/是否干净完赛派发维度计数。
+## 键名规则与任务数据一一对应：race_finished_any / race_win_<track> /
+## race_win_vehicle_<id> / race_clean_<track>。
+func _on_race_finished(track_id: String, vehicle_id: String, rank: int, _laps: int,
+		_best_lap: float, _total_time: float, clean: bool) -> void:
+	notify("race_finished_any")
+	if rank == 1:
+		notify("race_win_any")
+		notify("race_win_%s" % track_id)
+		notify("race_win_vehicle_%s" % vehicle_id)
+	if clean:
+		notify("race_clean_%s" % track_id)
+
+
+## 刷新赛道记录：无论是最快圈速还是最短完赛，都计入「更快一圈」。
+func _on_race_record_beaten(_track_id: String, _record_type: String) -> void:
+	notify("race_new_record")
 
 
 func _save() -> void:
