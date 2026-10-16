@@ -51,6 +51,14 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+## 外部（HUD）重新显示本图时调用：把采样计时器顶到阈值，下一帧立刻重采样。
+## 用途：驾驶飞行器时 HUD 会隐藏小地图并停掉 _process（飞行中高速掠过地形，
+## 每 0.6 s 扫一遍圆域纯属白工），下机恢复显示后必须立刻刷新，否则玩家看到
+## 的是上机之前那一帧的旧图。
+func request_resample() -> void:
+	_timer = SAMPLE_INTERVAL
+
+
 ## 采样以玩家所在格为中心、半径 MAP_RADIUS 的圆形区域顶面方块颜色。
 func _snap() -> void:
 	_samples.clear()

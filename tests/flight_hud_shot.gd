@@ -101,9 +101,16 @@ func _run() -> void:
 		" on_floor=", _craft.is_on_floor(), " pos=", _craft.global_position,
 		" panel=", _hud._flight_panel.visible)
 	_check(_hud._flight_panel.visible, "登机后飞行仪表盘显示")
-	_check(not _hud._hotbar_bar.visible, "登机后底部物品栏隐藏（截图取证）")
-	_check(not _hud._stats_box.visible,
+	# 显隐断言用 is_visible_in_tree()：子节点 visible 标记仍为 true，只有
+	# 「自身 + 祖先链」全可见才算真显示。
+	_check(not _hud._hotbar_bar.is_visible_in_tree(), "登机后底部物品栏隐藏（截图取证）")
+	_check(not _hud._stats_box.is_visible_in_tree(),
 		"登机后左上角状态块隐藏（姓名 + 生命 + 饥饿，截图取证）")
+	_check(not _hud._minimap.is_visible_in_tree(),
+		"登机后右上角小地图（指南针）隐藏（截图取证）")
+	_check(not _hud._mode_label.is_visible_in_tree(),
+		"登机后右上角模式徽章隐藏（截图取证）")
+	_check(_hud._time_label.is_visible_in_tree(), "驾驶中时钟/天气行保留（截图取证）")
 
 	# ── ① 地面满油门滑跑 ────────────────────────────────
 	# 注意：pitch 锁 0 时飞机永不抬头离地，满油门约 4~5 s 就会冲出 64 格跑道尽头
@@ -213,8 +220,10 @@ func _run() -> void:
 	for i in range(10):
 		await get_tree().physics_frame
 	_check(not _hud._flight_panel.visible, "下机后飞行仪表盘隐藏")
-	_check(_hud._hotbar_bar.visible, "下机后底部物品栏恢复显示")
-	_check(_hud._stats_box.visible, "下机后左上角状态块恢复显示")
+	_check(_hud._hotbar_bar.is_visible_in_tree(), "下机后底部物品栏恢复显示")
+	_check(_hud._stats_box.is_visible_in_tree(), "下机后左上角状态块恢复显示")
+	_check(_hud._minimap.is_visible_in_tree(), "下机后右上角小地图恢复显示")
+	_check(_hud._mode_label.is_visible_in_tree(), "下机后右上角模式徽章恢复显示")
 
 	SaveGuard.restore()
 	print("FLIGHT_HUD_DONE fails=%d" % _fails)

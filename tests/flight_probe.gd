@@ -435,12 +435,21 @@ func _run() -> void:
 		main_scene, start + Vector3(-6.0, 0.0, 6.0), RUNWAY_HEADING)
 	player.ride_aircraft(tel_craft)
 	await _frames(30)
-	_check(not hud._hotbar_bar.visible,
+	# 显隐断言一律用 is_visible_in_tree()：子节点自己的 visible 标记仍为 true，
+	# 只有「自身 + 祖先链」全可见才算真显示，逐节点断言会假绿。
+	_check(not hud._hotbar_bar.is_visible_in_tree(),
 		"登机后底部物品栏隐藏（飞行中不放置方块，底部让给飞行 UI）")
 	# 状态块按容器整块显隐：三个子节点 visible 标记仍是 true，只有容器的
 	# visible=false 才代表真正不显示，故断言落在 _stats_box 上。
-	_check(not hud._stats_box.visible,
+	_check(not hud._stats_box.is_visible_in_tree(),
 		"登机后左上角状态块隐藏（姓名 + 生命 + 饥饿，飞行中不显示生存读数）")
+	_check(not hud._minimap.is_visible_in_tree(),
+		"登机后右上角小地图（指南针）隐藏（方位交给战术地图与仪表小地图）")
+	_check(not hud._mode_label.is_visible_in_tree(), "登机后右上角模式徽章隐藏")
+	_check(hud._time_label.is_visible_in_tree(),
+		"驾驶中右上角天数/时钟/天气行保留（飞行仍要看得见昼夜与天气）")
+	_check(not hud._minimap.is_processing(),
+		"驾驶中停掉小地图 _process（不再每 0.6 s 扫一遍地形圆域）")
 	var mm_riding: float = panel._mm.elapsed()
 	_check(mm_riding > mm_before + 0.2,
 		"骑乘时真实遥测喂进任务管理器（elapsed %.2f → %.2f s）"
@@ -448,9 +457,12 @@ func _run() -> void:
 	# 下机：遥测停喂 + P1-2 修复——任务被 abandon，不再永久卡 RUNNING。
 	player.exit_aircraft()
 	await _frames(10)
-	_check(hud._hotbar_bar.visible, "下机后底部物品栏恢复显示")
-	_check(hud._stats_box.visible, "下机后左上角状态块恢复显示")
-	_check(hud._hunger_label.visible, "下机后饥饿读数仍在状态块内可见")
+	_check(hud._hotbar_bar.is_visible_in_tree(), "下机后底部物品栏恢复显示")
+	_check(hud._stats_box.is_visible_in_tree(), "下机后左上角状态块恢复显示")
+	_check(hud._hunger_label.is_visible_in_tree(), "下机后饥饿读数仍在状态块内可见")
+	_check(hud._minimap.is_visible_in_tree(), "下机后右上角小地图（指南针）恢复显示")
+	_check(hud._mode_label.is_visible_in_tree(), "下机后右上角模式徽章恢复显示")
+	_check(hud._minimap.is_processing(), "下机后小地图 _process 恢复（下机即重采样）")
 	_check(absf(panel._mm.elapsed() - mm_riding) < 0.001,
 		"下机后遥测停喂，elapsed 定格（%.2f s）" % panel._mm.elapsed())
 	_check(not panel.is_running(),
