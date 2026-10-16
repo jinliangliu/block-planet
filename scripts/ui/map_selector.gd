@@ -11,6 +11,8 @@ signal region_entered(region_id: int)
 signal closed
 ## 在介绍页请求跳去看该区域的动植物图鉴（由 HUD 关闭本窗口后打开图鉴）。
 signal bestiary_requested(region_id: int)
+## 在介绍页请求去钓鱼（四大洋）：HUD 关掉本窗口后打开钓具界面。
+signal fishing_requested(region_id: int)
 
 enum Page {
 	GLOBE,
@@ -73,6 +75,7 @@ var _steps: Array[Dictionary] = []
 var _selected := -1
 var _mode_buttons: Array[Button] = []
 var _mode_caption: Label
+var _fishing_button: Button
 var _dragging := false
 var _drag_distance := 0.0
 var _loading_time := 0.0
@@ -198,6 +201,10 @@ func _show_intro(region_id: int) -> void:
 		_intro_body.text += "\n\n本区域建有带跑道的机场——出生点就在跑道旁，落地即可起飞。"
 	elif RegionAtlas.has_landing_field(region_id):
 		_intro_body.text += "\n\n本区域在岛上/冰面上整备有一座简易降落场——出生点就在跑道旁，落地即可起飞。"
+	# 有钓点的区域（当前是四大洋）补一句：看完介绍可以直接下竿。
+	if not FishingSystem.get_spots_for_atlas(region_id).is_empty():
+		_intro_body.text += "\n\n这片海域开放了钓点——带上钓具，看看能钓上什么。"
+	_fishing_button.visible = not FishingSystem.get_spots_for_atlas(region_id).is_empty()
 	_detail_cards = RegionAtlas.cards_of(region_id)
 	for child in _card_row.get_children():
 		child.queue_free()
@@ -254,7 +261,7 @@ func _build_backdrop() -> void:
 	add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；插有飞行旗帜的区域带跑道（红）/ 有简易跑道（琥珀）"
+	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；插有飞行旗帜的区域带跑道（红）/ 有简易跑道（琥珀）；带 🎣 的海域可以钓鱼"
 	subtitle.add_theme_font_size_override("font_size", 16)
 	subtitle.add_theme_color_override("font_color", Color(0.72, 0.80, 0.92))
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -341,7 +348,9 @@ func _build_legend(parent: Control) -> void:
 		cell.add_child(chip)
 
 		var name_label := Label.new()
-		name_label.text = RegionAtlas.title_of(region_id)
+		# 有钓点的海域在图例里挂 🎣，与介绍页按钮同一个判据。
+		name_label.text = RegionAtlas.title_of(region_id) \
+			+ (" 🎣" if not FishingSystem.get_spots_for_atlas(region_id).is_empty() else "")
 		name_label.add_theme_font_size_override("font_size", 15)
 		name_label.add_theme_color_override("font_color", Color(0.80, 0.87, 0.96))
 		name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -484,6 +493,19 @@ func _build_intro_panel() -> void:
 			bestiary_requested.emit(_selected)
 	)
 	row.add_child(bestiary)
+
+	# 「去钓鱼」只在有钓点的区域出现（数据决定，不是写死四大洋）：
+	# 图例与介绍页共用同一个判据，加新钓点不用改两处。
+	_fishing_button = Button.new()
+	_fishing_button.text = "🎣 去钓鱼"
+	_fishing_button.custom_minimum_size = Vector2(130, 44)
+	_fishing_button.focus_mode = Control.FOCUS_NONE
+	_fishing_button.visible = false
+	_fishing_button.pressed.connect(func():
+		if _selected >= 0:
+			fishing_requested.emit(_selected)
+	)
+	row.add_child(_fishing_button)
 
 	var enter := Button.new()
 	enter.text = "进入"

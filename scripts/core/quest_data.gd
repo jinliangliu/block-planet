@@ -143,6 +143,47 @@ static func _build() -> void:
 			"goal": {"type": "count", "key": "smelted", "count": 1},
 			"reward": {"item": 204, "count": 2},
 		},
+		# ── 钓鱼（feature_fishing）────────────────────────────────────────
+		# 接在新手链之后：孩子先学会采集/合成/交易，再拿钓具去四大洋。
+		# 奖励刻意在链上递增，并且「深海船竿 / 重型鼓轮 / 碳氟线」三件装备
+		# 由 q_fish_first / q_fish_five / q_fish_deep 解锁（gear.json 的
+		# unlock = "quest:<id>"）——任务既是目标也是装备来源，不会两头落空。
+		{
+			"id": "q_fish_first", "category": Category.QUEST, "prerequisite": "newbie_smelt",
+			"title": "第一竿", "desc": "在四大洋的钓点钓上你的第一条鱼。",
+			"goal": {"type": "count", "key": "fish_caught", "count": 1},
+			"reward": {"item": 204, "count": 2},
+		},
+		{
+			"id": "q_fish_five", "category": Category.QUEST, "prerequisite": "q_fish_first",
+			"title": "小有收获", "desc": "累计钓上 5 条鱼，熟能生巧。",
+			"goal": {"type": "count", "key": "fish_caught", "count": 5},
+			"reward": {"item": 204, "count": 3},
+		},
+		{
+			"id": "q_fish_deep", "category": Category.QUEST, "prerequisite": "q_fish_five",
+			"title": "深海猎手", "desc": "换上重铅坠远投到深水，钓上一条深海鱼。",
+			"goal": {"type": "count", "key": "fish_deep", "count": 1},
+			"reward": {"item": 204, "count": 4},
+		},
+		{
+			"id": "q_fish_oceans", "category": Category.QUEST, "prerequisite": "q_fish_deep",
+			"title": "四海为家", "desc": "在四大洋各钓到 1 种鱼（太平洋、大西洋、印度洋、北冰洋）。",
+			"goal": {"type": "prefix_count", "prefix": "fished_region_", "count": 4},
+			"reward": {"item": 204, "count": 6},
+		},
+		{
+			"id": "q_fish_lure", "category": Category.QUEST, "prerequisite": "q_fish_first",
+			"title": "拟饵高手", "desc": "用假饵钓上一条掠食性鱼类（比如鲨鱼、金枪鱼）。",
+			"goal": {"type": "count", "key": "fish_lure_predator", "count": 1},
+			"reward": {"item": 204, "count": 3},
+		},
+		{
+			"id": "q_fish_release", "category": Category.QUEST, "prerequisite": "q_fish_first",
+			"title": "放它回家", "desc": "钓上来的鱼放生 3 条，大海里的朋友要好好对待。",
+			"goal": {"type": "count", "key": "fish_released", "count": 3},
+			"reward": {"item": 204, "count": 3},
+		},
 	]
 
 	_achievements = [

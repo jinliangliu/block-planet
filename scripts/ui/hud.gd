@@ -41,6 +41,11 @@ var _bestiary: BestiaryUI
 var _quest_panel: QuestPanel
 var _mission_panel: MissionPanel
 var _settings_panel: SettingsPanel
+## 钓鱼三件套（feature_fishing）：钓具界面 → 渔猎界面 → 教学浮层。
+## 层级依次升高，教学盖在最上面（z_index 40）。
+var _fishing_gear: FishingGearUI
+var _fishing_ui: FishingUI
+var _fishing_teaching: FishingTeachingUI
 ## 工坊台建造界面（main 持有、挂在 $UI 下）：模态互斥与冻结态广播用。
 var _build_screen: BuildScreen
 var _inventory_panel: InventoryPanel
@@ -210,6 +215,7 @@ func _build() -> void:
 	_build_quest_panel(root)
 	_build_mission_panel(root)
 	_build_settings_panel(root)
+	_build_fishing(root)
 	_build_toast(root)
 	_build_death_overlay(root)
 	_build_flight_panel(root)
@@ -246,6 +252,25 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _map_selector != null and _map_selector.is_open():
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 			close_map_selector()
+			get_viewport().set_input_as_handled()
+		return
+	# 钓鱼三件套同为模态窗口：教学 → 渔猎 → 钓具，ESC 逐层关闭最上面那层。
+	if _fishing_teaching != null and _fishing_teaching.is_open():
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			_fishing_teaching.close()
+			_on_fishing_teaching_closed()
+			get_viewport().set_input_as_handled()
+		return
+	if _fishing_ui != null and _fishing_ui.is_open():
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			_fishing_ui.close()
+			_on_fishing_closed()
+			get_viewport().set_input_as_handled()
+		return
+	if _fishing_gear != null and _fishing_gear.is_open():
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			_fishing_gear.close()
+			_on_fishing_gear_closed()
 			get_viewport().set_input_as_handled()
 		return
 	# 说明书同为模态窗口：ESC / F1 关闭，其余热键让位。
@@ -2372,6 +2397,7 @@ func _build_map_selector(root: Control) -> void:
 	_map_selector.region_entered.connect(_on_region_entered)
 	_map_selector.closed.connect(_on_region_closed)
 	_map_selector.bestiary_requested.connect(_on_map_bestiary_requested)
+	_map_selector.fishing_requested.connect(_on_fishing_requested)
 	root.add_child(_map_selector)
 
 
@@ -2464,7 +2490,10 @@ func _any_overlay_open() -> bool:
 		or (_bestiary != null and _bestiary.is_open()) \
 		or (_quest_panel != null and _quest_panel.is_open()) \
 		or (_mission_panel != null and _mission_panel.is_open()) \
-		or (_settings_panel != null and _settings_panel.is_open())
+		or (_settings_panel != null and _settings_panel.is_open()) \
+		or (_fishing_gear != null and _fishing_gear.is_open()) \
+		or (_fishing_ui != null and _fishing_ui.is_open()) \
+		or (_fishing_teaching != null and _fishing_teaching.is_open())
 
 
 ## 是否有任一窗口/面板打开（对外的模态互斥查询）：覆盖层 + 地图选择器 + 背包。
@@ -2639,6 +2668,93 @@ func _on_settings_changed(_difficulty: int, _assist_level: int, _livery_index: i
 	var s := FlightSettings.current()
 	Events.notice.emit("飞行设置：难度 %s · 辅助 %s · 涂装 %s" % [
 		s.difficulty_name(), s.assist_name(), s.livery_name()])
+
+
+# ────────────────────────── 钓鱼（feature_fishing） ──────────────────────────
+## 三个界面按「整备 → 操作 → 教学」的顺序挂在同一层里，教学 z 最高。
+## .modal 互斥沿用既有规则：任一钓鱼窗口打开时，其余热键与建造界面让位。
+func _build_fishing(root: Control) -> void:
+	_fishing_gear = FishingGearUI.new()
+	_fishing_gear.closed.connect(_on_fishing_gear_closed)
+	_fishing_gear.start_requested.connect(_open_fishing_ui)
+	root.add_child(_fishing_gear)
+
+	_fishing_ui = FishingUI.new()
+	_fishing_ui.closed.connect(_on_fishing_closed)
+	_fishing_ui.teaching_requested.connect(_on_fishing_teaching_requested)
+	root.add_child(_fishing_ui)
+
+	_fishing_teaching = FishingTeachingUI.new()
+	_fishing_teaching.closed.connect(_on_fishing_teaching_closed)
+	root.add_child(_fishing_teaching)
+
+	FishingSystem.fish_caught.connect(_on_fish_caught)
+	FishingSystem.new_species_unlocked.connect(_on_new_species)
+
+
+## 从地图选择器点「🎣 去钓鱼」进来：先关地图选择器（它会解冻玩家），再冻结。
+func _on_fishing_requested(atlas_region: int) -> void:
+	if _map_selector != null and _map_selector.is_open():
+		_map_selector.close()
+	open_fishing_gear(atlas_region)
+
+
+func open_fishing_gear(atlas_region: int) -> void:
+	if _fishing_gear == null:
+		return
+	_fishing_gear.open_for_atlas(atlas_region)
+	if not _fishing_gear.is_open():
+		Events.notice.emit("这片海域还没有开放的钓点")
+		return
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _on_fishing_gear_closed() -> void:
+	_set_player_frozen(false)
+	_on_manual_closed()
+
+
+## 装备整备完成 → 打开渔猎界面（FishingSystem 里已经 start_fishing 过）。
+func _open_fishing_ui() -> void:
+	if _fishing_ui == null:
+		return
+	_fishing_ui.open_session()
+	_set_player_frozen(true)
+
+
+func _on_fishing_closed() -> void:
+	_set_player_frozen(false)
+	_on_manual_closed()
+
+
+## 教学弹窗：弹出期间冻结渔猎界面的计时（不然读教学时鱼早跑了）。
+func _on_fishing_teaching_requested(lesson: Dictionary) -> void:
+	if _fishing_teaching == null or _fishing_teaching.is_open():
+		return
+	if _fishing_teaching.show_lesson(lesson):
+		_fishing_ui.set_paused(true)
+
+
+func _on_fishing_teaching_closed() -> void:
+	if _fishing_ui != null:
+		_fishing_ui.set_paused(false)
+
+
+## 钓到鱼：生鱼入包（复用既有 RAW_FISH），图鉴记录由 FishingSystem 自己写。
+func _on_fish_caught(fish_id: String, _spot_id: String, _gear: Dictionary) -> void:
+	var entry := FishingSystem.get_fish(fish_id)
+	if _player != null:
+		_player.inventory.add_item(ItemTypes.RAW_FISH, 1)
+	_push_log("钓到 %s（%s）" % [
+		String(entry.get("name_zh", fish_id)), String(FishingSystem.record_of(fish_id).get(
+			"first_caught_spot", ""))])
+
+
+func _on_new_species(fish_id: String) -> void:
+	var entry := FishingSystem.get_fish(fish_id)
+	Events.notice.emit("新鱼种：%s 已收入生物图鉴" % String(entry.get("name_zh", fish_id)))
 
 
 ## main 每物理帧调用：把飞行遥测透传给任务面板（仅 RUNNING 时生效）。

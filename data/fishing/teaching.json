@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "note_zh": "钓鱼引导教学。trigger 是该课首次触发的时机；看过的课记进 user://fishing_journal.json 的 lessons_seen，之后可在钓具界面点「重看教学」复习。",
+  "lessons": [
+    {
+      "id": "lesson_bait",
+      "title_zh": "鱼饵搭配",
+      "trigger": "first_time_bait",
+      "steps": [
+        "不同的鱼爱吃不同的饵。",
+        "假饵适合掠食性鱼类，活饵适合杂食和小鱼。",
+        "选对鱼饵，鱼才更容易上钩。"
+      ]
+    },
+    {
+      "id": "lesson_sinker",
+      "title_zh": "铅坠配重",
+      "trigger": "first_time_sinker",
+      "steps": [
+        "铅坠越重，抛得越远。",
+        "但铅坠太重，饵下沉太快，可能错过中上层鱼。",
+        "试试不同重量的铅坠吧。"
+      ]
+    },
+    {
+      "id": "lesson_drag",
+      "title_zh": "渔轮卸力",
+      "trigger": "first_time_drag",
+      "steps": [
+        "渔轮卸力太紧，鱼线容易断。",
+        "卸力太松，鱼会跑掉。",
+        "大鱼上钩时，要一边收线一边调整卸力。"
+      ]
+    },
+    {
+      "id": "lesson_cast",
+      "title_zh": "抛投",
+      "trigger": "first_time_cast",
+      "steps": [
+        "按住蓄力，松手抛投。",
+        "力度决定距离，时机决定落点。",
+        "想钓深海鱼，就用力抛远一点。"
+      ]
+    },
+    {
+      "id": "lesson_reel",
+      "title_zh": "渔轮收线",
+      "trigger": "first_time_reel",
+      "steps": [
+        "鱼咬钩后，按住收线。",
+        "让鱼保持在安全区内，进度条满就钓上来了。",
+        "别一直收，鱼挣扎时要放线。"
+      ]
+    }
+  ]
+}

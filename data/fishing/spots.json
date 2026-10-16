@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "note_zh": "四大洋钓点。atlas_region 对应 RegionAtlas 的区域号（0 太平洋 / 1 大西洋 / 2 印度洋 / 3 北冰洋），region_id 对应生物图鉴的区域 id。fish_pool 里的 id 必须在 fish.json 中存在，否则加载期报错。",
+  "spots": [
+    {
+      "id": "pacific_coast",
+      "region_id": "pacific_ocean",
+      "atlas_region": 0,
+      "name_zh": "太平洋近岸",
+      "name_en": "Pacific Coast",
+      "depth": "shallow",
+      "intro_zh": "风平浪静的近岸浅滩，礁石边躲着小丑鱼，远处偶有鲑鱼洄游经过。",
+      "fish_pool": ["pacific_clownfish", "pacific_salmon", "great_white_shark"],
+      "unlock": "default"
+    },
+    {
+      "id": "atlantic_open",
+      "region_id": "atlantic_ocean",
+      "atlas_region": 1,
+      "name_zh": "大西洋外海",
+      "name_en": "Atlantic Open Sea",
+      "depth": "deep",
+      "intro_zh": "开阔的大洋水域，鳕鱼群贴着大陆架，金枪鱼在深处高速巡游。",
+      "fish_pool": ["atlantic_cod", "atlantic_mackerel", "bluefin_tuna"],
+      "unlock": "default"
+    },
+    {
+      "id": "indian_reef",
+      "region_id": "indian_ocean",
+      "atlas_region": 2,
+      "name_zh": "印度洋珊瑚礁",
+      "name_en": "Indian Coral Reef",
+      "depth": "shallow",
+      "intro_zh": "五彩的珊瑚礁盘，小丑鱼在海葵间穿梭，礁外是鲸鲨缓慢巡游的深水。",
+      "fish_pool": ["clownfish", "lionfish", "whale_shark_io"],
+      "unlock": "default"
+    },
+    {
+      "id": "arctic_edge",
+      "region_id": "arctic_ocean",
+      "atlas_region": 3,
+      "name_zh": "北冰洋冰缘",
+      "name_en": "Arctic Ice Edge",
+      "depth": "shallow",
+      "intro_zh": "浮冰边缘的冷水，北极鳕鱼成群，冰缝深处有格陵兰鲨慢慢游动。",
+      "fish_pool": ["arctic_cod", "narwhal", "greenland_shark"],
+      "unlock": "default"
+    }
+  ]
+}
