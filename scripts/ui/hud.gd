@@ -885,6 +885,23 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 	# P1-2：下机且任务仍在进行 → 主动放弃当前任务，避免永久卡 RUNNING。
 	if not _riding and _mission_panel != null and _mission_panel.is_running():
 		_mission_panel.abandon_mission()
+	# 底部物品栏（快捷栏）：驾驶飞行器时整条隐藏——飞行中不放置也不取用
+	# 方块，留着它既挡视野又与飞行触控/仪表重叠；下机经同一信号恢复显示
+	#（坠机弹射与死亡退机都走 exit_aircraft，状态不会漏恢复）。
+	# _refresh_hotbar 只动子格 visible、不动本容器：模式切换、背包变化
+	#（含飞行任务奖励入包）都不会把驾驶中的它放出来。
+	if _hotbar_bar != null:
+		_hotbar_bar.visible = not _riding
+	# 左上角身份与生命（姓名 + 爱心）：驾驶飞行器时一并隐藏——飞行中玩家
+	# 就是飞机本身（3D 角色模型在 ride_aircraft 里已隐藏），左上角让位给飞行
+	# 信息；坠机弹射与死亡退机都走 exit_aircraft，下机经同一信号恢复，状态
+	# 不会漏恢复。饥饿不属于生命状态且飞行中仍在消耗，保留可见。
+	# _refresh_stats 只重画爱心/改饥饿文本、不动这两个节点的显隐：掉血、
+	# 饥饿变化都不会把驾驶中的它们放出来。
+	if _name_label != null:
+		_name_label.visible = not _riding
+	if _hearts != null:
+		_hearts.visible = not _riding
 	# P1-3：触屏设备上，驾驶时隐藏步行触控、显示飞行触控层。
 	if DisplayServer.is_touchscreen_available() and _flight_touch != null:
 		if _riding:

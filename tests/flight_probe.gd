@@ -435,6 +435,12 @@ func _run() -> void:
 		main_scene, start + Vector3(-6.0, 0.0, 6.0), RUNWAY_HEADING)
 	player.ride_aircraft(tel_craft)
 	await _frames(30)
+	_check(not hud._hotbar_bar.visible,
+		"登机后底部物品栏隐藏（飞行中不放置方块，底部让给飞行 UI）")
+	_check(not hud._name_label.visible,
+		"登机后左上角姓名隐藏（飞行中不显示身份信息）")
+	_check(not hud._hearts.visible,
+		"登机后左上角生命爱心隐藏（飞行中不显示生命状态）")
 	var mm_riding: float = panel._mm.elapsed()
 	_check(mm_riding > mm_before + 0.2,
 		"骑乘时真实遥测喂进任务管理器（elapsed %.2f → %.2f s）"
@@ -442,6 +448,9 @@ func _run() -> void:
 	# 下机：遥测停喂 + P1-2 修复——任务被 abandon，不再永久卡 RUNNING。
 	player.exit_aircraft()
 	await _frames(10)
+	_check(hud._hotbar_bar.visible, "下机后底部物品栏恢复显示")
+	_check(hud._name_label.visible, "下机后左上角姓名恢复显示")
+	_check(hud._hearts.visible, "下机后左上角生命爱心恢复显示")
 	_check(absf(panel._mm.elapsed() - mm_riding) < 0.001,
 		"下机后遥测停喂，elapsed 定格（%.2f s）" % panel._mm.elapsed())
 	_check(not panel.is_running(),

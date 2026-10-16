@@ -49,6 +49,10 @@ func _run() -> void:
 	# 存档隔离（D-010 铁律 3）：本探针真实起飞/巡航/失速，会推进 flew/flew_alt_*/
 	# flew_distance 计数，快照须在实例化 main.tscn 之前（暖机帧也可能触发 Events）。
 	SaveGuard.snapshot()
+	# 探针可复现性（对齐 flight_probe）：钉死标准难度——辅助稳定增益直接改变
+	# 飞行动力学，磁盘 settings.json 因开发者机器而异，探针行为不能依赖它。
+	# set_current 只改内存态，不落盘。
+	FlightSettings.set_current(FlightSettings.for_difficulty(FlightSettings.Difficulty.NORMAL))
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)
 	for i in range(90):
@@ -56,6 +60,14 @@ func _run() -> void:
 	_world = main_scene.get_node("World")
 	_player = main_scene.get_node("Player")
 	_hud = main_scene.get_node("UI")
+	# 停用刷怪并清场（对齐 flight_probe）：全局 RNG 每进程随机播种，生物（含飞行
+	# 豆娘）会在世界里随机碰撞机体——滑跑段之后的高速巡航/失速段入口能量态被扰动，
+	# 「满拉杆逼失速告警」这类攻角时序敏感机动就会逐 run 漂移（实测两次复跑轨迹
+	# 差 0.7 m、告警有无翻转）。停掉刷怪后世界状态确定，段间行为才可复现。
+	var spawner: MobSpawner = main_scene.get_node("MobSpawner")
+	spawner._spawn_timer = 9999.0
+	spawner._passive_timer = 9999.0
+	spawner._despawn_all()
 	if _hud._map_selector != null and _hud._map_selector.is_open():
 		_hud.close_map_selector()
 	GameState.needs_region_pick = false
@@ -89,6 +101,9 @@ func _run() -> void:
 		" on_floor=", _craft.is_on_floor(), " pos=", _craft.global_position,
 		" panel=", _hud._flight_panel.visible)
 	_check(_hud._flight_panel.visible, "登机后飞行仪表盘显示")
+	_check(not _hud._hotbar_bar.visible, "登机后底部物品栏隐藏（截图取证）")
+	_check(not _hud._name_label.visible, "登机后左上角姓名隐藏（截图取证）")
+	_check(not _hud._hearts.visible, "登机后左上角生命爱心隐藏（截图取证）")
 
 	# ── ① 地面满油门滑跑 ────────────────────────────────
 	# 注意：pitch 锁 0 时飞机永不抬头离地，满油门约 4~5 s 就会冲出 64 格跑道尽头
@@ -156,13 +171,30 @@ func _run() -> void:
 	await _shoot("flight_hud_cruise.png")
 
 	# ── ③ 满拉杆逼出失速告警 ─────────────────────────────
+	# 手法对齐 flight_probe E 段（该段历次回归全绿）：先 6 s 中度拉杆爬升
+	# （pitch 0.6 + 满油门）把飞机送进「机头高、速度衰」状态，再持续满杆
+	# （pitch 1.0）——几何攻角（机头姿态 − 航迹角）随爬升累积，稳定越过
+	# STALL_WARN_ALPHA 0.27。
+	# 早期版本从巡航态直接满杆：巡航速度下航迹角速度 ≥ 俯仰角速度（升力把
+	# 航迹掰向机头，target_pitch 是角速度指令且 authority 随动压衰减），攻角
+	# 稳在 ≈0.2 rad 平衡点，12 s 只是 zoom 爬升（实测 176 m / 20 m/s 不入
+	# 告警）——满杆时长与入口能量态稍差就逐 run 翻转，故加爬升预热并放宽到
+	# 25 s（E 段同款 1500 帧量级）。
 	_craft.controls.throttle = 1.0
+	_craft.controls.pitch = 0.6
+	for i in range(360):
+		await get_tree().physics_frame
 	_craft.controls.pitch = 1.0
 	elapsed = 0.0
-	while not bool(_craft.snapshot()["stall_warning"]) and elapsed < PHASE_TIMEOUT \
+	while not bool(_craft.snapshot()["stall_warning"]) and elapsed < 25.0 \
 			and not _craft.is_wrecked():
 		await get_tree().physics_frame
 		elapsed += get_physics_process_delta_time()
+	var stall_snap := _craft.snapshot()
+	print("DBG stall: warn=%s stalled=%s alpha=%.1fdeg air=%.1f agl=%.1f wrecked=%s" % [
+		stall_snap["stall_warning"], stall_snap["stalled"],
+		float(stall_snap["alpha_deg"]), float(stall_snap["airspeed"]),
+		float(stall_snap["altitude_agl"]), _craft.is_wrecked()])
 	snap = _verify_panel("失速态")
 	_check(bool(snap["stall_warning"]), "满拉杆后出现失速告警")
 	_check(_hud._flight_stall.visible, "告警态告警行显示")
@@ -181,6 +213,9 @@ func _run() -> void:
 	for i in range(10):
 		await get_tree().physics_frame
 	_check(not _hud._flight_panel.visible, "下机后飞行仪表盘隐藏")
+	_check(_hud._hotbar_bar.visible, "下机后底部物品栏恢复显示")
+	_check(_hud._name_label.visible, "下机后左上角姓名恢复显示")
+	_check(_hud._hearts.visible, "下机后左上角生命爱心恢复显示")
 
 	SaveGuard.restore()
 	print("FLIGHT_HUD_DONE fails=%d" % _fails)
