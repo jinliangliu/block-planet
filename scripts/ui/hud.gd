@@ -136,6 +136,8 @@ var _ft_engine: Button
 var _tactical_map: FlightTacticalMap
 ## 飞行屏幕仪表 HUD（D-034）：座舱玻璃 HUD / 追尾四角 / 小地图 / 警告 / 详细清单。
 var _instrument_hud: FlightInstrumentHUD
+## 起飞教练（D-043）：底部中央单步指引，点火→推油门→等速度→按 ↑ 抬轮。
+var _takeoff_coach: TakeoffCoach
 ## 警告蜂鸣码播放器（D-034）：程序生成音，落地儿童友好「语音提示」。
 var _alert_beeper: AlertBeeper
 
@@ -235,6 +237,9 @@ func _build() -> void:
 	# 飞行屏幕仪表 HUD（D-034）：全屏覆盖层，登机后才显形。
 	_instrument_hud = FlightInstrumentHUD.new()
 	add_child(_instrument_hud)
+	# 起飞教练（D-043）：叠在仪表层之上（后加的 Control 画在上层），只提示不改物理。
+	_takeoff_coach = TakeoffCoach.new()
+	add_child(_takeoff_coach)
 	# 警告蜂鸣码播放器（D-034）：程序生成音，无 TTS / 无语音资产依赖。
 	_alert_beeper = AlertBeeper.new()
 	add_child(_alert_beeper)
@@ -394,6 +399,12 @@ func _process(delta: float) -> void:
 	# 飞行屏幕仪表 HUD（D-034）：驾驶中每帧驱动（读快照→加工→分发）。
 	if _instrument_hud != null and _player != null and _player.is_riding():
 		_instrument_hud.tick(delta)
+	# 起飞教练（D-043）：与仪表同帧驱动；不在驾驶中就不驱动（内部会自己隐藏）。
+	if _takeoff_coach != null:
+		if _player != null and _player.is_riding():
+			_takeoff_coach.tick(delta)
+		elif _takeoff_coach.visible:
+			_takeoff_coach.clear()
 	if _player == null or _break_bar == null:
 		return
 	var breaking := _player.is_breaking()
@@ -988,6 +999,13 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 		var cr := _player.aircraft()
 		if cr != null and is_instance_valid(cr):
 			_instrument_hud.setup(cr, _flight_camera)
+	# 起飞教练（D-043）：登机绑定飞机（顺带把阶梯重置回第①步），下机清空。
+	if _takeoff_coach != null:
+		if _riding and _player != null:
+			var tc_craft := _player.aircraft()
+			_takeoff_coach.setup(tc_craft)
+		else:
+			_takeoff_coach.clear()
 	_refresh_flight_panel()
 
 

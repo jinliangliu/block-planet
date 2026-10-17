@@ -737,9 +737,11 @@ func ride_aircraft(craft: Aircraft) -> void:
 	_model.visible = false
 	_held_item.visible = false
 	Events.aircraft_ride_changed.emit(true)
-	Events.notice.emit("✈️ 登机：F 启动发动机；W/S 油门（座舱内滚轮也行），鼠标操纵杆，"
-		+ "A/D 方向舵；空格爬升/刹车，Shift 加速，Ctrl 下降；C 视角，V 环顾，M 地图，"
-		+ "双击左键改平，X 下机。")
+	# 起飞三步前置条件一次说清：发动机默认熄火（不点火推油门没反应）、拉杆是 ↑
+	# （默认追尾视角下鼠标不操纵飞机）。顺序按玩家实际会卡住的地方排。
+	Events.notice.emit("✈️ 登机：先按【F】点火（不点火推油门没反应）→ 按【W】推满油门滑跑 → "
+		+ "速度够了按【↑】抬轮。↑↓←→ 操纵飞机（任何视角都行），鼠标只在座舱视角是操纵杆；"
+		+ "底部「起飞教练」条会一步步带你飞起来；X 下机。")
 
 
 ## 下机：落到机身侧面。damage > 0 表示坠机抛出（照常扣血）。

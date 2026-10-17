@@ -1410,6 +1410,26 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 
 ---
 
+## D-043 起飞教练：把「点火 → 推油门 → 抬轮」拆成显式单步提示
+
+**背景**：用户试玩反馈「优化新手提示，我到现在还没能起飞成功」。诊断出三处提示缺失/错误，任一都足以让人飞不起来：
+1. `Aircraft.set_piloted(true)` 登机只满油、**不点火**，`engine_running` 默认 false；熄火时 `controls.throttle` 锁 0——推油门飞机完全不动。而说明书只写「按 F 登机，再按 F 下机」，没提点火。
+2. 拉杆是 ↑/↓（`aircraft_pitch_up/down`），鼠标仅在**第一人称座舱**（`FIRST_PERSON`）下才是操纵杆；默认视角是 CHASE（追尾，`aircraft_camera._mode`），说明书却只写「晃动鼠标 —— 操纵杆」，默认视角下晃鼠标毫无反应。
+3. 驾驶中 F 是发动机开关（`toggle_engine`），**下机是 X**；说明书写「再按 F 下机」是错的。
+
+**决策**：不改飞行物理（`flight_probe` 140 断言是手感基线，不动），只补提示层。
+
+**实现**：
+- 新增 `scripts/ui/takeoff_coach.gd`（`TakeoffCoach`）：驾驶中屏幕底部中央单步教练，读 `Aircraft.snapshot()` 这一份数据，按状态机给「下一步该按什么」——优先级：失速改出 > 点火 > 推油门 > 滑跑加速（进度条）> 抬轮 > 爬升 > 起飞成功。抬轮速度 = `stall_speed × 1.2`（跟着载重/襟翼档走，不写死 50 km/h，避免早抬轮失速）。由 `hud.gd` 驾驶中每帧 `tick`、登机 `setup`、下机 `clear`；熄灭态（任何地面/空中）都优先提示点火。
+- 修正 `manual_panel.gd`「驾驶飞机」页：写清起飞四步、↑↓←→ 全视角可操纵、空格地面刹车/空中爬升、鼠标仅座舱视角才是操纵杆、驾驶中 X 下机。
+- 修正 `player.gd` 登机 Toast：突出「先按 F 点火 → W 推满油门 → 速度够按 ↑ 抬轮」。
+
+**范围**：只加提示，不动 `aircraft_flight.gd` / `aircraft.gd` 的任何物理或控件语义；教练对 `engine/throttle/kmh/stall_speed/on_ground/altitude_agl/stalled` 只读。
+
+**验证**：全量回归 32 探针 0 FAIL（`flight_probe` 140 PASS、`flight_hud_shot` 34 PASS 确认教练挂载不破坏 HUD 层）；新增 `tests/takeoff_coach_shot.gd` 窗口探针，六阶段截图（点火 / 油门 / 滑跑 16→57 km/h / 抬轮 66 km/h / 爬升 6.6 m / 成功 17 m）文案与进度条全部正确，rc=0 无 SCRIPT ERROR。
+
+---
+
 ## 附：待定/开放问题
 
 | 编号 | 问题 | 现状 |
