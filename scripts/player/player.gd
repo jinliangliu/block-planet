@@ -617,6 +617,38 @@ func set_spawn_position(pos: Vector3) -> void:
 	spawn_position = pos
 
 
+## 传送救援（D-039 飞行重置入口之一）：清空全部运动状态并把玩家放到指定点。
+## 与 _respawn() 的区别：不动生命/饥饿（重置不是死亡），但速度、坠落累积与
+## 卡死帧必须清——坠机时残留的坠落速度会在落点被误判为跌落伤害。
+## 落点复用「4 格空气 + 实心底」向上搜索（同 _safe_respawn_position），
+## 防跑道被玩家自己拿方块堵住时嵌进地形。注意流式世界：玩家在远方坠机时
+## 初始跑道所在区块可能已卸载，get_block 对未加载列逐步失败、搜索一路跑满
+## ——此时回退 pos 原值（同 _safe_respawn_position 的兜底），区块随后随玩家
+## 位置自动重载，绝不对玩家使用搜索后的位置。
+func teleport_to(pos: Vector3, heading: float) -> void:
+	velocity = Vector3.ZERO
+	_fall_speed = 0.0
+	_stuck_frames = 0
+	if _world != null:
+		var cell := Vector3i(pos.floor())
+		var found := false
+		for _i in range(64):
+			var clear := true
+			for h in range(4):
+				if BlockTypes.is_solid(_world.get_block(cell + Vector3i(0, h, 0))):
+					clear = false
+					break
+			var grounded := BlockTypes.is_solid(_world.get_block(cell + Vector3i(0, -1, 0)))
+			if clear and grounded:
+				found = true
+				break
+			cell.y += 1
+		if found:
+			pos = Vector3(cell) + Vector3(0.5, 0.1, 0.5)
+	global_position = pos
+	rotation.y = heading
+
+
 ## 选择快捷栏槽位并广播变化。
 ## 生存模式快捷栏 9 位；创造模式虚拟快捷栏更长（建材 + 工具）。
 func select_slot(slot: int) -> void:
@@ -728,6 +760,11 @@ func aircraft() -> Aircraft:
 
 func is_riding() -> bool:
 	return _aircraft != null
+
+
+## 死亡停顿中（墓碑倒计时）为真：外部输入守卫用（D-039 飞行重置与之对齐）。
+func is_dead() -> bool:
+	return _dead
 
 
 ## 登机判定容差（m）：距机身碰撞盒最近点再放宽的距离。

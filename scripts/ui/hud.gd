@@ -890,7 +890,10 @@ var _last_crash_reason := ""
 ## 把原因合并进去（见 _on_damage_taken 的 REASON_CRASH 分支）。
 func _on_aircraft_crashed(reason: String) -> void:
 	_last_crash_reason = reason
-	_show_toast("💥 %s" % reason)
+	# 附重置提示（D-039）：坠机后玩家第一诉求是「再飞一次」，Toast 是覆盖式的，
+	# 两条各自弹出会互相顶掉，故并进同一条。_last_crash_reason 保持纯原因文本
+	# （掉血播报合并逻辑见 _on_damage_taken 的 REASON_CRASH 分支）。
+	_show_toast("💥 %s（按 Y 重置回跑道）" % reason)
 
 
 func _on_ft_exit() -> void:

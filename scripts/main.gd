@@ -27,6 +27,11 @@ var _cockpit_panel: CockpitPanel = null
 var _flight_markers: FlightMarkers = null
 ## 飞行导航锚点（机场中心 / 出生点）：登机时同时注入 HSI/CDI 与 3D 标注。
 var _mission_anchor := Vector3.ZERO
+## 飞行重置归位点（D-039）：_flight_spawn = 本次进图的初始出生点（跑道南段），
+## _craft_park = 初始停机位（出生点以北、机头朝北）。坠机/卡住时按 Y 把玩家
+## 与飞机送回这两点。无机场/降落场的区域 _craft_park 为零，飞机就地摆正。
+var _flight_spawn := Vector3.ZERO
+var _craft_park := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -83,6 +88,9 @@ func _ready() -> void:
 		spawn_pos = _find_spawn_position()
 	_player.global_position = spawn_pos
 	_player.set_spawn_position(spawn_pos)
+	# 飞行重置归位点（D-039）：记下本次进图的初始站位与停机位。
+	_flight_spawn = spawn_pos
+	_craft_park = craft_park
 	_player.setup_world(_world)
 	_hud.setup(_player)
 	_hud.set_day_night(_day_night)
@@ -223,6 +231,71 @@ func _on_flight_ride_changed(riding: bool) -> void:
 			_flight_markers.queue_free()
 			_flight_markers = null
 		_hud.instrument_hud().clear_navigation()
+
+
+## 飞行重置（D-039）：坠机 / 卡住的一键救援——玩家与飞机送回本地图初始
+## 跑道，满油重新开始飞。语义：
+##   1. 在机上先下机（exit_aircraft 把玩家放到机侧，随后被传送覆盖）；
+##   2. 残骸立即清除（不等 4 秒消散，翻篇）；完好的飞机 place() 搬回初始
+##      停机位——用 place 而非销毁重造：蓝图装配机的零件聚合会随销毁丢失；
+##   3. 场上没有完好飞机时（坠毁且背包已空）补一架默认机，保证重置后一定能飞；
+##   4. 玩家传送回初始出生点、朝北正对飞机（与开局摆机同一姿态）。
+func reset_flight_experience() -> void:
+	if _flight_spawn == Vector3.ZERO:
+		return
+	# 回放中让位（同 player 的 replaying 守卫）：运镜时搬世界会打断演出。
+	if _replay != null and _replay.is_playing():
+		Events.notice.emit("🎬 回放中不能重置。")
+		return
+	if _player.is_riding():
+		_player.exit_aircraft()
+	var parked: Aircraft = null
+	for child in get_children():
+		var craft := child as Aircraft
+		if craft == null or not is_instance_valid(craft):
+			continue
+		if craft.is_wrecked():
+			# 残骸提前消散（翻篇）。先禁碰撞再 queue_free：释放发生在帧末，
+			# 不清碰撞的话同位置新机出生时会被残骸的 depenetration 压下去
+			# （实测下沉 2.2 m），禁碰撞后残骸只余视觉翻倒。
+			craft.collision_layer = 0
+			craft.collision_mask = 0
+			craft.queue_free()
+		elif parked == null:
+			parked = craft
+	if _craft_park != Vector3.ZERO:
+		# 玩家在远方坠机时，初始跑道区块可能已流式卸载：先同步确保该区域
+		# 区块就绪（幂等，已加载即跳过），否则飞机 place 出去无地面可停，
+		# 会自由落体嵌入跑道、被 depenetration 乱推（实测浮起 1.6 m）。
+		# 顺带让玩家的落点安全搜索读到真实方块。
+		var pad := Vector3i(40, 0, 40)
+		_world.ensure_chunks_in_region(
+			Vector3i(_craft_park) - pad, Vector3i(_craft_park) + pad)
+		if parked != null:
+			parked.place(_craft_park, PI)  # place() 自带状态复位与满油
+		else:
+			Aircraft.spawn(self, _craft_park, PI)
+	else:
+		# 无跑道区域：飞机就地摆正，玩家回出生点。
+		if parked != null:
+			parked.place(parked.global_position, PI)
+	_player.teleport_to(_flight_spawn, PI)
+	Events.notice.emit("✈️ 已重置：回到跑道起点，满油待发。")
+
+
+## Y（D-039）：飞行重置入口。守卫与 player 的飞行键一致：死亡停顿 / 回放 /
+## 模态面板打开时让位——背包、地图选择器、工坊台里按 Y 不应把世界搬走。
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	if not event.is_action_pressed("aircraft_reset"):
+		return
+	if _player == null or _player.is_dead():
+		return
+	if _hud != null and _hud.is_any_panel_open():
+		return
+	reset_flight_experience()
+	get_viewport().set_input_as_handled()
 
 
 ## 选图确认：记录区域并重载场景，由新实例按该区域重新生成世界。
