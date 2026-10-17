@@ -137,6 +137,11 @@ var _altitude_agl := 0.0
 var _agl_timer := 0.0
 ## 上一帧是否着地（起飞边沿检测）。
 var _was_on_floor := true
+## 首物理帧地面态是否已同步。新 add_child 的 CharacterBody3D 首帧 is_on_floor()
+## 恒为 false（move_and_slide 尚未跑），据它判「刚离地」会让每架新落位飞机凭空
+## 多发一次 aircraft_took_off（flew 成就 +1）。首帧只用当帧地面态同步 _was_on_floor、
+## 不派发跳变事件，等价「出生即基准」——与落位高度无关。
+var _ground_synced := false
 ## 本次飞行已达成的离地高度里程碑与里程里程碑（m）。
 var _alt_milestone := 0.0
 var _dist_milestone := 0.0
@@ -577,6 +582,16 @@ func _animate_bp_surfaces(throttle: float, pitch: float, delta: float) -> void:
 ## 飞行里程统计：起飞边沿、离地高度里程碑、累计里程，广播给进度核心
 ## （探索模式「展翅高飞 / 冲上云霄 / 空中漫游」三枚成就的数据源）。
 func _update_flight_tracking(delta: float, on_ground: bool) -> void:
+	# 首物理帧守卫：此处 on_ground 读自 move_and_slide() 之前，刚 add_child 的
+	# CharacterBody3D 首帧恒为 false（与落位高度无关）。不能据此判「刚离地/刚触地」，
+	# 否则每架新落位飞机都会凭空多发一次 aircraft_took_off。故首帧只把基准态
+	# 同步为当帧地面态并跳过本帧跳变派发；油耗/气动/里程首帧均为零量，从下一帧起算。
+	if not _ground_synced:
+		_ground_synced = true
+		_was_on_floor = on_ground
+		if on_ground:
+			_altitude_agl = 0.0
+		return
 	if not on_ground and _was_on_floor:
 		# 起飞：本次飞行的里程碑从零起算（落地下次再飞可重新达成）。
 		Events.aircraft_took_off.emit()

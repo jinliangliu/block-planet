@@ -13,9 +13,18 @@ extends RefCounted
 ## 逻辑与机场一致。
 
 const RUNWAY_LEN := 56           # 沿 +Z，满油门滑跑到抬轮有余量
-const RUNWAY_WID := 12           # 沿 X；机身宽 6.6 格，留侧向余量
+## 沿 X。用户选定「跑道加宽到翼展全包」：翼展 48 格（24 m）+ 每侧 2 格余量 = 52 格
+## = 26 m。1 格 = 0.5 m，故 52 格宽 = 26 m。（旧值 12 格只有 6 m，比机身碰撞盒
+## 13.2 格还窄，只是踩着中线滑跑——这是「米误标格」同源错误，已订正。）
+const RUNWAY_WID := 52
 const CLEAR_H := 12              # 跑道 / 机库上方净空（块）
 const HANGAR_DEPTH := 4
+## 机库宽度（格）。机库宽度与跑道宽度**解耦**：跑道按翼展加宽后不应把这座装饰性
+## 棚屋连带拉宽（它进深仅 4 格（2 m）、围墙 6 格高、朝跑道只开 3 格（1.5 m）门洞，
+## 本就不是能停机的库；拉到 54 格宽 × 2 m 深，视觉上就是一堵 27 m 长的大墙挖了个洞，
+## 且没有任何玩法收益——机翼塞不进去）。12 格 = 6 m，取体素 0.5 m 化之前的旧跑道
+## 宽度，保持机库原有外观。
+const HANGAR_WID := 12
 const FIELD_LEN := 32            # 简易降落场：短跑道，够起飞 / 停稳即用
 const FIELD_WID := 10
 const FIELD_CLEAR_H := 8
@@ -120,8 +129,9 @@ func _mark_approach(with_approach: bool) -> void:
 
 ## 机库：南端一座开放式圆石棚（围墙高 6 + 木顶），朝跑道（+Z）留 3 宽门洞。
 ## 与跑道同基准高度，独立于村庄结构。仅机场（build）建造。
+## 宽度用 HANGAR_WID（与跑道宽度解耦），纵向仍以跑道南端 RUNWAY_LEN 定位。
 func _build_hangar(center: Vector3i) -> void:
-	var half_w := RUNWAY_WID / 2
+	var half_w := HANGAR_WID / 2
 	var z0 := center.z - RUNWAY_LEN / 2 - HANGAR_DEPTH
 	var x0 := center.x - half_w - 1
 	var x1 := center.x + half_w + 1
@@ -175,8 +185,11 @@ func _spawn_point() -> Vector3:
 ## 机头朝 +Z（北端，沿跑道进近方向的反向 = 起飞方向，对齐红端/北端导航灯）。
 ## 与出生点拉开 ≥19 格（≈9.5 m）以避开机身碰撞盒半长 7.8 m，否则玩家开局
 ## 会生成在机体碰撞盒内被物理挤出；同时距北端仍有整条跑道余量供满油门滑跑抬轮。
-## 返回点为跑道铺面 y；Aircraft.spawn 会据 place() 自行沉降到
-## base_y + GROUND_CLEARANCE，与手持右键放机共用同一条落位路径。
+## 返回点是跑道的**可站立顶面**（= base_y + 1）：base_y 是跑道铺装方块自身的 y，
+## 方块占据 [base_y, base_y + 1]，顶面在 base_y + 1 —— 与 _spawn_point() 同一语义。
+## 若误返回 base_y（方块自身 y）会让机轮/碰撞盒陷进跑道 0.95 m，首物理帧因
+## is_on_floor()==false 误发 aircraft_took_off（见 tmp/park_dbg 落位回归）。Aircraft.spawn 的
+## place() 会在此顶面之上再加 GROUND_CLEARANCE，与手持右键放机共用同一条落位路径。
 func parking_spot() -> Vector3:
 	return Vector3(
-		origin.x + 0.5, float(base_y), float(origin.z - _len / 2 + 22) + 0.5)
+		origin.x + 0.5, float(base_y + 1), float(origin.z - _len / 2 + 22) + 0.5)

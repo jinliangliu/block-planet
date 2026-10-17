@@ -35,10 +35,10 @@ func _run() -> void:
 	GameState.set_mode(GameState.Mode.SURVIVAL)
 
 	# 1) 机场跑道已生成：统计机场区域内 COBBLESTONE 跑道方块数量。
-	#    机场中心 (96,96)，跑道宽 12 / 长 57，机库另铺圆石，数量应远大于阈值。
+	#    机场中心 (114,96)，跑道宽 52 / 长 57，机库另铺圆石，数量应远大于阈值。
 	var cobble := 0
-	for x in range(90, 103):
-		for z in range(68, 126):
+	for x in range(86, 143):
+		for z in range(66, 127):
 			for y in range(30, 46):
 				if world.get_block(Vector3i(x, y, z)) == BlockTypes.Block.COBBLESTONE:
 					cobble += 1
@@ -64,7 +64,7 @@ func _run() -> void:
 	#     北红在 spawn_z+53（均在已整平足迹内、base_y 高度）。
 	#     先同步强制加载机场整区：流式 LOAD_RADIUS=2 会把机场北端所在 chunk 卸载
 	#     （get_block 对未载区块返 AIR），此处与读取同帧完成，流式来不及卸载。
-	world.ensure_chunks_in_region(Vector3i(88, 0, 62), Vector3i(104, 0, 126))
+	world.ensure_chunks_in_region(Vector3i(82, 0, 60), Vector3i(146, 0, 128))
 	var ap_nav := false
 	for dx in range(-6, 7):
 		var south := world.get_block(Vector3i(spawn_x + dx, feet_y, spawn_z - 3))
@@ -98,16 +98,17 @@ func _run() -> void:
 	_check(after == before + 1, "生存模式回收飞机退回背包（+1，%d → %d）" % [before, after])
 
 	# 4) 飞行任务航路 / 降落区锚定机场（runway ↔ mission 联动）。
-	var mm := MissionData.missions_for_airport(Vector3(96.0, 0.0, 96.0))
+	#    机场中心随跑道加宽东移到 (114,96)（避开亚洲村庄 A），任务锚点同步。
+	var mm := MissionData.missions_for_airport(Vector3(114.0, 0.0, 96.0))
 	_check(mm.size() == 3, "missions_for_airport 返回三任务")
 	var landing: MissionData = mm[2]
 	_check(landing.type == MissionData.Type.LANDING, "第三个任务为降落")
-	_check(landing.zone_center.distance_to(Vector3(96.0, 0.0, 96.0)) < 0.01,
-		"降落区锚定机场中心 (96,96)")
+	_check(landing.zone_center.distance_to(Vector3(114.0, 0.0, 96.0)) < 0.01,
+		"降落区锚定机场中心 (114,96)")
 	var circuit: MissionData = mm[1]
 	var anchored := circuit.waypoints.size() == 4
 	for wp: Vector3 in circuit.waypoints:
-		if Vector2(wp.x - 96.0, wp.z - 96.0).length() > 200.0:
+		if Vector2(wp.x - 114.0, wp.z - 96.0).length() > 200.0:
 			anchored = false
 	_check(anchored, "绕点航路绕机场中心（4 点，均在 200 m 内）")
 
@@ -119,9 +120,9 @@ func _run() -> void:
 	#     首航点越过跑道北端（+28），第三航点在南端外侧。
 	var wps := circuit.waypoints
 	var sized := wps.size() == 4
-	var final_on_centerline := sized and is_equal_approx(wps[3].x, 96.0) and is_equal_approx(wps[0].x, 96.0)
+	var final_on_centerline := sized and is_equal_approx(wps[3].x, 114.0) and is_equal_approx(wps[0].x, 114.0)
 	var spans_runway := sized and wps[0].z > 96.0 + 28.0 and wps[2].z < 96.0 - 28.0
-	_check(final_on_centerline and spans_runway, "绕点航路末程对准跑道中线（单向进场，x=96）")
+	_check(final_on_centerline and spans_runway, "绕点航路末程对准跑道中线（单向进场，x=114）")
 
 	# 端到端：main 经 HUD 注入后，面板实际持有的是锚定机场的任务集。
 	var hud_node: HUD = main_scene.get_node("UI")
@@ -129,7 +130,7 @@ func _run() -> void:
 	var live_ok := false
 	if panel != null and panel._missions.size() == 3:
 		var live_landing: MissionData = panel._missions[2]
-		live_ok = live_landing.zone_center.distance_to(Vector3(96.0, 0.0, 96.0)) < 0.01
+		live_ok = live_landing.zone_center.distance_to(Vector3(114.0, 0.0, 96.0)) < 0.01
 	_check(live_ok, "面板降落区已锚定机场（端到端注入生效）")
 
 	# 5) 简易降落场（build_field）：大洋/极地区域的无机库短跑道。

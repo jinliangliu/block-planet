@@ -112,6 +112,10 @@ func _ready() -> void:
 	if GameState.is_explore() and craft_park != Vector3.ZERO \
 			and DisplayServer.get_name() != "headless":
 		Aircraft.spawn(self, craft_park, PI)
+		# 开局让玩家正对停机飞机（+Z 正北 = 跑道起飞方向）：出生点在南段、机头朝南
+		# 看不到身后北侧的飞机——把玩家 yaw 转 180°。第三人称相机的 yaw 由父节点
+		# （Player）旋转自动跟随，只需转玩家，别单独动相机。仅探索模式成功摆机时设置。
+		_player.rotation.y = PI
 		Events.notice.emit("✈️ 跑道上停着你的飞机，走到跟前按 F 登机。")
 	_mob_spawner.setup(_player, _world, _day_night)
 	_mob_spawner.set_region(profile)
@@ -273,12 +277,17 @@ func _build_village() -> void:
 		builder.build(_world, _player, _day_night, self, offset)
 
 
-## 机场中心：亚洲村庄在原点附近，机场放到东南角（96,96）避开村庄；
-## 其余大陆区域出生点本就在 (8,8) 附近，机场即落其旁，开局即达跑道。
+## 机场中心：跑道加宽到翼展全包（RUNWAY_WID=52 格=26 m，半宽 26 格）后，
+## 机场铺装/整平足迹横向达 ±(26+2)=±28 格、_probe_base_y 达 ±(26+3)=±29 格，
+## 必须让「中心 x − 29 ≥ 村庄 A 整平上界 82 + 2」，即 center.x ≥ 113，否则会
+## 压到亚洲村庄 A（x∈[26,82]）。故取 114：跑道 x∈[88,140]，既远离村庄 A（≤82），
+## 又远离东侧远景村庄（村 B x∈[154,210]）。机场沿 +Z，z 中心保持各区原值（亚洲 96、
+## 其余 8）。其余大陆原为 (8,8)：加宽后跑道会伸到负 x 且与原点村庄 A 重叠
+## （x∈[26,34]），故一并东移到 114（z 仍 8，向南段跑道落位与旧版一致）。
 func _airport_center(region_id: int) -> Vector3i:
 	if region_id == RegionAtlas.ASIA:
-		return Vector3i(96, 0, 96)
-	return Vector3i(8, 0, 8)
+		return Vector3i(114, 0, 96)
+	return Vector3i(114, 0, 8)
 
 
 ## 出生点：在出生列按真实方块向上扫描"两格空气 + 实心底"，双脚精确落在
