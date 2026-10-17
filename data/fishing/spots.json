@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note_zh": "四大洋钓点。atlas_region 对应 RegionAtlas 的区域号（0 太平洋 / 1 大西洋 / 2 印度洋 / 3 北冰洋），region_id 对应生物图鉴的区域 id。fish_pool 里的 id 必须在 fish.json 中存在，否则加载期报错。",
+  "note_zh": "四大洋钓点。atlas_region 对应 RegionAtlas 的区域号（0 太平洋 / 1 大西洋 / 2 印度洋 / 3 北冰洋），region_id 对应生物图鉴的区域 id。fish_pool 里的 id 必须在 fish.json 中存在，否则加载期报错。 unlock=boat 的出海钓点（四大洋 × 近/中/远海）只从船上按距港距离解锁，见 BoatSystem.spot_for_distance。",
   "spots": [
     {
       "id": "pacific_coast",
@@ -10,7 +10,11 @@
       "name_en": "Pacific Coast",
       "depth": "shallow",
       "intro_zh": "风平浪静的近岸浅滩，礁石边躲着小丑鱼，远处偶有鲑鱼洄游经过。",
-      "fish_pool": ["pacific_clownfish", "pacific_salmon", "great_white_shark"],
+      "fish_pool": [
+        "pacific_clownfish",
+        "pacific_salmon",
+        "great_white_shark"
+      ],
       "unlock": "default"
     },
     {
@@ -21,7 +25,11 @@
       "name_en": "Atlantic Open Sea",
       "depth": "deep",
       "intro_zh": "开阔的大洋水域，鳕鱼群贴着大陆架，金枪鱼在深处高速巡游。",
-      "fish_pool": ["atlantic_cod", "atlantic_mackerel", "bluefin_tuna"],
+      "fish_pool": [
+        "atlantic_cod",
+        "atlantic_mackerel",
+        "bluefin_tuna"
+      ],
       "unlock": "default"
     },
     {
@@ -32,7 +40,11 @@
       "name_en": "Indian Coral Reef",
       "depth": "shallow",
       "intro_zh": "五彩的珊瑚礁盘，小丑鱼在海葵间穿梭，礁外是鲸鲨缓慢巡游的深水。",
-      "fish_pool": ["clownfish", "lionfish", "whale_shark_io"],
+      "fish_pool": [
+        "clownfish",
+        "lionfish",
+        "whale_shark_io"
+      ],
       "unlock": "default"
     },
     {
@@ -43,8 +55,176 @@
       "name_en": "Arctic Ice Edge",
       "depth": "shallow",
       "intro_zh": "浮冰边缘的冷水，北极鳕鱼成群，冰缝深处有格陵兰鲨慢慢游动。",
-      "fish_pool": ["arctic_cod", "narwhal", "greenland_shark"],
+      "fish_pool": [
+        "arctic_cod",
+        "narwhal",
+        "greenland_shark"
+      ],
       "unlock": "default"
+    },
+    {
+      "id": "pacific_near",
+      "region_id": "pacific_ocean",
+      "atlas_region": 0,
+      "name_zh": "太平洋近海",
+      "name_en": "Pacific Near Shore",
+      "depth": "shallow",
+      "intro_zh": "离岛不远的近海，水浅鱼密，是练手的好地方。",
+      "fish_pool": [
+        "pacific_clownfish"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "pacific_mid",
+      "region_id": "pacific_ocean",
+      "atlas_region": 0,
+      "name_zh": "太平洋中海",
+      "name_en": "Pacific Middle Sea",
+      "depth": "mid",
+      "intro_zh": "开出一段的中海，鱼种开始换，个头也见长。",
+      "fish_pool": [
+        "pacific_salmon",
+        "pacific_mackerel"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "pacific_far",
+      "region_id": "pacific_ocean",
+      "atlas_region": 0,
+      "name_zh": "太平洋远海",
+      "name_en": "Pacific Open Sea",
+      "depth": "deep",
+      "intro_zh": "真正的外海，风浪大，只有大家伙才待得下去。",
+      "fish_pool": [
+        "great_white_shark",
+        "pacific_marlin"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "atlantic_near",
+      "region_id": "atlantic_ocean",
+      "atlas_region": 1,
+      "name_zh": "大西洋近海",
+      "name_en": "Atlantic Near Shore",
+      "depth": "shallow",
+      "intro_zh": "离岛不远的近海，水浅鱼密，是练手的好地方。",
+      "fish_pool": [
+        "atlantic_cod",
+        "atlantic_herring"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "atlantic_mid",
+      "region_id": "atlantic_ocean",
+      "atlas_region": 1,
+      "name_zh": "大西洋中海",
+      "name_en": "Atlantic Middle Sea",
+      "depth": "mid",
+      "intro_zh": "开出一段的中海，鱼种开始换，个头也见长。",
+      "fish_pool": [
+        "atlantic_mackerel",
+        "atlantic_halibut"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "atlantic_far",
+      "region_id": "atlantic_ocean",
+      "atlas_region": 1,
+      "name_zh": "大西洋远海",
+      "name_en": "Atlantic Open Sea",
+      "depth": "deep",
+      "intro_zh": "真正的外海，风浪大，只有大家伙才待得下去。",
+      "fish_pool": [
+        "bluefin_tuna"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "indian_near",
+      "region_id": "indian_ocean",
+      "atlas_region": 2,
+      "name_zh": "印度洋近海",
+      "name_en": "Indian Near Shore",
+      "depth": "shallow",
+      "intro_zh": "离岛不远的近海，水浅鱼密，是练手的好地方。",
+      "fish_pool": [
+        "clownfish",
+        "indian_mackerel"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "indian_mid",
+      "region_id": "indian_ocean",
+      "atlas_region": 2,
+      "name_zh": "印度洋中海",
+      "name_en": "Indian Middle Sea",
+      "depth": "mid",
+      "intro_zh": "开出一段的中海，鱼种开始换，个头也见长。",
+      "fish_pool": [
+        "lionfish",
+        "giant_grouper"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "indian_far",
+      "region_id": "indian_ocean",
+      "atlas_region": 2,
+      "name_zh": "印度洋远海",
+      "name_en": "Indian Open Sea",
+      "depth": "deep",
+      "intro_zh": "真正的外海，风浪大，只有大家伙才待得下去。",
+      "fish_pool": [
+        "whale_shark_io"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "arctic_near",
+      "region_id": "arctic_ocean",
+      "atlas_region": 3,
+      "name_zh": "北冰洋近海",
+      "name_en": "Arctic Near Shore",
+      "depth": "shallow",
+      "intro_zh": "离岛不远的近海，水浅鱼密，是练手的好地方。",
+      "fish_pool": [
+        "arctic_cod",
+        "arctic_char"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "arctic_mid",
+      "region_id": "arctic_ocean",
+      "atlas_region": 3,
+      "name_zh": "北冰洋中海",
+      "name_en": "Arctic Middle Sea",
+      "depth": "mid",
+      "intro_zh": "开出一段的中海，鱼种开始换，个头也见长。",
+      "fish_pool": [
+        "narwhal",
+        "arctic_skate"
+      ],
+      "unlock": "boat"
+    },
+    {
+      "id": "arctic_far",
+      "region_id": "arctic_ocean",
+      "atlas_region": 3,
+      "name_zh": "北冰洋远海",
+      "name_en": "Arctic Open Sea",
+      "depth": "deep",
+      "intro_zh": "真正的外海，风浪大，只有大家伙才待得下去。",
+      "fish_pool": [
+        "greenland_shark"
+      ],
+      "unlock": "boat"
     }
   ]
 }

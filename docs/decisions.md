@@ -1384,6 +1384,27 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 
 ---
 
+## D-042 航海玩法：大洋默认发船 + 出海距离决定鱼种 + 航海 HUD
+
+**背景**：用户需求——四大洋地图主体全是海，玩家初始地点为海岛，岛上设有港口，港湾内有种类不一的船只；进入玩法后系统默认提供一艘船。出海距离远近决定能钓的鱼种；驾船出海后主界面为航海模式，关注地理方位、海况、船的航向、油量等。
+
+**决策**：航海作为「探索模式」下大洋区的专属子玩法。沿用飞行玩法的两段式（纯逻辑 `BoatPhysics` + 场景节点 `Boat`，与 `CarPhysics`/`Aircraft` 同构）；`BoatSystem` 为 Autoload 中枢（拥有关系 + 海况模型 + 距离分带）；港口 `HarborBuilder` 依附于大洋简易降落场所在的海岛，仅在 `has_landing_field` 的大洋区生成。
+
+**实现**：
+- `data/boating/boats.json` + `scripts/vehicles/boat_physics.gd`：木筏（无动力，系统默认发放）/ 小渔船（深海任务解锁）/ 快艇（商店）三型；街机向手感（推油即走、打舵即转、风沿航向顺推逆阻、波浪降速、熄火漂流）；纯逻辑可无头单测。
+- `scripts/vehicles/boat.gd` + `boat_model.gd`：CharacterBody3D 浮水/地形碰撞/驾驶座/读数广播；程序化体素船模（三型各异）；靠港自动加油；`harbor_pos` 注入后才有距港距离。
+- `scripts/systems/boat_system.gd`：默认发放木筏（`user://boats.json` 持久化拥有/油量）；海况 = 区域×天气×时刻（确定性，无随机）；距港距离 `band_of` → near/mid/far 三档，对应 `spots.json` 四大洋×3 带共 12 个出海钓点；`input_suspended` 模态面板时锁舵。
+- `scripts/systems/harbor_builder.gd` + `main.gd _build_harbor`：沙滩平台 + 木栈桥 + 灯塔 + 泊位 + 2 艘异型景观船；避开降落场足迹；三段式写入（preload→bulk→重建保留窗）。
+- `scripts/player/player.gd`：F 登船（优先）/ X 下船，与飞行互斥；`_boat` 成员 + `boat()/is_riding_boat()/boat_board_target()`。
+- `scripts/ui/boat_hud.gd`：航海仪表（罗经带 + 坐标 + 距港/渔场带 + 海况浪高/风向 + 速度/油门 + 油量/熄火），只信 `Player.boat().snapshot()` 一份数据；`Events.boat_ride_changed` 显隐。
+- 钓鱼分带入口：`fishing_gear_ui.gd` 新增 `open_for_boat(atlas_region, distance_m)`，`hud._on_fishing_requested` 在 `is_riding_boat()` 时走此路径；`_rebuild_boat_spot_row` 三档渔场只让当前距离档可下竿，其余显示「需航行 Xm」。
+
+**范围**：只新增航海体系，不改动飞行/竞速/岸钓逻辑。岸钓点（unlock=default）与出海钓点（unlock=boat）在 `get_spots_for_atlas` 中分列。介绍页地理文案、图例 🎣 不动。
+
+**验证**：新增 `tests/boat_probe.gd`（27 断言全 PASS）：默认发船、港口建造（玩家船泊位+2 景观船）、登/离船、BoatPhysics 全油门能开/打舵转向/动力船耗油/风沿航向分量、海况字段、distance→band→spot 映射、12 个出海钓点鱼池非空；全量回归 0 FAIL（见 `tmp/regression.txt`），`user://` 逐字节还原。
+
+---
+
 ## 附：待定/开放问题
 
 | 编号 | 问题 | 现状 |

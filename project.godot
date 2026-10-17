@@ -22,6 +22,7 @@ Progress="*res://scripts/systems/progress_manager.gd"
 BestiaryData="*res://scripts/systems/bestiary_data.gd"
 FishingSystem="*res://scripts/systems/fishing_system.gd"
 RaceSystem="*res://scripts/systems/race_system.gd"
+BoatSystem="*res://scripts/systems/boat_system.gd"
 
 [debug]
 

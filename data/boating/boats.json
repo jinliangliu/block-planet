@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "note_zh": "四大洋航海玩法船型表（D-042）。速度/加速度为设计值（m/s，代码里按 1 格=0.5 m 换算 ×2）；fuel_l=0 表示无动力（木筏，靠桨/水流，不耗油也不会熄火）；unlock=default 开局即拥有（系统默认提供一艘木筏），quest:<任务id> 任务奖励解锁，shop 绿宝石购买（预留）。seats 为载员数（儿童向单船不设多人）。",
+  "boats": [
+    {
+      "id": "raft",
+      "name_zh": "木筏",
+      "name_en": "Raft",
+      "desc_zh": "结实的木头扎成的小筏子，不用油也能划，是港湾里默认提供的那艘。",
+      "max_speed_mps": 5.0,
+      "accel_mps2": 1.4,
+      "turn_rate": 1.0,
+      "fuel_l": 0.0,
+      "burn_lps": 0.0,
+      "seats": 1,
+      "unlock": "default",
+      "hull_color": [
+        0.55,
+        0.38,
+        0.2
+      ],
+      "trim_color": [
+        0.72,
+        0.55,
+        0.32
+      ],
+      "has_cabin": false,
+      "has_mast": false,
+      "length_blocks": 7.0,
+      "width_blocks": 3.6
+    },
+    {
+      "id": "fishing_boat",
+      "name_zh": "小渔船",
+      "name_en": "Fishing Boat",
+      "desc_zh": "带舱室和活水舱的小渔船，摇得稳、跑得远，出海钓鱼的老伙计。",
+      "max_speed_mps": 11.0,
+      "accel_mps2": 2.0,
+      "turn_rate": 0.85,
+      "fuel_l": 30.0,
+      "burn_lps": 0.06,
+      "seats": 2,
+      "unlock": "quest:q_fish_deep",
+      "hull_color": [
+        0.23,
+        0.36,
+        0.55
+      ],
+      "trim_color": [
+        0.9,
+        0.9,
+        0.92
+      ],
+      "has_cabin": true,
+      "has_mast": false,
+      "length_blocks": 13.0,
+      "width_blocks": 5.0
+    },
+    {
+      "id": "speedboat",
+      "name_zh": "快艇",
+      "name_en": "Speedboat",
+      "desc_zh": "屁股冒烟的快艇，冲浪一把好手，就是油烧得飞快。",
+      "max_speed_mps": 20.0,
+      "accel_mps2": 3.4,
+      "turn_rate": 1.25,
+      "fuel_l": 45.0,
+      "burn_lps": 0.14,
+      "seats": 2,
+      "unlock": "shop",
+      "hull_color": [
+        0.8,
+        0.25,
+        0.2
+      ],
+      "trim_color": [
+        0.96,
+        0.96,
+        0.98
+      ],
+      "has_cabin": true,
+      "has_mast": false,
+      "length_blocks": 11.0,
+      "width_blocks": 4.2
+    }
+  ]
+}

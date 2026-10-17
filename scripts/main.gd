@@ -65,6 +65,7 @@ func _ready() -> void:
 	var airport_spawn := Vector3.ZERO
 	var craft_park := Vector3.ZERO
 	var mission_anchor := Vector3.ZERO
+	var field_site := Vector3i.ZERO
 	var region := GameState.current_region
 	if RegionAtlas.has_airport(region):
 		var center := _airport_center(region)
@@ -74,6 +75,7 @@ func _ready() -> void:
 		mission_anchor = Vector3(center)
 	elif RegionAtlas.has_landing_field(region):
 		var site := _find_field_site()
+		field_site = site
 		var builder := AirportBuilder.new()
 		airport_spawn = builder.build_field(_world, site)
 		craft_park = builder.parking_spot()
@@ -81,6 +83,10 @@ func _ready() -> void:
 	# 村庄先于出生点生成：亚洲出生点锚定在村庄整平区内，扫描时读到的
 	# 必须是整平后的 GRASS+空气（set_block_deferred 的数据写入是同步的）。
 	_build_village()
+	# 航海玩法（D-042）：四大洋在降落场所在的海岛边缘建港，默认提供一艘船。
+	# 注意时序：机场/降落场与村庄都已落数据，岸点搜索读到的是成岛后的地形。
+	if _is_ocean_region(region):
+		_build_harbor(field_site, craft_park)
 	var spawn_pos: Vector3
 	if airport_spawn != Vector3.ZERO:
 		spawn_pos = airport_spawn
@@ -158,6 +164,9 @@ func _ready() -> void:
 ## vertical_speed/wrecked/block_under）。不在机上则无需喂帧——面板只在
 ## RUNNING 时透传。
 func _physics_process(delta: float) -> void:
+	# 航海玩法（D-042）：模态面板（地图选择器 / 钓具界面 / 教学浮层）打开时
+	# 锁舵——船收油随波减速停住，不会在玩家看界面时自己跑掉；关闭即恢复。
+	BoatSystem.input_suspended = _hud.is_any_panel_open() or _hud._any_overlay_open()
 	var craft := _player.aircraft()
 	if craft == null or not is_instance_valid(craft):
 		return
@@ -335,8 +344,46 @@ func _on_test_fly_requested(bp: Blueprint) -> void:
 	Events.notice.emit("🔧 蓝图飞机已放出，起飞！")
 
 
-## 生成固定村庄与掠夺塔（含村民与掠夺者，挂载于本节点，不受昼夜清空管理）。
-## 每个区域建 3 座村庄：出生点旁一座（亚洲出生锚定该村），东西南各远处一座。
+## 四大洋（0~3）：航海玩法只属于海面区域；大洋洲（9）虽然有降落场但是
+## 大陆地块，不建港。
+func _is_ocean_region(region_id: int) -> bool:
+	return region_id >= RegionAtlas.PACIFIC and region_id <= RegionAtlas.ARCTIC
+
+
+## 建港（D-042）：海岛边缘的沙滩平台 + 木栈桥 + 灯塔 + 泊位。
+## 泊位分工：栈桥向海端 = 玩家默认船（船头朝外海）；栈桥两侧 = 港湾里
+## 泊着的两艘异型船（小渔船 / 快艇，纯景观，供「种类不一的船只」）。
+## 找不到岸线（极小的岛）时退到停机位旁的地面上泊船，玩法仍可用。
+func _build_harbor(field_site: Vector3i, craft_park: Vector3) -> void:
+	var harbor := HarborBuilder.new().build(_world, field_site)
+	var player_boat_id := BoatSystem.current_boat_id()
+	if not bool(harbor.get("found", false)):
+		var at := craft_park + Vector3(7.0, 0.0, 0.0) if craft_park != Vector3.ZERO \
+			else Vector3(field_site.x + 7.0, 0.0, field_site.y)
+		var ground_y := float(_world.get_surface_height(int(at.x), int(at.z))) + 1.0
+		var boat := Boat.spawn(self, Vector3(at.x, ground_y, at.z), PI, player_boat_id)
+		boat.harbor_pos = Vector3.ZERO  # 无港口：距港 -1（近海带）
+		boat.setup_world(_world, _day_night)
+		Events.notice.emit("⛵ 岛上没有合适的岸线，你的船停在跑道旁——按 F 登船。")
+		return
+	var dock_dir: Vector2 = harbor["dock_dir"]
+	var facing := atan2(dock_dir.x, dock_dir.y)  # rotation.y 与船头约定一致
+	var player_boat := Boat.spawn(self, harbor["dock_end"], facing, player_boat_id)
+	player_boat.harbor_pos = harbor["dock_end"]
+	player_boat.setup_world(_world, _day_night)
+	# 港湾泊船：两艘异型船面朝港内（垂直栈桥、船尾朝海）。
+	var side_facing := facing + PI * 0.5
+	var moorings: Array = harbor["moorings"]
+	var scenery_ids := ["fishing_boat", "speedboat"]
+	for i in range(mini(moorings.size(), scenery_ids.size())):
+		var moored := Boat.spawn(self, moorings[i],
+			side_facing if i == 0 else side_facing + PI, scenery_ids[i], false)
+		moored.harbor_pos = harbor["dock_end"]
+		moored.setup_world(_world, _day_night)
+	Events.notice.emit("⛵ 港口泊着你的船——沿木栈桥走到头按 F 登船；开得越远，鱼种越多。")
+
+
+## 生成固定村庄与掠夺塔（含村民与掠夺者，挂载于本节点，不受昼夜清空管理）。## 每个区域建 3 座村庄：出生点旁一座（亚洲出生锚定该村），东西南各远处一座。
 ## 村庄格数布局体素 0.5m 化后占地（格）×2，村庄间距同步 ×2。
 func _build_village() -> void:
 	if GameState.current_region in [RegionAtlas.ARCTIC, RegionAtlas.ANTARCTICA]:

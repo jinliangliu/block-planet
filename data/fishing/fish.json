@@ -5,15 +5,25 @@
     {
       "id": "pacific_clownfish",
       "region_id": "pacific_ocean",
-      "spot_ids": ["pacific_coast"],
+      "spot_ids": [
+        "pacific_coast"
+      ],
       "habitat": "ocean",
       "depth": "shallow",
       "rarity": "common",
       "difficulty": 1,
-      "tags": ["reef_fish", "small_fish"],
-      "preferred_bait": ["live_shrimp"],
+      "tags": [
+        "reef_fish",
+        "small_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
       "fight_power": 1,
-      "weight_kg": [0.05, 0.25],
+      "weight_kg": [
+        0.05,
+        0.25
+      ],
       "name_zh": "小丑鱼",
       "name_en": "Clownfish",
       "scientific": "Amphiprion ocellaris",
@@ -22,15 +32,25 @@
     {
       "id": "pacific_salmon",
       "region_id": "pacific_ocean",
-      "spot_ids": ["pacific_coast"],
+      "spot_ids": [
+        "pacific_coast"
+      ],
       "habitat": "ocean",
       "depth": "mid",
       "rarity": "common",
       "difficulty": 2,
-      "tags": ["small_fish"],
-      "preferred_bait": ["live_shrimp", "metal_lure"],
+      "tags": [
+        "small_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp",
+        "metal_lure"
+      ],
       "fight_power": 3,
-      "weight_kg": [2.0, 6.5],
+      "weight_kg": [
+        2.0,
+        6.5
+      ],
       "name_zh": "太平洋鲑鱼",
       "name_en": "Pacific Salmon",
       "scientific": "Oncorhynchus",
@@ -39,15 +59,24 @@
     {
       "id": "great_white_shark",
       "region_id": "pacific_ocean",
-      "spot_ids": ["pacific_coast"],
+      "spot_ids": [
+        "pacific_coast"
+      ],
       "habitat": "ocean",
       "depth": "deep",
       "rarity": "epic",
       "difficulty": 6,
-      "tags": ["predator"],
-      "preferred_bait": ["metal_lure"],
+      "tags": [
+        "predator"
+      ],
+      "preferred_bait": [
+        "metal_lure"
+      ],
       "fight_power": 9,
-      "weight_kg": [400.0, 1100.0],
+      "weight_kg": [
+        400.0,
+        1100.0
+      ],
       "name_zh": "大白鲨",
       "name_en": "Great White Shark",
       "scientific": "Carcharodon carcharias",
@@ -56,15 +85,25 @@
     {
       "id": "atlantic_cod",
       "region_id": "atlantic_ocean",
-      "spot_ids": ["atlantic_open"],
+      "spot_ids": [
+        "atlantic_open"
+      ],
       "habitat": "ocean",
       "depth": "shallow",
       "rarity": "common",
       "difficulty": 1,
-      "tags": ["small_fish", "bottom_fish"],
-      "preferred_bait": ["live_shrimp"],
+      "tags": [
+        "small_fish",
+        "bottom_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
       "fight_power": 2,
-      "weight_kg": [1.5, 8.0],
+      "weight_kg": [
+        1.5,
+        8.0
+      ],
       "name_zh": "大西洋鳕鱼",
       "name_en": "Atlantic Cod",
       "scientific": "Gadus morhua",
@@ -73,15 +112,26 @@
     {
       "id": "atlantic_mackerel",
       "region_id": "atlantic_ocean",
-      "spot_ids": ["atlantic_open"],
+      "spot_ids": [
+        "atlantic_open"
+      ],
       "habitat": "ocean",
       "depth": "mid",
       "rarity": "uncommon",
       "difficulty": 3,
-      "tags": ["small_fish", "predator"],
-      "preferred_bait": ["metal_lure", "live_shrimp"],
+      "tags": [
+        "small_fish",
+        "predator"
+      ],
+      "preferred_bait": [
+        "metal_lure",
+        "live_shrimp"
+      ],
       "fight_power": 4,
-      "weight_kg": [0.3, 1.2],
+      "weight_kg": [
+        0.3,
+        1.2
+      ],
       "name_zh": "大西洋鲭鱼",
       "name_en": "Atlantic Mackerel",
       "scientific": "Scomber scombrus",
@@ -90,15 +140,24 @@
     {
       "id": "bluefin_tuna",
       "region_id": "atlantic_ocean",
-      "spot_ids": ["atlantic_open"],
+      "spot_ids": [
+        "atlantic_open"
+      ],
       "habitat": "ocean",
       "depth": "deep",
       "rarity": "rare",
       "difficulty": 5,
-      "tags": ["predator"],
-      "preferred_bait": ["metal_lure"],
+      "tags": [
+        "predator"
+      ],
+      "preferred_bait": [
+        "metal_lure"
+      ],
       "fight_power": 8,
-      "weight_kg": [60.0, 250.0],
+      "weight_kg": [
+        60.0,
+        250.0
+      ],
       "name_zh": "蓝鳍金枪鱼",
       "name_en": "Atlantic Bluefin Tuna",
       "scientific": "Thunnus thynnus",
@@ -107,15 +166,25 @@
     {
       "id": "clownfish",
       "region_id": "indian_ocean",
-      "spot_ids": ["indian_reef"],
+      "spot_ids": [
+        "indian_reef"
+      ],
       "habitat": "ocean",
       "depth": "shallow",
       "rarity": "common",
       "difficulty": 1,
-      "tags": ["reef_fish", "small_fish"],
-      "preferred_bait": ["live_shrimp"],
+      "tags": [
+        "reef_fish",
+        "small_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
       "fight_power": 1,
-      "weight_kg": [0.05, 0.25],
+      "weight_kg": [
+        0.05,
+        0.25
+      ],
       "name_zh": "小丑鱼",
       "name_en": "Clownfish",
       "scientific": "Amphiprion ocellaris",
@@ -124,15 +193,26 @@
     {
       "id": "lionfish",
       "region_id": "indian_ocean",
-      "spot_ids": ["indian_reef"],
+      "spot_ids": [
+        "indian_reef"
+      ],
       "habitat": "ocean",
       "depth": "mid",
       "rarity": "uncommon",
       "difficulty": 3,
-      "tags": ["reef_fish", "predator"],
-      "preferred_bait": ["live_shrimp", "metal_lure"],
+      "tags": [
+        "reef_fish",
+        "predator"
+      ],
+      "preferred_bait": [
+        "live_shrimp",
+        "metal_lure"
+      ],
       "fight_power": 4,
-      "weight_kg": [0.3, 1.5],
+      "weight_kg": [
+        0.3,
+        1.5
+      ],
       "name_zh": "狮子鱼",
       "name_en": "Lionfish",
       "scientific": "Pterois",
@@ -141,15 +221,24 @@
     {
       "id": "whale_shark_io",
       "region_id": "indian_ocean",
-      "spot_ids": ["indian_reef"],
+      "spot_ids": [
+        "indian_reef"
+      ],
       "habitat": "ocean",
       "depth": "deep",
       "rarity": "epic",
       "difficulty": 6,
-      "tags": ["predator"],
-      "preferred_bait": ["live_shrimp"],
+      "tags": [
+        "predator"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
       "fight_power": 9,
-      "weight_kg": [4000.0, 12000.0],
+      "weight_kg": [
+        4000.0,
+        12000.0
+      ],
       "name_zh": "鲸鲨",
       "name_en": "Whale Shark",
       "scientific": "Rhincodon typus",
@@ -158,15 +247,24 @@
     {
       "id": "arctic_cod",
       "region_id": "arctic_ocean",
-      "spot_ids": ["arctic_edge"],
+      "spot_ids": [
+        "arctic_edge"
+      ],
       "habitat": "ocean",
       "depth": "shallow",
       "rarity": "common",
       "difficulty": 1,
-      "tags": ["small_fish"],
-      "preferred_bait": ["live_shrimp"],
+      "tags": [
+        "small_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
       "fight_power": 2,
-      "weight_kg": [0.1, 0.6],
+      "weight_kg": [
+        0.1,
+        0.6
+      ],
       "name_zh": "北极鳕鱼",
       "name_en": "Arctic Cod",
       "scientific": "Boreogadus saida",
@@ -175,15 +273,24 @@
     {
       "id": "narwhal",
       "region_id": "arctic_ocean",
-      "spot_ids": ["arctic_edge"],
+      "spot_ids": [
+        "arctic_edge"
+      ],
       "habitat": "ocean",
       "depth": "mid",
       "rarity": "epic",
       "difficulty": 7,
-      "tags": ["predator"],
-      "preferred_bait": ["metal_lure"],
+      "tags": [
+        "predator"
+      ],
+      "preferred_bait": [
+        "metal_lure"
+      ],
       "fight_power": 8,
-      "weight_kg": [800.0, 1600.0],
+      "weight_kg": [
+        800.0,
+        1600.0
+      ],
       "name_zh": "独角鲸",
       "name_en": "Narwhal",
       "scientific": "Monodon monoceros",
@@ -192,19 +299,244 @@
     {
       "id": "greenland_shark",
       "region_id": "arctic_ocean",
-      "spot_ids": ["arctic_edge"],
+      "spot_ids": [
+        "arctic_edge"
+      ],
       "habitat": "ocean",
       "depth": "deep",
       "rarity": "legendary",
       "difficulty": 9,
-      "tags": ["bottom_fish", "predator"],
-      "preferred_bait": ["soft_lure", "live_shrimp"],
+      "tags": [
+        "bottom_fish",
+        "predator"
+      ],
+      "preferred_bait": [
+        "soft_lure",
+        "live_shrimp"
+      ],
       "fight_power": 10,
-      "weight_kg": [400.0, 1400.0],
+      "weight_kg": [
+        400.0,
+        1400.0
+      ],
       "name_zh": "格陵兰鲨",
       "name_en": "Greenland Shark",
       "scientific": "Somniosus microcephalus",
       "fact_zh": "游得很慢，却是已知活得最久的脊椎动物，能活三百岁以上。"
+    },
+    {
+      "id": "pacific_mackerel",
+      "region_id": "pacific_ocean",
+      "spot_ids": [
+        "pacific_mid"
+      ],
+      "habitat": "ocean",
+      "depth": "mid",
+      "rarity": "uncommon",
+      "difficulty": 2,
+      "tags": [
+        "schooling",
+        "small_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
+      "fight_power": 3,
+      "weight_kg": [
+        0.3,
+        1.0
+      ],
+      "name_zh": "太平洋鲭鱼",
+      "name_en": "Pacific Mackerel",
+      "scientific": "Scomber japonicus",
+      "fact_zh": "喜欢成群游动，鱼群密得像水里下了一场雨。"
+    },
+    {
+      "id": "pacific_marlin",
+      "region_id": "pacific_ocean",
+      "spot_ids": [
+        "pacific_far"
+      ],
+      "habitat": "ocean",
+      "depth": "deep",
+      "rarity": "rare",
+      "difficulty": 6,
+      "tags": [
+        "predator",
+        "big_fish"
+      ],
+      "preferred_bait": [
+        "metal_lure"
+      ],
+      "fight_power": 9,
+      "weight_kg": [
+        120.0,
+        400.0
+      ],
+      "name_zh": "太平洋枪鱼",
+      "name_en": "Pacific Marlin",
+      "scientific": "Kajikia audax",
+      "fact_zh": "上颚长长地翘起来像一柄剑，是外海最难缠的对手之一。"
+    },
+    {
+      "id": "atlantic_herring",
+      "region_id": "atlantic_ocean",
+      "spot_ids": [
+        "atlantic_near"
+      ],
+      "habitat": "ocean",
+      "depth": "shallow",
+      "rarity": "common",
+      "difficulty": 1,
+      "tags": [
+        "schooling",
+        "small_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
+      "fight_power": 1,
+      "weight_kg": [
+        0.1,
+        0.5
+      ],
+      "name_zh": "大西洋鲱鱼",
+      "name_en": "Atlantic Herring",
+      "scientific": "Clupea harengus",
+      "fact_zh": "一群鲱鱼能有几百万条，是海里最重要的口粮。"
+    },
+    {
+      "id": "atlantic_halibut",
+      "region_id": "atlantic_ocean",
+      "spot_ids": [
+        "atlantic_mid"
+      ],
+      "habitat": "ocean",
+      "depth": "mid",
+      "rarity": "rare",
+      "difficulty": 5,
+      "tags": [
+        "bottom_fish",
+        "big_fish"
+      ],
+      "preferred_bait": [
+        "soft_lure"
+      ],
+      "fight_power": 7,
+      "weight_kg": [
+        25.0,
+        150.0
+      ],
+      "name_zh": "大西洋庸鲽",
+      "name_en": "Atlantic Halibut",
+      "scientific": "Hippoglossus hippoglossus",
+      "fact_zh": "比最大的锅盖还平，两只眼睛都长在脸的同一侧。"
+    },
+    {
+      "id": "indian_mackerel",
+      "region_id": "indian_ocean",
+      "spot_ids": [
+        "indian_near"
+      ],
+      "habitat": "ocean",
+      "depth": "shallow",
+      "rarity": "common",
+      "difficulty": 1,
+      "tags": [
+        "schooling",
+        "small_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
+      "fight_power": 2,
+      "weight_kg": [
+        0.2,
+        0.8
+      ],
+      "name_zh": "印度鲭鱼",
+      "name_en": "Indian Mackerel",
+      "scientific": "Rastrelliger kanagurta",
+      "fact_zh": "季风一起就成群结队地换地方，渔民跟着季风追它们。"
+    },
+    {
+      "id": "giant_grouper",
+      "region_id": "indian_ocean",
+      "spot_ids": [
+        "indian_mid"
+      ],
+      "habitat": "ocean",
+      "depth": "mid",
+      "rarity": "rare",
+      "difficulty": 5,
+      "tags": [
+        "predator",
+        "big_fish"
+      ],
+      "preferred_bait": [
+        "metal_lure"
+      ],
+      "fight_power": 8,
+      "weight_kg": [
+        40.0,
+        250.0
+      ],
+      "name_zh": "巨石斑鱼",
+      "name_en": "Giant Grouper",
+      "scientific": "Epinephelus lanceolatus",
+      "fact_zh": "能长到一辆小汽车那么大，嘴巴一张能把小鱼整个吸进去。"
+    },
+    {
+      "id": "arctic_char",
+      "region_id": "arctic_ocean",
+      "spot_ids": [
+        "arctic_near"
+      ],
+      "habitat": "ocean",
+      "depth": "shallow",
+      "rarity": "common",
+      "difficulty": 1,
+      "tags": [
+        "small_fish"
+      ],
+      "preferred_bait": [
+        "live_shrimp"
+      ],
+      "fight_power": 2,
+      "weight_kg": [
+        0.5,
+        3.0
+      ],
+      "name_zh": "北极红点鲑",
+      "name_en": "Arctic Char",
+      "scientific": "Salvelinus alpinus",
+      "fact_zh": "冷水里的美人鱼，肚子在产卵季会染成晚霞一样的橙红。"
+    },
+    {
+      "id": "arctic_skate",
+      "region_id": "arctic_ocean",
+      "spot_ids": [
+        "arctic_mid"
+      ],
+      "habitat": "ocean",
+      "depth": "mid",
+      "rarity": "uncommon",
+      "difficulty": 3,
+      "tags": [
+        "bottom_fish"
+      ],
+      "preferred_bait": [
+        "soft_lure"
+      ],
+      "fight_power": 4,
+      "weight_kg": [
+        3.0,
+        20.0
+      ],
+      "name_zh": "北极鳐",
+      "name_en": "Arctic Skate",
+      "scientific": "Amblyraja hyperborea",
+      "fact_zh": "贴着冰海海底滑行，尾巴上还留着一根小小的毒刺。"
     }
   ]
 }

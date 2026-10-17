@@ -141,6 +141,9 @@ var day_night_ref: DayNightCycle = null
 var stuck_rescues := 0
 ## 正在驾驶的飞行器（null 表示徒步）。驾驶期间玩家物理冻结，位置每帧贴到座舱位。
 var _aircraft: Aircraft = null
+## 正在驾驶的船（D-042，null 表示不在船上）。与飞机互斥；驾驶期间玩家
+## 物理冻结，位置每帧贴到驾驶座。
+var _boat: Boat = null
 ## 飞行视角 rig（D-033，由 main 装配时注入）：驾驶中的视角切换 / 自由观察 / 缩放
 ## 都经它；null 时（无头探针未装配）飞行输入退化为旧行为，不影响探针。
 var flight_camera: AircraftCamera = null
@@ -263,20 +266,30 @@ func _unhandled_input(event: InputEvent) -> void:
 		for i in range(Inventory.HOTBAR_SIZE):
 			if event.is_action_pressed("slot_%d" % (i + 1)):
 				select_slot(i)
-		if event.is_action_pressed("jump") and _aircraft == null:
+		if event.is_action_pressed("jump") and _aircraft == null and _boat == null:
 			_handle_jump_tap()
 		# 回放中（D-033）：F/X 让位给 Esc 跳过，防止运镜中被下机打断。
 		var replaying := flight_camera != null \
 			and flight_camera.current_mode() == AircraftCamera.ViewMode.REPLAY
-		# F（D-033）：驾驶中 = 发动机启停；徒步时 = 登机（双击收回）。
+		# F（D-033/D-042）：开船中 = 发动机启停；开飞机中 = 发动机启停；
+		# 徒步时 = 就近登船（优先）或登机（双击收回）。
 		if event.is_action_pressed("aircraft_engine") and not _dead and not replaying:
-			if _aircraft != null:
+			if _boat != null:
+				_boat.toggle_engine()
+			elif _aircraft != null:
 				_aircraft.toggle_engine()
 			else:
-				_handle_aircraft_key()
-		# X（D-033）：驾驶中 = 下机（双击收回）；徒步时 = 就近收回停着的飞机。
+				var boat_target := boat_board_target()
+				if boat_target != null:
+					ride_boat(boat_target)
+				else:
+					_handle_aircraft_key()
+		# X（D-033/D-042）：开船中 = 下船；开飞机中 = 下机（双击收回）；
+		# 徒步时 = 就近收回停着的飞机。
 		if event.is_action_pressed("aircraft_exit") and not _dead and not replaying:
-			if _aircraft != null:
+			if _boat != null:
+				exit_boat()
+			elif _aircraft != null:
 				_handle_aircraft_key()
 			else:
 				var near: Aircraft = _pickup_target()
@@ -323,8 +336,8 @@ func _handle_jump_tap() -> void:
 func _process(delta: float) -> void:
 	if _dead:
 		return
-	# 驾驶飞行器期间不破坏方块、不拉弓、不垂钓。
-	if _aircraft != null:
+	# 驾驶飞行器 / 船只期间不破坏方块、不拉弓、不垂钓（垂钓走航海界面）。
+	if _aircraft != null or _boat != null:
 		return
 	_update_breaking(delta)
 	_update_bow(delta)
@@ -514,6 +527,12 @@ func _physics_process(delta: float) -> void:
 	if _aircraft != null:
 		velocity = Vector3.ZERO
 		global_transform = _aircraft.seat_transform()
+		return
+
+	# 驾驶船只（D-042）：船体自己跑物理（Boat._physics_process），玩家贴驾驶座。
+	if _boat != null:
+		velocity = Vector3.ZERO
+		global_transform = _boat.seat_transform()
 		return
 
 	var jump_pressed := virtual_jump
@@ -760,6 +779,86 @@ func aircraft() -> Aircraft:
 
 func is_riding() -> bool:
 	return _aircraft != null
+
+
+# ── 驾驶船只（D-042 航海玩法）────────────────────────────────
+## 与飞机同构：驾驶期间玩家物理冻结、位置每帧贴到驾驶座。
+## 与飞机互斥（同按 F 登机，谁近谁先；在机上时机车分支不生效）。
+func ride_boat(boat: Boat) -> void:
+	if boat == null or _dead or _aircraft != null:
+		return
+	if _boat == boat:
+		return
+	_boat = boat
+	boat.set_piloted(true, self)
+	velocity = Vector3.ZERO
+	_fall_speed = 0.0
+	_clear_fishing()
+	# 骑乘者与船体互不碰撞（驾驶位落在船体碰撞盒内，否则两个
+	# CharacterBody3D 互相深穿透会被物理弹飞——登机同款教训）。
+	add_collision_exception_with(boat)
+	camera_distance = CAM_DISTANCE_MAX_RIDING
+	_spring_arm.rotation.x = CHASE_PITCH_RIDING
+	_esc_released = false
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_apply_camera_mode()
+	_model.visible = false
+	_held_item.visible = false
+	Events.boat_ride_changed.emit(true)
+	Events.notice.emit("⛵ 登船：W/S 油门（S 倒船），A/D 转舵；F 发动机，X 下船；"
+		+ "开得越远鱼种越多，按 M 打开地图就能下竿。")
+
+
+## 下船：落到船侧码头上（船体坐标 +X 为右舷，跨出碰撞盒半宽再留余量）。
+func exit_boat() -> void:
+	if _boat == null:
+		return
+	var boat := _boat
+	_boat = null
+	if is_instance_valid(boat):
+		remove_collision_exception_with(boat)
+		boat.set_piloted(false)
+		# 船可能正在航行：落点取船侧 + 略高（掉下水也能游上岸，不掉血）。
+		global_position = boat.global_position \
+			+ boat.global_transform.basis.x * 4.0 + Vector3(0.0, 1.0, 0.0)
+	velocity = Vector3.ZERO
+	_fall_speed = 0.0
+	camera_distance = 0.0
+	if _esc_released:
+		_esc_released = false
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_spring_arm.rotation.x = _camera.rotation.x
+	_apply_camera_mode()
+	Events.boat_ride_changed.emit(false)
+
+
+## 当前驾驶的船（null 表示不在船上）；HUD 航海界面据此显隐。
+func boat() -> Boat:
+	return _boat
+
+
+func is_riding_boat() -> bool:
+	return _boat != null
+
+
+## 就近找一艘能登的船（与 _pickup_target 飞机同思路：横向距离判定）。
+func boat_board_target() -> Boat:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return null
+	var best: Boat = null
+	var best_d := Boat.BOARD_RANGE
+	for child in scene.get_children():
+		var boat := child as Boat
+		if boat == null or not is_instance_valid(boat):
+			continue
+		var d := Vector2(boat.global_position.x - global_position.x,
+			boat.global_position.z - global_position.z).length()
+		if d <= best_d:
+			best_d = d
+			best = boat
+	return best
 
 
 ## 死亡停顿中（墓碑倒计时）为真：外部输入守卫用（D-039 飞行重置与之对齐）。

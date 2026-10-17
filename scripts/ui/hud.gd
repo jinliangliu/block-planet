@@ -46,6 +46,8 @@ var _settings_panel: SettingsPanel
 var _fishing_gear: FishingGearUI
 var _fishing_ui: FishingUI
 var _fishing_teaching: FishingTeachingUI
+## 航海模式界面（D-042）：登船期间可见。
+var _boat_hud: BoatHUD
 ## 赛道选择器（feature_car_racing）：模态窗口，选完切到竞速场景（独立场景）。
 var _track_selector: TrackSelectorUI
 ## 工坊台建造界面（main 持有、挂在 $UI 下）：模态互斥与冻结态广播用。
@@ -219,6 +221,10 @@ func _build() -> void:
 	_build_settings_panel(root)
 	_build_fishing(root)
 	_build_racing(root)
+	# 航海模式主界面（D-042）：登船后显形，替代徒步 HUD 关注方位/海况/航向/油量。
+	_boat_hud = BoatHUD.new()
+	add_child(_boat_hud)
+	Events.boat_ride_changed.connect(_on_boat_ride_changed)
 	_build_toast(root)
 	_build_death_overlay(root)
 	_build_flight_panel(root)
@@ -2707,10 +2713,31 @@ func _build_fishing(root: Control) -> void:
 
 
 ## 从地图选择器点「🎣 去钓鱼」进来：先关地图选择器（它会解冻玩家），再冻结。
+## 在船上（D-042）：钓点由「距港距离」决定——近海/中海/远海三个渔场，
+## 开得越远鱼种越多，此时不给选点（距离就是选点）。
 func _on_fishing_requested(atlas_region: int) -> void:
 	if _map_selector != null and _map_selector.is_open():
 		_map_selector.close()
+	if _player != null and _player.is_riding_boat():
+		var boat := _player.boat()
+		var dist_m := float(boat.snapshot().get("harbor_distance_m", 0.0))
+		open_fishing_gear_boat(atlas_region, dist_m)
+		return
 	open_fishing_gear(atlas_region)
+
+
+## 出海钓鱼（船上）：按距港距离定位到唯一钓点，其余分带在界面上置灰
+## 并标注距离要求——把「越远鱼种越多」的规则直接做进选点界面。
+func open_fishing_gear_boat(atlas_region: int, distance_m: float) -> void:
+	if _fishing_gear == null:
+		return
+	_fishing_gear.open_for_boat(atlas_region, distance_m)
+	if not _fishing_gear.is_open():
+		Events.notice.emit("这片海域还没有开放的钓点")
+		return
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func open_fishing_gear(atlas_region: int) -> void:
@@ -2736,6 +2763,18 @@ func _open_fishing_ui() -> void:
 		return
 	_fishing_ui.open_session()
 	_set_player_frozen(true)
+
+
+## 登船 / 下船（D-042）：航海界面显隐。setup 每次登船重绑玩家引用
+## （场景重载后 Player 是全新实例）。
+func _on_boat_ride_changed(riding: bool) -> void:
+	if _boat_hud == null:
+		return
+	if riding and _player != null:
+		_boat_hud.setup(_player)
+		_boat_hud.visible = true
+	else:
+		_boat_hud.visible = false
 
 
 func _on_fishing_closed() -> void:

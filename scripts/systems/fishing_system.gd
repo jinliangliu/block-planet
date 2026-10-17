@@ -225,6 +225,21 @@ func get_spots_for_atlas(atlas_region: int) -> Array:
 	return out
 
 
+## 岸边垂钓钓点（unlock=default）：地图页「去钓鱼」只列这些。
+## 出海钓点（unlock=boat，D-042）不在此列——它们由距港距离定位，
+## 见 BoatSystem.spot_for_distance() 与 FishingGearUI.open_for_boat()。
+func get_shore_spots_for_atlas(atlas_region: int) -> Array:
+	var out: Array = []
+	for item_value: Variant in spots:
+		var spot: Dictionary = item_value
+		if int(spot.get("atlas_region", -1)) != atlas_region:
+			continue
+		if String(spot.get("unlock", "default")) != "default":
+			continue
+		out.append(spot)
+	return out
+
+
 ## 某图鉴区域 id 下的钓点。
 func get_spots_for_region(region_id: String) -> Array:
 	var out: Array = []

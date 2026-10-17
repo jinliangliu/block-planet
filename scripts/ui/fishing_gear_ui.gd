@@ -26,6 +26,9 @@ const OFF_BG := Color(0.88, 0.84, 0.74)
 var _atlas_region := -1
 var _spot_id := ""
 var _selected: Dictionary = {}
+## 出海模式（D-042）：在船上开钓，钓点由距港距离决定，不给自由选点。
+var _boat_mode := false
+var _distance_m := 0.0
 var _spot_row: HBoxContainer
 var _gear_rows: Dictionary = {}
 var _hint: Label
@@ -137,14 +140,38 @@ func _build() -> void:
 	row.add_child(close)
 
 
-## 打开某个世界区域（RegionAtlas 区域号）的钓具界面。
+## 打开某个世界区域（RegionAtlas 区域号）的钓具界面（岸边垂钓：
+## 只列 unlock=default 的岸钓点；出海钓点不在此列，见 open_for_boat）。
 func open_for_atlas(atlas_region: int) -> void:
 	_atlas_region = atlas_region
-	var spots := FishingSystem.get_spots_for_atlas(atlas_region)
+	_boat_mode = false
+	var spots := FishingSystem.get_shore_spots_for_atlas(atlas_region)
 	if spots.is_empty():
 		_close()
 		return
 	_spot_id = String((spots[0] as Dictionary).get("id", ""))
+	_selected = {}
+	for kind: String in FishingGear.KINDS:
+		var owned := FishingSystem.owned_items(kind)
+		if not owned.is_empty():
+			_selected[kind] = String((owned[0] as Dictionary).get("id", ""))
+		else:
+			_selected[kind] = ""
+	visible = true
+	_refresh()
+
+
+## 打开出海钓具界面（D-042）：在船上按距港距离定位唯一钓点。
+## 三个分带按钮全部列出，但只有当前距离够得着的能选——其余置灰并标注
+## 距离要求，把「开得越远鱼种越多」直接做进界面。
+func open_for_boat(atlas_region: int, distance_m: float) -> void:
+	_atlas_region = atlas_region
+	_boat_mode = true
+	_distance_m = distance_m
+	_spot_id = BoatSystem.spot_for_distance(atlas_region, distance_m)
+	if FishingSystem.get_spot(_spot_id).is_empty():
+		_close()
+		return
 	_selected = {}
 	for kind: String in FishingGear.KINDS:
 		var owned := FishingSystem.owned_items(kind)
@@ -206,7 +233,10 @@ func _refresh() -> void:
 func _rebuild_spot_row() -> void:
 	for child in _spot_row.get_children():
 		child.queue_free()
-	for spot_value: Variant in FishingSystem.get_spots_for_atlas(_atlas_region):
+	if _boat_mode:
+		_rebuild_boat_spot_row()
+		return
+	for spot_value: Variant in FishingSystem.get_shore_spots_for_atlas(_atlas_region):
 		var spot: Dictionary = spot_value
 		var spot_id := String(spot.get("id", ""))
 		var btn := Button.new()
@@ -216,6 +246,35 @@ func _rebuild_spot_row() -> void:
 		btn.toggle_mode = true
 		btn.button_pressed = spot_id == _spot_id
 		btn.pressed.connect(func(): _spot_id = spot_id; _refresh())
+		_spot_row.add_child(btn)
+
+
+## 出海模式选点行：近/中/远三个渔场，按当前距离只有一格可点。
+## 置灰的按钮 tooltip 写明距离要求——儿童玩家也看得懂「再开远点」。
+func _rebuild_boat_spot_row() -> void:
+	var current_band := BoatSystem.band_of(_distance_m)
+	var band_order := ["near", "mid", "far"]
+	var dist_need := {"near": 0.0, "mid": BoatSystem.NEAR_MAX_M, "far": BoatSystem.MID_MAX_M}
+	for band: String in band_order:
+		var spot_id := BoatSystem.spot_id_for(_atlas_region, band)
+		var reachable: bool = band == current_band
+		var btn := Button.new()
+		btn.text = "⛵ %s" % BoatSystem.band_title(band)
+		if reachable:
+			btn.text += "（当前 %.0f m）" % _distance_m
+		btn.custom_minimum_size = Vector2(240, 38)
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.toggle_mode = true
+		btn.button_pressed = reachable
+		btn.disabled = not reachable
+		if reachable:
+			btn.pressed.connect(func(): _spot_id = spot_id; _refresh())
+		else:
+			var need := float(dist_need.get(band, 0.0))
+			if band == "near":
+				btn.tooltip_text = "太远了就会错过近海鱼群——开回 %.0f m 以内" % need
+			else:
+				btn.tooltip_text = "再往外海开 %.0f m 才能解锁" % maxf(0.0, need - _distance_m)
 		_spot_row.add_child(btn)
 
 
@@ -282,6 +341,10 @@ func _refresh_hint() -> void:
 	var lines := PackedStringArray()
 	lines.append("钓点：%s —— %s" % [
 		String(spot.get("name_zh", "?")), String(spot.get("intro_zh", ""))])
+	if _boat_mode:
+		lines.append("出海距离 %.0f m · %s：近海 %.0f m 内 / 中海到 %.0f m / 更远是远海——鱼种随距离换" % [
+			_distance_m, BoatSystem.band_title(BoatSystem.band_of(_distance_m)),
+			BoatSystem.NEAR_MAX_M, BoatSystem.MID_MAX_M])
 	var sinker_id := String(_selected.get("sinkers", ""))
 	if not sinker_id.is_empty():
 		var sinker := FishingSystem.gear.sinker(sinker_id)

@@ -15,6 +15,9 @@ signal player_mode_changed(flying: bool)
 ## 玩家登机 / 下机后广播，HUD 据此显隐飞行仪表。
 signal aircraft_ride_changed(riding: bool)
 
+## 玩家登船 / 下船后广播（D-042 航海玩法），HUD 据此显隐航海界面。
+signal boat_ride_changed(riding: bool)
+
 ## 飞行器机轮离地（起飞）时广播，进度核心据此累计首飞。
 signal aircraft_took_off
 
