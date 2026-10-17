@@ -292,9 +292,7 @@ func _test_scene_end_to_end() -> void:
 	_check(RaceReplayLog.read_events().size() > 0, "回放日志已落盘")
 
 	Events.race_finished.disconnect(_on_probe_race_finished)
-	scene.queue_free()
-	await get_tree().process_frame
-	await get_tree().process_frame
+	# 同 _test_hud_wiring 收尾：不手动释放，等帧区即崩溃区（rc=139）。
 
 
 func _on_probe_race_finished(track_id: String, vehicle_id: String, rank: int, laps: int,
@@ -316,7 +314,6 @@ func _test_hud_wiring() -> void:
 	_check(hud._track_selector != null, "HUD 已建赛道选择器")
 	_check(hud._map_selector != null, "HUD 已建地图选择器")
 	if hud._track_selector == null or hud._map_selector == null:
-		main_scene.queue_free()
 		return
 	_check(hud._map_selector.race_requested.get_connections().size() > 0, "地图页「🏁 竞速」已接线")
 	_check(hud._track_selector.race_requested.get_connections().size() > 0, "赛道选择器「开始比赛」已接线")
@@ -339,12 +336,10 @@ func _test_hud_wiring() -> void:
 	_check(not hud._track_selector._start_button.disabled, "默认赛道可选、开始按钮可用")
 	hud.close_track_selector()
 
-	main_scene.queue_free()
-	# 等足 30 帧再进 _finish：queue_free 的实际释放跨帧，只等 2 帧曾在本函数
-	# 末尾触发 Vulkan 清理段崩溃（rc=139，进程死在 SaveGuard.restore 之前，
-	# race_replay.jsonl 残留）。30 帧是工程里已验证的安全值。
-	for _i in 30:
-		await get_tree().process_frame
+	# 不手动 queue_free main_scene：退出期手动释放 + 等帧会踩 Vulkan 清理段
+	# 崩溃（rc=139，进程死在 SaveGuard.restore 之前，race_replay.jsonl 残留，
+	# 随后又被 racing_shot 快照固化）——flight_reset_probe 同款教训。场景树
+	# 随 quit 整体销毁即可，restore 在 _finish 里先于 quit 执行。
 
 
 func _check(cond: bool, label: String) -> void:
