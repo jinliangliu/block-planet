@@ -2767,14 +2767,38 @@ func _open_fishing_ui() -> void:
 
 ## 登船 / 下船（D-042）：航海界面显隐。setup 每次登船重绑玩家引用
 ## （场景重载后 Player 是全新实例）。
+## 同时收起与航海仪表抢位置的徒步 HUD：顶部世界名（与罗经同处顶部居中）、
+## 右上小地图与模式徽章（与海况面板同处右上）、底部快捷栏（与速度面板同处底部居中）。
+## 保留生命/饥饿（_stats_box，落水伤害与饥饿仍需看得见）与时间/天气行（_time_label，
+## 它直接关联海况模型，是航海读数的一部分）。隐藏 ≠ 停算：小地图在船上没意义，一并停
+## 掉其每帧采样与地形扫圈，下船时重采样刷新回上船前的旧图避免显示错位。
 func _on_boat_ride_changed(riding: bool) -> void:
 	if _boat_hud == null:
 		return
 	if riding and _player != null:
 		_boat_hud.setup(_player)
 		_boat_hud.visible = true
+		if _map_name_label != null:
+			_map_name_label.visible = false
+		if _minimap != null:
+			_minimap.visible = false
+			_minimap.set_process(false)
+		if _mode_label != null:
+			_mode_label.visible = false
+		if _hotbar_bar != null:
+			_hotbar_bar.visible = false
 	else:
 		_boat_hud.visible = false
+		if _map_name_label != null:
+			_map_name_label.visible = true
+		if _minimap != null:
+			_minimap.visible = true
+			_minimap.set_process(true)
+			_minimap.request_resample()
+		if _mode_label != null:
+			_mode_label.visible = true
+		if _hotbar_bar != null:
+			_hotbar_bar.visible = true
 
 
 func _on_fishing_closed() -> void:

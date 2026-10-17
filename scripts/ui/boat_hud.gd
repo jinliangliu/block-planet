@@ -72,8 +72,12 @@ func _draw_compass(size: Vector2, heading_deg: float) -> void:
 	while t <= heading_deg + half:
 		var frac: float = (t - heading_deg) / half  # -1 ~ 1
 		var x: float = cx + frac * (COMPASS_W * 0.5 - 8.0)
-		var cardinal := _cardinal_of(wrapf(t, 0.0, 360.0))
-		if not cardinal.is_empty():
+		# 只有恰好落在 45° 整数刻度（N/NE/E/…）才写方位名；其余 15° 小刻只画短竖线。
+		# 原写法用 _cardinal_of 的四舍五入会把 ±22.5° 内的三个 15° 刻都归到同一方位名，
+		# 于是出现「西北 西北 西北」连刷。t 是 15 的倍数、45 也是其倍数，故取模即可精确判定。
+		var w_deg := int(round(wrapf(t, 0.0, 360.0)))
+		if w_deg % 45 == 0:
+			var cardinal := _cardinal_of(float(w_deg))
 			var font := ThemeDB.fallback_font
 			var tw := font.get_string_size(cardinal, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
 			draw_string(font, Vector2(x - tw * 0.5, top + 24.0), cardinal,
@@ -99,18 +103,23 @@ func _draw_position_panel(snap: Dictionary) -> void:
 	var pos: Vector3 = snap["pos"]
 	var dist_m := float(snap["harbor_distance_m"])
 	var band := String(snap["band"])
-	var rect := Rect2(Vector2(16.0, 16.0), Vector2(210.0, 92.0))
+	# 把整块面板下移到生命/饥饿块（_stats_box，约占 y16~100）下方，两块不再相互压字。
+	# 面板内文字一律以 rect.position 为基准——原写法用绝对 y（40/60/82/100），面板一挪
+	# 文字不跟随，会与上方姓名/爱心/饥饿叠成一团。
+	var rect := Rect2(Vector2(16.0, 116.0), Vector2(210.0, 92.0))
 	draw_rect(rect, PANEL_BG)
 	draw_rect(rect, PANEL_BORDER, false, 1.0)
 	var font := ThemeDB.fallback_font
+	var ox := rect.position.x + 10.0
+	var oy := rect.position.y
 	var x_text := "X %+.0f m" % (pos.x * 0.5)
 	var z_text := "Z %+.0f m" % (pos.z * 0.5)
-	draw_string(font, Vector2(26.0, 40.0), x_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT_MAIN)
-	draw_string(font, Vector2(26.0, 60.0), z_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT_MAIN)
+	draw_string(font, Vector2(ox, oy + 24.0), x_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT_MAIN)
+	draw_string(font, Vector2(ox, oy + 44.0), z_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT_MAIN)
 	var dist_text := "距港 %.0f m" % dist_m if dist_m >= 0.0 else "距港 —（无港口）"
-	draw_string(font, Vector2(26.0, 82.0), dist_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, TEXT_DIM)
+	draw_string(font, Vector2(ox, oy + 66.0), dist_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, TEXT_DIM)
 	var band_text := "渔场：%s" % BoatSystem.band_title(band)
-	draw_string(font, Vector2(26.0, 100.0), band_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, ACCENT)
+	draw_string(font, Vector2(ox, oy + 84.0), band_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, ACCENT)
 
 
 ## 海况面板（右上）：浪高、风向风级、天气一句。
