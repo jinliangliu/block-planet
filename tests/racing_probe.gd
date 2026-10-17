@@ -340,8 +340,11 @@ func _test_hud_wiring() -> void:
 	hud.close_track_selector()
 
 	main_scene.queue_free()
-	await get_tree().process_frame
-	await get_tree().process_frame
+	# 等足 30 帧再进 _finish：queue_free 的实际释放跨帧，只等 2 帧曾在本函数
+	# 末尾触发 Vulkan 清理段崩溃（rc=139，进程死在 SaveGuard.restore 之前，
+	# race_replay.jsonl 残留）。30 帧是工程里已验证的安全值。
+	for _i in 30:
+		await get_tree().process_frame
 
 
 func _check(cond: bool, label: String) -> void:
