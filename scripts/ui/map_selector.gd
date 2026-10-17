@@ -267,7 +267,7 @@ func _build_backdrop() -> void:
 	add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；带 🎣 的海域可以钓鱼；切到「探索」模式才显示飞行旗帜（红=机场 / 琥珀=降落场）与 🏁 赛道竞速"
+	subtitle.text = "拖动旋转地球 · 点击七大洲或四大洋查看地理介绍；球面上游着小鱼的海域可以钓鱼；切到「探索」模式才显示小飞机（红=机场 / 琥珀=降落场）与 🏁 赛道竞速"
 	subtitle.add_theme_font_size_override("font_size", 16)
 	subtitle.add_theme_color_override("font_color", Color(0.72, 0.80, 0.92))
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -434,7 +434,7 @@ func _refresh_mode_row() -> void:
 	_refresh_vehicle_entries()
 
 
-## 载具门牌显隐（D-041）：飞行旗帜（地球上的红/琥珀小旗）与 🏁 赛道竞速
+## 载具门牌显隐（D-041）：飞行标记（地球上的红/琥珀小飞机，D-044 由小旗改）与 🏁 赛道竞速
 ## 入口都是「载具玩法」的门牌，只在探索模式显示——生存/创造模式下玩家
 ## 还没有载具，挂着只会误导。判据统一走 GameState.is_explore()，
 ## 由 _refresh_mode_row() 在选模式与 open() 时调用，切模式当帧同步。
@@ -453,7 +453,7 @@ func selected_mode() -> int:
 
 ## 竞速入口：贴在左栏图例下方（图例只占中段竖排，左下角这片留白正好放一枚
 ## 全宽按钮）。赛道不绑地理区域，故与地球页同显、不随选中区域变化；
-## 但只在探索模式显示（D-041）——与地球上的飞行旗帜同一判据，见
+## 但只在探索模式显示（D-041）——与地球上的飞行小飞机同一判据，见
 ## _refresh_vehicle_entries()。
 func _build_race_entry(parent: Control) -> void:
 	var btn := Button.new()

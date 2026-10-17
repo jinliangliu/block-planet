@@ -1827,19 +1827,21 @@ func _run() -> void:
 	selector._select_mode(GameState.Mode.CREATIVE)
 	_check(GameState.is_creative(), "地图页也能选到创造模式")
 
-	# Q-6b 载具门牌只在探索模式显示（D-041）：飞行旗帜 + 🏁 竞速入口，
+	# Q-6b 载具门牌只在探索模式显示（D-041）：飞行小飞机（D-044）+ 🏁 竞速入口，
 	# 切模式当帧同步，不用重开选择器。
 	var race_btn: Button = selector._race_button
 	_check(race_btn != null, "地图页建有 🏁 赛道竞速入口按钮")
 	selector._select_mode(GameState.Mode.SURVIVAL)
 	_check(race_btn != null and not race_btn.visible, "生存模式隐藏 🏁 竞速入口")
-	_check(not selector._globe.flight_flags_visible(), "生存模式隐藏地球上的飞行旗帜")
+	_check(not selector._globe.flight_flags_visible(), "生存模式隐藏地球上的飞行小飞机")
 	selector._select_mode(GameState.Mode.EXPLORE)
 	_check(race_btn != null and race_btn.visible, "探索模式显示 🏁 竞速入口")
-	_check(selector._globe.flight_flags_visible(), "探索模式显示地球上的飞行旗帜")
+	_check(selector._globe.flight_flags_visible(), "探索模式显示地球上的飞行小飞机")
+	# 小鱼标记不绑模式（D-044）：钓鱼不需要载具，关飞行标记也不该连坐。
+	_check(selector._globe.fish_markers_visible(), "地球上的小鱼标记不随模式隐藏")
 	selector._select_mode(GameState.Mode.CREATIVE)
 	_check(race_btn != null and not race_btn.visible, "创造模式同样隐藏 🏁 竞速入口")
-	_check(not selector._globe.flight_flags_visible(), "创造模式同样隐藏飞行旗帜")
+	_check(not selector._globe.flight_flags_visible(), "创造模式同样隐藏飞行小飞机")
 	# 重开选择器也按当前模式同步（open() 路径）。
 	GameState.set_mode(GameState.Mode.EXPLORE)
 	selector.close()
