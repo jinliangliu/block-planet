@@ -75,7 +75,9 @@ func _run() -> void:
 	var surface_y := int(craft.global_position.y - Aircraft.GROUND_CLEARANCE)
 	var center: Vector3i = main_scene._airport_center(REGION)
 	# 进近落地区沿 +Z（北端）整平一段，保证降落落在平地上（非山丘）。
-	_flatten_lane(world, center, surface_y)
+	# 带南界包到飞机起点前 12 格：停机位在跑道南段，带面高跑道 1 格，
+	# 不覆盖起点就会在带南缘撞台阶（D-040 教训）。
+	_flatten_lane(world, center, surface_y, int(craft.global_position.z))
 	# 在整平带上重铺一段 COBBLESTONE 落地带（覆盖被整平覆盖的原跑道中线），
 	# 让降落最终落在真正的跑道铺面上（block=COBBLESTONE），而非 DIRT。
 	_pave_landing_strip(world, center, surface_y)
@@ -216,8 +218,11 @@ func _pave_landing_strip(world: World, center: Vector3i, surface_y: int) -> void
 
 
 ## 沿 +Z 方向整平一段落地带（中心以南 15 格 → 北端以外），保证降落落在平地。
-func _flatten_lane(world: World, center: Vector3i, surface_y: int) -> void:
-	var z0 := center.z - 25
+func _flatten_lane(world: World, center: Vector3i, surface_y: int, from_z: int = 1 << 30) -> void:
+	# 整平带必须覆盖飞机起点（停机位）：带面比跑道铺装高 1 格（surface_y 取自
+	# 机体下方），若起点在带外，滑跑会在带南缘撞 0.5 m 台阶解体/卡住
+	# （D-040 跑道加倍、停机位南移后踩过，故 from_z 向南包到起点前 12 格）。
+	var z0 := mini(center.z - 25, from_z - 12)
 	var z1 := center.z + 70
 	var x0 := center.x - 8
 	var x1 := center.x + 8
