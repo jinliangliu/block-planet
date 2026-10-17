@@ -35,14 +35,18 @@ func _run() -> void:
 	GameState.set_mode(GameState.Mode.SURVIVAL)
 
 	# 1) 机场跑道已生成：统计机场区域内 COBBLESTONE 跑道方块数量。
-	#    机场中心 (114,96)，跑道宽 52 / 长 57，机库另铺圆石，数量应远大于阈值。
+	#    机场中心 (114,96)，跑道宽 52 / 长 113（RUNWAY_LEN=112，用户要求长度加倍：
+	#    56→112 格），机库另铺圆石，整条跑道即约 53×113≈6000 块。
+	#    先同步强制加载机场整区：流式 LOAD_RADIUS=2 只保出生点（z=43）周边，
+	#    跑道北端 z=152 距出生点逾百格，不 ensure 则 get_block 对未载区块返 AIR。
+	world.ensure_chunks_in_region(Vector3i(82, 0, 34), Vector3i(146, 0, 158))
 	var cobble := 0
-	for x in range(86, 143):
-		for z in range(66, 127):
+	for x in range(86, 147):
+		for z in range(34, 159):
 			for y in range(30, 46):
 				if world.get_block(Vector3i(x, y, z)) == BlockTypes.Block.COBBLESTONE:
 					cobble += 1
-	_check(cobble > 200, "机场跑道已生成（COBBLESTONE 方块 %d）" % cobble)
+	_check(cobble > 5000, "机场跑道已生成（COBBLESTONE 方块 %d）" % cobble)
 
 	# 2) 出生点落在跑道旁：出生列脚下（±3 格）存在跑道方块 COBBLESTONE/SAND。
 	var spawn_x := int(player.global_position.x)
@@ -60,15 +64,12 @@ func _run() -> void:
 	_check(on_runway, "出生点落在跑道旁（出生列 %s）" % Vector3i(player.global_position.floor()))
 
 	# 2b) 机场进近导航灯：南端绿门槛（进场）/ 北端红端行（远端），视觉对齐 +Z 进近。
-	#     机场 RUNWAY_LEN=56：出生点落在 center.z-_len/2+3，故南绿在 spawn_z-3、
-	#     北红在 spawn_z+53（均在已整平足迹内、base_y 高度）。
-	#     先同步强制加载机场整区：流式 LOAD_RADIUS=2 会把机场北端所在 chunk 卸载
-	#     （get_block 对未载区块返 AIR），此处与读取同帧完成，流式来不及卸载。
-	world.ensure_chunks_in_region(Vector3i(82, 0, 60), Vector3i(146, 0, 128))
+	#     机场 RUNWAY_LEN=112：出生点落在 center.z-_len/2+3，故南绿在 spawn_z-3、
+	#     北红在 spawn_z+109（均在上方 ensure 的整区内、base_y 高度）。
 	var ap_nav := false
 	for dx in range(-6, 7):
 		var south := world.get_block(Vector3i(spawn_x + dx, feet_y, spawn_z - 3))
-		var north := world.get_block(Vector3i(spawn_x + dx, feet_y, spawn_z + 53))
+		var north := world.get_block(Vector3i(spawn_x + dx, feet_y, spawn_z + 109))
 		if south == BlockTypes.Block.NAV_GREEN and north == BlockTypes.Block.NAV_RED:
 			ap_nav = true
 			break

@@ -38,7 +38,7 @@ const STEP_M := RANGE_M * 2.0 / float(GRID_CELLS - 1)
 const DETAIL_M := 45.0
 ## 跑道细扫：±48 m、步长 4 m（覆盖 World.LOAD_RADIUS 的已加载范围），
 ## 只挑 COBBLESTONE 顶面簇，用来定位机场 / 降落场标记。
-const RUNWAY_SCAN_M := 48.0
+const RUNWAY_SCAN_M := 64.0
 const RUNWAY_STEP_M := 4.0
 ## 本机偏离缓存中心超过该距离即重新采样（m）：留约 50 m 图内余量。
 const RECENTER_M := 130.0
@@ -362,9 +362,10 @@ func _sample_terrain() -> void:
 	_cell_color = col
 
 
-## 跑道识别：±48 m / 4 m 细扫挑 COBBLESTONE 顶面（噪声不生圆石，只有
+## 跑道识别：±64 m / 4 m 细扫挑 COBBLESTONE 顶面（噪声不生圆石，只有
 ## 机场跑道与玩家建筑会命中），膨胀一格后聚类，按「长条」形态过滤掉
-## 房屋等紧凑建筑。机场（28 m）与降落场（16 m）靠长度 + 区域配置区分。
+## 房屋等紧凑建筑。机场（56 m，长度加倍后）与降落场（16 m）靠长度 + 区域配置区分；
+## 扫描半径 64 m 保证站在跑道任一端也看全整条（56 m + 余量）。
 func _scan_runways() -> void:
 	_runways.clear()
 	if _world == null:
@@ -430,7 +431,7 @@ func _scan_runways() -> void:
 		mark.len_m = len_m
 		mark.wid_m = wid_m
 		mark.axis = Vector2(1.0, 0.0) if span_i >= span_j else Vector2(0.0, 1.0)
-		# 机场跑道 28 m、降落场 16 m：区域带机场且够长才记 ✈️。
+		# 机场跑道 56 m、降落场 16 m：区域带机场且够长才记 ✈️。
 		mark.is_airport = is_airport_region and len_m >= 22.0
 		_runways.append(mark)
 

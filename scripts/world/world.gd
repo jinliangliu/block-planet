@@ -228,11 +228,31 @@ func set_block_deferred(world_pos: Vector3i, id: int) -> void:
 
 ## 结构生成支持：重建区域内全部已加载区块（批量写入完成后调用一次）。
 func rebuild_chunks_in_region(min_cell: Vector3i, max_cell: Vector3i) -> void:
+	_rebuild_region(min_cell, max_cell, Vector3.INF)
+
+
+## 结构生成支持（boot 场景）：同上，但只同步重建 near 所在「步行保留窗」
+## （LOAD_RADIUS + UNLOAD_PAD 方格，与 _update_chunks 首帧卸载判定同参）内的
+## 区块；窗外区块跳过——玩家首帧就在 near（出生点/停机位），窗外区块本来
+## 就会被流式首帧卸载，等玩家靠近时按正常加载路径重建（写入过的数据经
+## _modified_data 往返，不丢）。机场跑道长度加倍后区域达 32 区块，其中北半场
+## 16 块在旧实现里「建完网格即被卸载」，实测白工约 250 ms。
+func rebuild_chunks_in_region_near(min_cell: Vector3i, max_cell: Vector3i, near: Vector3) -> void:
+	_rebuild_region(min_cell, max_cell, near)
+
+
+func _rebuild_region(min_cell: Vector3i, max_cell: Vector3i, near: Vector3) -> void:
 	var cmin := world_to_chunk(Vector3(min_cell))
 	var cmax := world_to_chunk(Vector3(max_cell))
+	var use_near := is_finite(near.x) and is_finite(near.z)
+	var near_c := world_to_chunk(near) if use_near else Vector3i.ZERO
 	for cx in range(cmin.x, cmax.x + 1):
 		for cz in range(cmin.z, cmax.z + 1):
-			_rebuild_chunk(Vector3i(cx, 0, cz))
+			var coord := Vector3i(cx, 0, cz)
+			if use_near and (absi(coord.x - near_c.x) > LOAD_RADIUS + UNLOAD_PAD
+					or absi(coord.z - near_c.z) > LOAD_RADIUS + UNLOAD_PAD):
+				continue
+			_rebuild_chunk(coord)
 
 
 func world_to_chunk(pos: Vector3) -> Vector3i:
