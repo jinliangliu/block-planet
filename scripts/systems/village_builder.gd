@@ -38,13 +38,18 @@ func build(world: World, player: Player, day_night: DayNightCycle, parent: Node3
 	_parent = parent
 	origin = origin_offset
 	_probe_base_y()
-	world.ensure_chunks_in_region(_min_cell(), _max_cell())
+	# 预加载（不建网格）+ 批量写入：统一放到下面 rebuild_chunks_in_region
+	# 一遍完成，避免每块「无邻居重建 + 有邻居再重建」的双倍白工与数万次
+	# 逐列重扫（三村合计约 1.4 s）。
+	world.preload_chunks_in_region(_min_cell(), _max_cell())
+	world.begin_bulk_writes()
 	_flatten()
 	for pos: Vector3i in HOUSE_POSITIONS:
 		_build_house(pos)
 	_build_plaza(PLAZA_ORIGIN)
 	_build_tower()
 	_build_farm()
+	world.end_bulk_writes()
 	world.rebuild_chunks_in_region(_min_cell(), _max_cell())
 	_spawn_npcs()
 

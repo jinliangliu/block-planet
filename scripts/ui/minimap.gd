@@ -80,16 +80,12 @@ func _snap() -> void:
 
 
 ## 从估算地表上方往下扫，返回该列第一个非空方块（未加载返回 AIR）。
+## 实际走 World.top_block_at：区块内直接取列顶（pristine）或列内扫描，
+## 比逐格 get_block 快一个量级（每格一次 world_to_chunk + 字典查询）。
 func _top_block(wx: int, wz: int) -> int:
 	if _world == null:
 		return BlockTypes.Block.AIR
-	var y := _world.get_surface_height(wx, wz) + 14
-	while y >= 0:
-		var id := _world.get_block(Vector3i(wx, y, wz))
-		if id != BlockTypes.Block.AIR:
-			return id
-		y -= 1
-	return BlockTypes.Block.AIR
+	return _world.top_block_at(wx, wz)
 
 
 func _draw() -> void:

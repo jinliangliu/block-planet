@@ -75,7 +75,12 @@ func _begin(world: World, center: Vector3i, wid: int, length: int,
 		center.x - _half_w - 2, 0, center.z - length / 2 - south_extra - 2)
 	_max_c = Vector3i(
 		center.x + _half_w + 2, 0, center.z + length / 2 + 2)
-	_world.ensure_chunks_in_region(_min_c, _max_c)
+	# 预加载（不建网格）：统一放到 _end 的 rebuild_chunks_in_region 一遍完成，
+	# 避免每块「无邻居重建 + 有邻居再重建」的双倍白工（约 530 ms）。
+	# 随后开批量写入：整平/铺面/导航灯数万次 set_block_deferred 跳过逐列维护，
+	# _end 统一重算列顶表（又省约 500 ms）。
+	_world.preload_chunks_in_region(_min_c, _max_c)
+	_world.begin_bulk_writes()
 
 
 ## 整平地基：清上方（含树木）+ 填 DIRT 地基，统一落在一块平地上。
@@ -172,6 +177,9 @@ func _probe_base_y(south_extra: int) -> void:
 
 
 func _end() -> void:
+	# 退出批量写入（内部统一重算列顶表）后一次重建全区域：邻居齐备、列边界
+	# 可信，一遍即终态。
+	_world.end_bulk_writes()
 	_world.rebuild_chunks_in_region(_min_c, _max_c)
 
 

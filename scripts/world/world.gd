@@ -7,6 +7,10 @@ const LOAD_RADIUS := 2
 # 每帧加载 2 个并按距玩家距离优先：缩短玩家到达未生成区域的窗口，
 # 配合玩家防卡死检测（嵌入实心方块自动重生脱困）形成双保险。
 const CHUNKS_PER_FRAME := 2
+## 徒步每帧加载时间预算（ms）：与飞行的 FLIGHT_BUDGET_MS 同思路——按耗时限量而非
+## 按块数。实测单块重建 23~29 ms，「每帧 2 块」最坏就是 46 ms 级的走向新地形卡顿；
+## 低端机单块更慢时也不会因固定块数吃掉整帧。每帧至少加载 1 块保证队列推进。
+const WALK_BUDGET_MS := 10.0
 # ── 飞行流式加载（D-035）────────────────────────────────────────────────
 # 徒步的 5×5 区块 = 40 m 见方对步行够用；飞行满油门 50 m/s 时每 0.16 s 就要
 # 换一行区块，前方地形会永远慢半拍。故飞行时把预算集中到真正会被看到的
@@ -55,6 +59,17 @@ var _flight_stream := false
 ## 飞行时的机头水平方向（单位向量）：偏置窗口与加载优先级都以它为 +u 轴。
 var _stream_dir := Vector3(0.0, 0.0, -1.0)
 var _neighbor_lookup: Callable
+# ── 流式加载缓存（性能优化，2026-10-17）──────────────────────────────────
+# _update_chunks 原先每帧重建 wanted 集（飞行窗口 169 次字典插入 ≈1.16 ms/帧）、
+# 每帧用新建 lambda 排序待加载队列。 wanted 集只在「中心区块变化」或「飞行时
+# 机头方向转过阈值」时才真正改变，故缓存之；排序同理加脏位。
+var _wanted: Dictionary = {}
+var _wanted_center := Vector3i(1 << 30, 0, 1 << 30)  # 不可能的中心值：首帧必重算
+var _wanted_dir := Vector3(0.0, 0.0, -1.0)
+var _wanted_flight := false
+var _pending_dirty := true
+var _sort_center := Vector3i.ZERO
+var _priority_cmp: Callable
 # 储物箱内容物：按方块坐标记录独立 36 格背包，破坏时散落至地面。
 var box_contents: Dictionary[Vector3i, Inventory] = {}
 # 水体分类缓存：水面格 → WATER_LARGE / WATER_POND，同一水体只洪泛一次。
@@ -66,6 +81,7 @@ var _profile: Dictionary = {}
 
 func _ready() -> void:
 	_neighbor_lookup = Callable(self, "get_block")
+	_priority_cmp = Callable(self, "_cmp_load_priority")
 	_build_atlas_material()
 	_build_emissive_material()
 	if _profile.is_empty():
@@ -100,6 +116,34 @@ func _process(_delta: float) -> void:
 
 func get_surface_height(wx: int, wz: int) -> int:
 	return _terrain_height(wx, wz) + 1
+
+
+## 该列最高的非空气格（未加载返回 AIR）。供小地图采样：一次定位区块后直接在
+## 区块数据内取顶，避免逐格 get_block 的 world_to_chunk + 字典查询
+## （实测采样 6.5 ms/次 → 目标 <1 ms）。pristine 区块走列顶表 O(1)，
+## 被改动过的区块退回列内扫描（仍只做一次区块定位）。
+func top_block_at(wx: int, wz: int) -> int:
+	var coord := Vector3i(
+		floori(float(wx) / float(CHUNK_SIZE.x)), 0,
+		floori(float(wz) / float(CHUNK_SIZE.z)))
+	var chunk: Chunk = _chunks.get(coord)
+	if chunk == null:
+		return BlockTypes.Block.AIR
+	var sx := CHUNK_SIZE.x
+	var plane := sx * CHUNK_SIZE.z
+	var lx := wx - coord.x * sx
+	var lz := wz - coord.z * CHUNK_SIZE.z
+	var base := lx + lz * sx
+	if chunk.pristine and not chunk.col_top.is_empty():
+		var top := int(chunk.col_top[base])
+		if top == 255:
+			return BlockTypes.Block.AIR
+		return chunk.data[base + top * plane]
+	for y in range(CHUNK_SIZE.y - 1, -1, -1):
+		var id := chunk.data[base + y * plane]
+		if id != BlockTypes.Block.AIR:
+			return id
+	return BlockTypes.Block.AIR
 
 
 ## 该列水深（水面到地形顶面的格数）；陆地返回 0。
@@ -148,13 +192,27 @@ func _flood_water(start: Vector2i) -> Array[Vector2i]:
 
 
 ## 结构生成支持：强制同步加载区域内全部区块。
-## 村庄等固定建筑生成前调用，确保 set_block 落到已加载区块。
+## 村庄等固定建筑生成前调用，确保 set_block 落到已加载区块（含网格重建）。
 func ensure_chunks_in_region(min_cell: Vector3i, max_cell: Vector3i) -> void:
 	var cmin := world_to_chunk(Vector3(min_cell))
 	var cmax := world_to_chunk(Vector3(max_cell))
 	for cx in range(cmin.x, cmax.x + 1):
 		for cz in range(cmin.z, cmax.z + 1):
 			_load_chunk(Vector3i(cx, 0, cz))
+
+
+## 结构生成预加载：只落数据、不建网格（供机场/村庄在统一重建前把整片区域
+## 的方块写入已加载区块）。_load_chunk 自带的 rebuild 在邻居尚未加载时也要
+## 做一遍（边界列全扫 ≈20 ms），随后 rebuild_chunks_in_region 又会带着齐备
+## 的邻居重做一遍——每块双倍重建，机场 + 三村约 80 块 ≈ 1 s 级白工。预加载把
+## 网格创建推后到统一重建：邻居齐备、列边界可信，一遍即终态。探针与常规流式
+## 仍走 ensure_chunks_in_region（带网格），不受影响。
+func preload_chunks_in_region(min_cell: Vector3i, max_cell: Vector3i) -> void:
+	var cmin := world_to_chunk(Vector3(min_cell))
+	var cmax := world_to_chunk(Vector3(max_cell))
+	for cx in range(cmin.x, cmax.x + 1):
+		for cz in range(cmin.z, cmax.z + 1):
+			_load_chunk(Vector3i(cx, 0, cz), false)
 
 
 ## 结构生成支持：批量写方块但不触发网格重建（配合 rebuild_chunks_in_region 一次重建）。
@@ -314,11 +372,16 @@ func _rebuild_chunk(coord: Vector3i) -> void:
 
 
 ## 刷新区块的列顶扩展表（rebuild 的快路径输入）：(SIZE.x+2)×(SIZE.z+2)，
-## 中心是本区块，外圈是四邻区块贴边的那一列；未知（邻块未加载、被改动过）
-## 记 255，对应列退回全量扫描。本区块非 pristine 时两张表清空，直接走全量。
+## 中心是本区块，外圈是四邻区块贴边的那一列。每列按可信度编码：
+## - tops=255：整列为空（rebuild 直接跳过该列）；
+## - tops=真实列顶 + grounds=真实列地：边界可信，收窄扫描；
+## - tops=63 + grounds=255：该列被地下开挖作废 / 从未计算（邻列未知同理），
+##   rebuild 对该列全扫。邻列未知经 grounds=255 让贴邻的列也全扫——这正是
+##   开挖后需要向四邻传播的语义（邻列侧向可能在任意高度露出新面）。
 ## 区块刚生成时尚未进 _chunks，故由参数带入。
 func _prepare_columns(coord: Vector3i, chunk: Chunk) -> void:
-	if not chunk.pristine or chunk.col_top.is_empty():
+	if chunk.col_top.is_empty():
+		# 整块未知（被覆写恢复且尚未被编辑过）：不给表，rebuild 全量遍历。
 		chunk.tops_ext = PackedByteArray()
 		chunk.grounds_ext = PackedByteArray()
 		return
@@ -332,34 +395,45 @@ func _prepare_columns(coord: Vector3i, chunk: Chunk) -> void:
 	grounds.fill(255)
 	for z in n:
 		for x in n:
-			var i := x + z * n
-			tops[(z + 1) * w + (x + 1)] = chunk.col_top[i]
-			grounds[(z + 1) * w + (x + 1)] = chunk.col_ground[i]
+			_encode_column(tops, grounds, (z + 1) * w + (x + 1), chunk, x + z * n)
 	for z in n:
 		var nb: Chunk = _chunks.get(coord + Vector3i(-1, 0, 0))
 		if _has_columns(nb):
-			tops[(z + 1) * w] = nb.col_top[(n - 1) + z * n]
-			grounds[(z + 1) * w] = nb.col_ground[(n - 1) + z * n]
+			_encode_column(tops, grounds, (z + 1) * w, nb, (n - 1) + z * n)
 		nb = _chunks.get(coord + Vector3i(1, 0, 0))
 		if _has_columns(nb):
-			tops[(z + 1) * w + (n + 1)] = nb.col_top[z * n]
-			grounds[(z + 1) * w + (n + 1)] = nb.col_ground[z * n]
+			_encode_column(tops, grounds, (z + 1) * w + (n + 1), nb, z * n)
 	for x in n:
 		var nbz: Chunk = _chunks.get(coord + Vector3i(0, 0, -1))
 		if _has_columns(nbz):
-			tops[x + 1] = nbz.col_top[x + (n - 1) * n]
-			grounds[x + 1] = nbz.col_ground[x + (n - 1) * n]
+			_encode_column(tops, grounds, x + 1, nbz, x + (n - 1) * n)
 		nbz = _chunks.get(coord + Vector3i(0, 0, 1))
 		if _has_columns(nbz):
-			tops[(n + 1) * w + (x + 1)] = nbz.col_top[x]
-			grounds[(n + 1) * w + (x + 1)] = nbz.col_ground[x]
+			_encode_column(tops, grounds, (n + 1) * w + (x + 1), nbz, x)
 	chunk.tops_ext = tops
 	chunk.grounds_ext = grounds
 
 
-## 该邻块的列顶表是否可用（已加载、未被改动且已计算）。
+## 把 src 区块第 i 列的边界编码进扩展表的 slot（编码规则见 _prepare_columns）。
+func _encode_column(tops: PackedByteArray, grounds: PackedByteArray, slot: int,
+		src: Chunk, i: int) -> void:
+	var t := int(src.col_top[i])
+	if t == 255:
+		return  # 整列为空：保持 255，rebuild 跳过
+	var valid := 0 if src.col_valid.is_empty() else int(src.col_valid[i])
+	if t == 254 or valid == 0:
+		# 未知或被地下开挖作废：全扫（tops 给满高、grounds 给未知）。
+		tops[slot] = 63
+		grounds[slot] = 255
+		return
+	tops[slot] = t
+	grounds[slot] = src.col_ground[i]
+
+
+## 该邻块的列顶表是否可用（已加载且已计算过列顶）。pristine 与否不再重要：
+## 编辑过的区块同样逐列维护 col_top/col_valid（见 Chunk.set_block_local）。
 func _has_columns(chunk: Chunk) -> bool:
-	return chunk != null and chunk.pristine and not chunk.col_top.is_empty()
+	return chunk != null and not chunk.col_top.is_empty()
 
 
 ## 树干砍完后让树冠「落下消失」：由 Player 在破坏 WOOD 后调用。
@@ -516,15 +590,13 @@ func _update_chunks() -> void:
 	var center := world_to_chunk(_player.global_position)
 	_update_stream_dir()
 
-	var wanted := {}
-	var reach := LOAD_RADIUS + UNLOAD_PAD
-	if _flight_stream:
-		reach = maxi(FLIGHT_FORWARD, maxi(FLIGHT_SIDE, FLIGHT_BACK)) + UNLOAD_PAD
-	for ex in range(-reach, reach + 1):
-		for ez in range(-reach, reach + 1):
-			var off := Vector3i(ex, 0, ez)
-			if _in_stream_window(off, 0):
-				wanted[center + off] = true
+	# wanted 集缓存：只有中心区块变化、或飞行时机头方向转过阈值才重算
+	# （卸载判定仍每帧用实时中心精确计算，不受缓存影响）。
+	var rebuild_wanted := center != _wanted_center or _flight_stream != _wanted_flight
+	if _flight_stream and not rebuild_wanted and _stream_dir.distance_to(_wanted_dir) > 0.12:
+		rebuild_wanted = true
+	if rebuild_wanted:
+		_rebuild_wanted(center)
 
 	var to_unload := []
 	for key in _chunks:
@@ -534,24 +606,28 @@ func _update_chunks() -> void:
 	for key in to_unload:
 		_unload_chunk(key)
 
-	for key in _pending_load.keys():
-		if not wanted.has(key):
-			_pending_load.erase(key)
+	# 待加载队列的增删只在 wanted 变化时需要进行：之后每加载一块就从队列移除，
+	# 不会有新的「该加载而未入队」项出现。
+	if rebuild_wanted:
+		for key in _pending_load.keys():
+			if not _wanted.has(key):
+				_pending_load.erase(key)
+		for key in _wanted:
+			if not _chunks.has(key) and not _pending_load.has(key):
+				_pending_load[key] = true
+				_pending_dirty = true
 
-	for key in wanted:
-		if not _chunks.has(key) and not _pending_load.has(key):
-			_pending_load[key] = true
-
-	var loaded := 0
-	# 飞行时按「前方越远越优先」排序（马上要飞到），徒步按曼哈顿距离升序
-	# （脚下与近处优先）；两者都是为了缩短高速移动时前方地形未生成的窗口期。
 	var keys := _pending_load.keys()
-	keys.sort_custom(func(a: Vector3i, b: Vector3i) -> bool:
-		return _load_priority(a, center) < _load_priority(b, center)
-	)
+	if _pending_dirty:
+		# 排序比较器用预建 Callable（_cmp_load_priority 读 _sort_center），
+		# 避免每帧新建 lambda 的分配；仅队列变化时排一次。
+		_sort_center = center
+		keys.sort_custom(_priority_cmp)
+		_pending_dirty = false
 	var max_chunks := FLIGHT_CHUNKS_PER_FRAME if _flight_stream else CHUNKS_PER_FRAME
-	var budget_us := int(FLIGHT_BUDGET_MS * 1000.0)
+	var budget_us := int((FLIGHT_BUDGET_MS if _flight_stream else WALK_BUDGET_MS) * 1000.0)
 	var t0 := Time.get_ticks_usec()
+	var loaded := 0
 	for key in keys:
 		if loaded >= max_chunks:
 			break
@@ -560,9 +636,44 @@ func _update_chunks() -> void:
 		_pending_load.erase(key)
 		_load_chunk(key)
 		loaded += 1
-		# 时间预算只作用于飞行：徒步维持「每帧 2 块」的既有节奏。
-		if _flight_stream and Time.get_ticks_usec() - t0 >= budget_us:
+		# 时间预算（徒步与飞行都生效）：单块耗时随机器波动，限量按块数会在
+		# 低端机上把多块重建堆在同一帧。每帧至少加载 1 块保证队列一定在推进。
+		if Time.get_ticks_usec() - t0 >= budget_us:
 			break
+
+	# 卸载后重新暴露的边界面：邻居区块由 _unload_chunk 入队，这里每帧至多
+	# 补重建 2 个（首个不限预算保证队列推进，第二个受同一预算约束）。
+	# 注意：该循环在初始提交里本就在 _update_chunks 末尾，后来提取
+	# _load_priority 时被误放到其 return 之后成了死代码——走出加载范围时
+	# 边界永远缺面（2026-10-17 性能优化时归位）。
+	var rebuilt := 0
+	while rebuilt < 2 and not _pending_rebuilds.is_empty():
+		if rebuilt > 0 and Time.get_ticks_usec() - t0 >= budget_us:
+			break
+		_rebuild_chunk(_pending_rebuilds.pop_front())
+		rebuilt += 1
+
+
+## 重建 wanted 集（见 _wanted 缓存说明）：以中心区块为原点的保留窗口。
+func _rebuild_wanted(center: Vector3i) -> void:
+	var wanted := {}
+	var reach := LOAD_RADIUS + UNLOAD_PAD
+	if _flight_stream:
+		reach = maxi(FLIGHT_FORWARD, maxi(FLIGHT_SIDE, FLIGHT_BACK)) + UNLOAD_PAD
+	for ex in range(-reach, reach + 1):
+		for ez in range(-reach, reach + 1):
+			var off := Vector3i(ex, 0, ez)
+			if _in_stream_window(off, 0):
+				wanted[center + off] = true
+	_wanted = wanted
+	_wanted_center = center
+	_wanted_dir = _stream_dir
+	_wanted_flight = _flight_stream
+
+
+## 加载优先级排序比较器（预建 Callable，中心由 _sort_center 带入）。
+func _cmp_load_priority(a: Vector3i, b: Vector3i) -> bool:
+	return _load_priority(a, _sort_center) < _load_priority(b, _sort_center)
 
 
 ## 飞行流式开关：main 在登机 / 下机时切换。关闭后下一帧即回落到徒步窗口，
@@ -620,13 +731,8 @@ func _load_priority(coord: Vector3i, center: Vector3i) -> float:
 	var v := float(off.x) * -_stream_dir.z + float(off.z) * _stream_dir.x
 	return absf(u) + absf(v) - 0.6 * u
 
-	var rebuilt := 0
-	while rebuilt < 2 and not _pending_rebuilds.is_empty():
-		_rebuild_chunk(_pending_rebuilds.pop_front())
-		rebuilt += 1
 
-
-func _load_chunk(coord: Vector3i) -> void:
+func _load_chunk(coord: Vector3i, with_rebuild: bool = true) -> void:
 	if _chunks.has(coord):
 		return
 
@@ -640,11 +746,28 @@ func _load_chunk(coord: Vector3i) -> void:
 		# 玩家改动过的区块：列结构不再由高度图决定，走全量遍历。
 		chunk.pristine = false
 	else:
+		# 生成期批量写入：树木/水草的 set_block_local 跳过逐列维护，
+		# end_bulk 里的 compute_col_top 反正会全量重算（每村省 ~16 ms）。
+		chunk.begin_bulk()
 		_generate_chunk(chunk, coord)
-		chunk.compute_col_top()
+		chunk.end_bulk()
 	_prepare_columns(coord, chunk)
-	chunk.rebuild(_atlas_material, _emissive_material, _neighbor_lookup)
+	if with_rebuild:
+		chunk.rebuild(_atlas_material, _emissive_material, _neighbor_lookup)
 	_chunks[coord] = chunk
+
+
+## 批量写入开关（结构生成用，与 rebuild_chunks_in_region 配对）：期间所有已载
+## 区块的 set_block_local 跳过逐列维护，end 时统一重算列顶表。机场 + 三村
+## 一次写入数万方块，逐列重扫合计 0.5 s 级；统一重算每块 1~2 ms。
+func begin_bulk_writes() -> void:
+	for chunk: Chunk in _chunks.values():
+		chunk.begin_bulk()
+
+
+func end_bulk_writes() -> void:
+	for chunk: Chunk in _chunks.values():
+		chunk.end_bulk()
 
 
 func _unload_chunk(coord: Vector3i) -> void:
@@ -655,9 +778,12 @@ func _unload_chunk(coord: Vector3i) -> void:
 		_modified_data[coord] = chunk.data
 	_chunks.erase(coord)
 	chunk.queue_free()
-	# 卸载后邻居外侧边界重新暴露，入队补面重建。
+	# 卸载后邻居外侧边界重新暴露，入队补面重建（去重：多个卸载共享同一邻居
+	# 时只留一份，避免同一coord 被反复重建）。
 	for offset: Vector3i in [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1)]:
-		_pending_rebuilds.append(coord + offset)
+		var nb := coord + offset
+		if not _pending_rebuilds.has(nb):
+			_pending_rebuilds.append(nb)
 
 
 ## 区块数据生成（判据与 _block_at 同源，逐格结果一致）。

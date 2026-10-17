@@ -14,10 +14,17 @@ signal quiz_reward_earned(item: int, count: int)
 enum State { ACTIVE, DONE, CLAIMED }
 
 const SAVE_PATH := "user://progress.json"
+## 存档防抖间隔（ms）：notify 只标记脏位，由 _process 至多每这么长时间落一次盘。
+## 原先每次 notify 都同步 JSON 序列化 + 写盘（实测 ~1.1 ms/次），而挖/放一块方块
+## 就是两次 notify——连续挖矿时每块都吃一次磁盘写入尖峰。竞速结算等批量事件同理。
+## 脏位 + 定时落盘把写入合并到空闲帧；_exit_tree 与 claim 仍会立即落盘，不丢关键进度。
+const SAVE_INTERVAL_MS := 1500
 
 var counters: Dictionary = {}
 var states: Dictionary = {}          # id -> State（仅记录已解锁条目）
 var _quiz_correct_since_reward := 0
+var _dirty := false
+var _last_save_msec := 0
 
 
 func _ready() -> void:
@@ -39,8 +46,15 @@ func _ready() -> void:
 	_reevaluate()
 
 
+func _process(_delta: float) -> void:
+	# 防抖落盘：有脏位且距上次落盘超过间隔才写（见 SAVE_INTERVAL_MS）。
+	if _dirty and Time.get_ticks_msec() - _last_save_msec >= SAVE_INTERVAL_MS:
+		_save()
+
+
 func _exit_tree() -> void:
-	_save()
+	if _dirty:
+		_save()
 
 
 ## 行为计数入口：所有任务/成就的判定数据源。
@@ -48,7 +62,7 @@ func notify(key: String, amount: int = 1) -> void:
 	counters[key] = int(counters.get(key, 0)) + amount
 	_reevaluate()
 	progress_bumped.emit()
-	_save()
+	_dirty = true
 
 
 ## 知识问答作答：答对计入计数器，每满 QUIZ_REWARD_EVERY 题发一次奖励。
@@ -103,7 +117,8 @@ func claim(id: String) -> Dictionary:
 	if entry.is_empty():
 		return {}
 	states[id] = State.CLAIMED
-	_save()
+	_dirty = true
+	_save()  # 领奖是关键进度：立即落盘，不赶防抖间隔
 	_reevaluate()
 	quest_claimed.emit(id, entry["reward"])
 	return entry["reward"]
@@ -227,6 +242,8 @@ func _save() -> void:
 	if file == null:
 		return
 	file.store_string(JSON.stringify(data))
+	_dirty = false
+	_last_save_msec = Time.get_ticks_msec()
 
 
 func _load() -> void:
