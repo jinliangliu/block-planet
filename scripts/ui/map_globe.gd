@@ -163,6 +163,26 @@ func _add_flight_flags() -> void:
 			_field_markers.append(_make_flight_flag(pos, dir, Color(0.98, 0.72, 0.15)))
 
 
+## 飞行旗帜整体显隐：地图选择器只在「探索」模式显示它们（D-041）——
+## 生存/创造模式下玩家还没有载具，挂着旗子只会误导。
+## 逐旗 set visible，不销毁重建：切回探索模式瞬间复现，零建造成本。
+func set_flight_flags_visible(value: bool) -> void:
+	for marker in _airport_markers:
+		marker.visible = value
+	for marker in _field_markers:
+		marker.visible = value
+
+
+## 当前旗帜是否可见（探针断言用）。两类旗同显同隐，取第一面为代表；
+## 一面旗都没有的区域组合返回 false。
+func flight_flags_visible() -> bool:
+	for marker in _airport_markers:
+		return marker.visible
+	for marker in _field_markers:
+		return marker.visible
+	return false
+
+
 ## 一面立在地表的飞行小旗：Node3D 作根，本地 +Y 对齐球面外法线（dir），
 ## 旗杆（圆柱）自根部立起，旗布（平面）挂在杆顶向 +X 切向伸展、面朝 +Z 切向
 ## （双面可见）。机场/降落场由 cloth_color 区分。

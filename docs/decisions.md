@@ -1367,6 +1367,23 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 
 ---
 
+## D-041 地图选择器载具门牌仅在探索模式显示
+
+**背景**：用户需求「地图选择器上，仅在玩家选择探索模式时才同步显示飞行旗帜标记和汽车标记」。原行为：地球页的飞行旗帜（机场红 / 降落场琥珀小旗）与左下角 🏁 赛道竞速入口在任何模式下都常显——生存/创造模式下玩家还没有载具，两块「门牌」纯属误导。
+
+**决策**：两个载具门牌的显隐判据统一为 `GameState.is_explore()`，在 `MapSelector._refresh_mode_row()` 末尾经新增的 `_refresh_vehicle_entries()` 刷新——模式三选一的 `_select_mode()` 与 `open()` 都经过 `_refresh_mode_row()`，切模式当帧同步，无需重开选择器。
+
+**实现**：
+- `MapGlobe.set_flight_flags_visible()` / `flight_flags_visible()`：对 `_airport_markers` / `_field_markers` 逐旗 `set visible`，不销毁重建（切回探索模式瞬间复现，零建造成本）；
+- `MapSelector._race_button` 从 `_build_race_entry` 局部变量提为成员，同样只切 `visible`；建造顺序上模式列先于按钮，故 `_build_globe_page()` 末尾补调一次 `_refresh_vehicle_entries()` 兜住初始态；
+- 副标题文案同步改为「切到『探索』模式才显示飞行旗帜（红=机场 / 琥珀=降落场）与 🏁 赛道竞速」，说明书与界面不再各说一套。
+
+**范围**：只动两个「门牌」。介绍页的机场/降落场说明文本是地理信息、图例 🎣 与模式无关，均保持原样；`racing_probe` 经 `race_requested.emit()` 直发信号验证接线，不依赖按钮可见性，不受影响。
+
+**验证**：`life_probe` 阶段 Q-6b 新增 8 项断言（建有按钮 / 生存隐藏 / 探索显示 / 创造也隐藏 / 重开选择器仍同步，旗帜与按钮分别断言）；`globe_flags_shot` 本就先切探索模式再截图；`map_mode_shot` 两张（默认生存 + 探索）正好对比门牌出现与否。
+
+---
+
 ## 附：待定/开放问题
 
 | 编号 | 问题 | 现状 |

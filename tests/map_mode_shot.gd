@@ -28,7 +28,8 @@ func _run() -> void:
 	await RenderingServer.frame_post_draw
 	var first := _shot_path("map_mode_shot.png")
 	get_viewport().get_texture().get_image().save_png(first)
-	# 改选探索模式再截一张：验证选中态与说明文案随选切换。
+	# 改选探索模式再截一张：验证选中态与说明文案随选切换，
+	# 并确认飞行旗帜与 🏁 赛道竞速入口只在探索模式出现（D-041）。
 	hud._map_selector._select_mode(GameState.Mode.EXPLORE)
 	for i in range(10):
 		await get_tree().process_frame

@@ -1827,6 +1827,26 @@ func _run() -> void:
 	selector._select_mode(GameState.Mode.CREATIVE)
 	_check(GameState.is_creative(), "地图页也能选到创造模式")
 
+	# Q-6b 载具门牌只在探索模式显示（D-041）：飞行旗帜 + 🏁 竞速入口，
+	# 切模式当帧同步，不用重开选择器。
+	var race_btn: Button = selector._race_button
+	_check(race_btn != null, "地图页建有 🏁 赛道竞速入口按钮")
+	selector._select_mode(GameState.Mode.SURVIVAL)
+	_check(race_btn != null and not race_btn.visible, "生存模式隐藏 🏁 竞速入口")
+	_check(not selector._globe.flight_flags_visible(), "生存模式隐藏地球上的飞行旗帜")
+	selector._select_mode(GameState.Mode.EXPLORE)
+	_check(race_btn != null and race_btn.visible, "探索模式显示 🏁 竞速入口")
+	_check(selector._globe.flight_flags_visible(), "探索模式显示地球上的飞行旗帜")
+	selector._select_mode(GameState.Mode.CREATIVE)
+	_check(race_btn != null and not race_btn.visible, "创造模式同样隐藏 🏁 竞速入口")
+	_check(not selector._globe.flight_flags_visible(), "创造模式同样隐藏飞行旗帜")
+	# 重开选择器也按当前模式同步（open() 路径）。
+	GameState.set_mode(GameState.Mode.EXPLORE)
+	selector.close()
+	selector.open()
+	_check(race_btn != null and race_btn.visible and selector._globe.flight_flags_visible(),
+		"探索模式下重开选择器，两个门牌仍然显示")
+
 	# Q-7 HUD 模式徽章：贴在小地图外框正下方，只两个字，带描边
 	GameState.set_mode(GameState.Mode.EXPLORE)
 	_check(hud._mode_label.text == "探索", "HUD 模式徽章只显示两个字「%s」" % hud._mode_label.text)
