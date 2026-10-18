@@ -1,10 +1,13 @@
 extends Node
-## 起飞教练取证（D-043）：登机后按「点火 → 推油门 → 滑跑 → 抬轮 → 离地」
-## 五个阶段各出一张截图，验证教练条文案、配色与进度条是否随状态推进。
+## 起飞教练取证（D-043 / D-046）：登机后按「点火 → 推油门 → 滑跑 → 抬轮 → 离地」
+## 六个阶段各出一张截图，验证教练区文案、配色与进度条是否随状态推进。
+## D-046 起教练区不再是屏幕底部独立横条，而是合并进顶部居中的飞行面板卡片
+## （「2区和3区合并按照2区风格展示」）——截图里它是卡片的最后几行，另在
+## coach_7_cruise 验证起飞成功后教练区收起、卡片缩回原高度。
 ##
 ## 不依赖长跑道：速度由 Aircraft.launch() 直接给（抬轮段给到抬轮速度以上即可
 ## 触发「按 ↑ 抬轮」，无需真的滑跑 18 m）。操纵量走 drive_remotely 外部写入，
-## 与飞行手感无关，只验证教练条的状态机与绘制。
+## 与飞行手感无关，只验证教练区的状态机与渲染。
 ## 需窗口运行，勿加 --headless。
 ## 运行：Godot_v4.6.3-stable_win64_console.exe --path . res://tests/takeoff_coach_shot.tscn
 
@@ -23,6 +26,16 @@ const STRIP_LENGTH := 64
 
 var _craft: Aircraft = null
 var _player: Player = null
+var _hud: HUD = null
+var _fails := 0
+
+
+func _check(cond: bool, msg: String) -> void:
+	if cond:
+		print("PASS: ", msg)
+	else:
+		_fails += 1
+		print("FAIL: ", msg)
 
 
 func _shot_path(file_name: String) -> String:
@@ -65,6 +78,7 @@ func _run() -> void:
 	await _wait(120)
 
 	var hud: HUD = main_scene.get_node("UI")
+	_hud = hud
 	if hud._map_selector != null and hud._map_selector.is_open():
 		hud.close_map_selector()
 	# 停刷怪：生物撞机会扰动滑跑段（对齐 flight_hud_shot）。
@@ -112,6 +126,15 @@ func _run() -> void:
 	await _wait_physics(6)
 
 	# ① 刚登机：发动机默认熄火（这正是新手「推油门没反应」的卡点）。
+	# D-046 合并布局断言：教练区是飞行面板卡片的最后几行；登机即隐藏状态块
+	# 与世界名（用户要求「1区不显示」）。
+	_check(_hud._flight_panel.visible, "登机后飞行面板卡片显示（教练区挂在其中）")
+	_check(_hud._coach_main.is_visible_in_tree(), "教练主句在卡片内显示（第①步点火）")
+	var card: Rect2 = _hud._flight_panel.get_global_rect()
+	_check(card.encloses(_hud._coach_main.get_global_rect()),
+		"教练主句整块落在飞行面板卡片内（D-046 合并）")
+	_check(not _hud._stats_box.is_visible_in_tree(), "登机后左上角状态块隐藏")
+	_check(not _hud._map_name_label.is_visible_in_tree(), "登机后顶部居中世界名隐藏")
 	await _snap("coach_1_engine_off.png")
 
 	# ② 已点火、油门 0。
@@ -145,8 +168,22 @@ func _run() -> void:
 			break
 	await _snap("coach_6_success.png")
 
+	# ⑦ 成功横幅停留 3.5 s 后教练区收起、卡片缩回原高度（巡航不占屏）。
+	# 先缓爬保住离地高度（掉回 15 m 以下会重新显示「爬升中」），再等横幅过期。
+	_craft.controls.pitch = 0.4
+	for i in range(300):
+		await get_tree().physics_frame
+		if float(_craft.snapshot()["altitude_agl"]) > 20.0:
+			break
+	for i in range(280):
+		await get_tree().physics_frame
+	_check(not _hud._coach_main.is_visible_in_tree(),
+		"起飞成功横幅过期后教练区收起（卡片缩回原高度，巡航不占屏）")
+	await _snap("coach_7_cruise.png")
+
 	SaveGuard.restore()
-	get_tree().quit(0)
+	print("COACH_SHOT_DONE fails=%d" % _fails)
+	get_tree().quit(1 if _fails > 0 else 0)
 
 
 func _pick_strip_origin(world: World) -> Vector2i:

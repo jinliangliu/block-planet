@@ -435,17 +435,18 @@ func _run() -> void:
 		main_scene, start + Vector3(-6.0, 0.0, 6.0), RUNWAY_HEADING)
 	player.ride_aircraft(tel_craft)
 	await _frames(30)
-	# 状态块在驾驶中保持可见：容器 visible 保持 true，三个读数随容器一起
-	# 在树内可见（飞行中仍会掉血/饥饿，读数必须看得见）。显隐断言一律用
-	# is_visible_in_tree()：子节点自己的 visible 标记仍为 true，只有
-	# 「自身 + 祖先链」全可见才算真显示，逐节点断言会假绿。
+	# 状态块在驾驶中隐藏（D-046，用户要求「登机后1区不显示」）：容器 visible=false，
+	# 三个读数随容器一起不可见。显隐断言一律用 is_visible_in_tree()：子节点自己的
+	# visible 标记仍为 true，只有「自身 + 祖先链」全可见才算真显示，逐节点断言会假绿。
 	_check(not hud._hotbar_bar.is_visible_in_tree(),
 		"登机后底部物品栏隐藏（飞行中不放置方块，底部让给飞行 UI）")
-	_check(hud._stats_box.is_visible_in_tree(),
-		"登机后左上角状态块仍显示（姓名 + 生命 + 饥饿）")
-	_check(hud._name_label.is_visible_in_tree(), "驾驶中姓名仍在状态块内可见")
-	_check(hud._hearts.is_visible_in_tree(), "驾驶中生命爱心仍在状态块内可见")
-	_check(hud._hunger_label.is_visible_in_tree(), "驾驶中饥饿读数仍在状态块内可见")
+	_check(not hud._stats_box.is_visible_in_tree(),
+		"登机后左上角状态块隐藏（姓名 + 生命 + 饥饿，飞行中玩家就是飞机本身）")
+	_check(not hud._name_label.is_visible_in_tree(), "驾驶中姓名随状态块一起隐藏")
+	_check(not hud._hearts.is_visible_in_tree(), "驾驶中生命爱心随状态块一起隐藏")
+	_check(not hud._hunger_label.is_visible_in_tree(), "驾驶中饥饿读数随状态块一起隐藏")
+	_check(not hud._map_name_label.is_visible_in_tree(),
+		"登机后顶部居中世界名隐藏（不贴住飞行面板标题右侧）")
 	_check(not hud._minimap.is_visible_in_tree(),
 		"登机后右上角小地图（指南针）隐藏（方位交给战术地图与仪表小地图）")
 	_check(not hud._mode_label.is_visible_in_tree(), "登机后右上角模式徽章隐藏")
@@ -462,6 +463,7 @@ func _run() -> void:
 	await _frames(10)
 	_check(hud._hotbar_bar.is_visible_in_tree(), "下机后底部物品栏恢复显示")
 	_check(hud._stats_box.is_visible_in_tree(), "下机后左上角状态块恢复显示")
+	_check(hud._map_name_label.is_visible_in_tree(), "下机后顶部居中世界名恢复显示")
 	_check(hud._hunger_label.is_visible_in_tree(), "下机后饥饿读数仍在状态块内可见")
 	_check(hud._minimap.is_visible_in_tree(), "下机后右上角小地图（指南针）恢复显示")
 	_check(hud._mode_label.is_visible_in_tree(), "下机后右上角模式徽章恢复显示")

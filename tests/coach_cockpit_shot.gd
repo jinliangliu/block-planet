@@ -1,22 +1,22 @@
 extends Node
-## 座舱视角下起飞教练条避让取证（takeoff_coach_shot 的补充，不是替代）。
+## 起飞教练合并进飞行面板后的座舱视角取证（D-046；重写自 D-045 的底部横条版）。
 ##
-## 存在理由：takeoff_coach_shot.gd 全文不切视角（ride_aircraft 后无 set_mode），
-## AircraftCamera._mode 默认 CHASE，六张截图全程走 BOTTOM_RESERVE=122 的旧路，
-## 对「座舱视角 reserve=200」这条新路径零覆盖——那条正好是会把座舱玻璃 HUD
-## 底部三行读数整块盖住的唯一路径。
-##
-## 本探针单独跑，不改 takeoff_coach_shot 的任何行为（六张截图保持原样）。
+## 背景：D-043 的教练条原是屏幕底部独立横条，D-045 为避开座舱玻璃 HUD 的底部
+## 三行读数带（y H-120…H-60）给它加了 reserve=200 的避让。D-046 按用户要求
+## 「2区和3区合并按照2区风格展示」把教练条并进顶部居中的飞行面板卡片后，底部
+## 避让整条链路失去存在理由——本探针改验新布局的四件事：
+##   ① 教练区（主句 / 副句 / 进度条）整块落在飞行面板卡片矩形内——真的合并了；
+##   ② 追尾视角下卡片与左上角读数 _c_tl 零重叠；
+##   ③ 座舱视角下卡片与玻璃 HUD 底部读数带零重叠（旧冲突从此不该存在）；
+##   ④ 登机后左上角状态块与顶部居中世界名都隐藏（D-046 用户要求「1区不显示」）。
 ## 需窗口运行（截图走 Vulkan），勿加 --headless。
-## 运行：Godot_v4.6.3-stable_win64.exe --path . res://tests/coach_cockpit_shot.tscn
+## 运行：Godot_v4.6.3-stable_win64_console.exe --path . res://tests/coach_cockpit_shot.tscn
 
 const SHOT_DIR := "res://tmp"
 
-## 四角 HUD 左右各留白（角标 230 + 16 边距 + 8 余量）：与 takeoff_coach._draw_bar
-## 的窄屏兜底同源，此处用于算横条左右边界。
-const SIDE_KEEP := 254.0
 ## 座舱玻璃 HUD 底部三行读数带（flight_instrument_hud._build_glass）：
-## 锚底，offset_top=-120 / offset_bottom=-60，横向 W/2±160。
+## 锚底，offset_top=-120 / offset_bottom=-60，横向 W/2±160。该 VBox 是 _glass
+## 的局部子节点、没存成员，这里按同源常量重算期望矩形。
 const GLASS_TOP := 120.0
 const GLASS_BOTTOM := 60.0
 const GLASS_HALF_W := 160.0
@@ -24,6 +24,7 @@ const GLASS_HALF_W := 160.0
 var _fails := 0
 var _craft: Aircraft = null
 var _player: Player = null
+var _hud: HUD = null
 
 
 func _check(cond: bool, msg: String) -> void:
@@ -57,9 +58,9 @@ func _run() -> void:
 	add_child(main_scene)
 	await _wait(120)
 
-	var hud: HUD = main_scene.get_node("UI")
-	if hud._map_selector != null and hud._map_selector.is_open():
-		hud.close_map_selector()
+	_hud = main_scene.get_node("UI")
+	if _hud._map_selector != null and _hud._map_selector.is_open():
+		_hud.close_map_selector()
 	var spawner: MobSpawner = main_scene.get_node("MobSpawner")
 	spawner._spawn_timer = 9999.0
 	spawner._passive_timer = 9999.0
@@ -96,8 +97,8 @@ func _run() -> void:
 	_craft.drive_remotely()
 	# 踩坑（aircraft.gd:345-347）：drive_remotely() 内部 set_piloted(true) **不带 who**，
 	# 会把 ride_aircraft 刚设好的 _craft.rider 清回 null。真实手动登机没有这一步，
-	# rider 正常；takeoff_coach._refresh_bottom_reserve 正是读 rider.flight_camera。
-	# 这里补一次带 who 的 set_piloted 把探针拉回「真人驾驶」状态，否则座舱判据失效。
+	# rider 正常；座舱判据（rider.flight_camera）正依赖它。这里补一次带 who 的
+	# set_piloted 把探针拉回「真人驾驶」状态。
 	_craft.set_piloted(true, _player)
 	for i in range(300):
 		await get_tree().physics_frame
@@ -105,8 +106,8 @@ func _run() -> void:
 			break
 	await _wait_physics(6)
 
-	# 引擎点火 + 油门半程：教练停在「② 按住【W】把油门推到底」。该步 flash=false
-	# → 描边 alpha=1.0、颜色固定为 COL_KEY(1.0, 0.88, 0.35)，截图可复现（不闪）。
+	# 引擎点火 + 油门半程：教练停在「② 按住【W】推满油门」。该步 flash=false
+	# → 主句 alpha=1.0、颜色固定为 COL_KEY(1.0, 0.88, 0.35)，截图可复现（不闪）。
 	_craft.set_engine(true)
 	_craft.controls.throttle = 0.3
 	await _wait_physics(6)
@@ -114,16 +115,34 @@ func _run() -> void:
 	var cam: AircraftCamera = _player.flight_camera
 	_check(cam != null, "AircraftCamera 已注入 Player.flight_camera")
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE,
-		"默认视角为追尾 CHASE（与 takeoff_coach_shot 一致）")
+		"默认视角为追尾 CHASE")
 	_check(_craft.rider == _player,
 		"drive_remotely() 未抹掉 rider（aircraft.gd:347 的坑，已按真人状态补回）")
-	var coach: TakeoffCoach = hud._takeoff_coach
-	_check(coach != null, "HUD 持有起飞教练节点")
-	await _wait_physics(2)
-	_check(is_equal_approx(coach._bottom_reserve, TakeoffCoach.BOTTOM_RESERVE),
-		"追尾视角 reserve=122.0（实测 %.1f）" % coach._bottom_reserve)
-	# 追尾对照截图：证明本探针不改 takeoff_coach_shot 六张图的旧行为（reserve 122）。
-	await _snap(coach, "coach_cockpit_ctrl_chase.png")
+
+	# ── ④ D-046：登机后状态块与世界名都隐藏 ──
+	_check(not _hud._stats_box.is_visible_in_tree(),
+		"登机后左上角状态块隐藏（姓名+生命+饥饿，用户要求「1区不显示」）")
+	_check(not _hud._map_name_label.is_visible_in_tree(),
+		"登机后顶部居中世界名隐藏（不再贴住飞行面板标题右侧）")
+
+	# ── ① 教练区真的并进了飞行面板卡片 ──
+	var card: Rect2 = _hud._flight_panel.get_global_rect()
+	var main_rect: Rect2 = _hud._coach_main.get_global_rect()
+	var sub_rect: Rect2 = _hud._coach_sub.get_global_rect()
+	var bar_rect: Rect2 = _hud._coach_bar.get_global_rect()
+	print("DBG  card=", card, " coach_main=", main_rect)
+	_check(_hud._coach_main.is_visible_in_tree(), "教练主句在树内可见（登机即带一遍）")
+	_check(card.encloses(main_rect), "教练主句整块落在飞行面板卡片内（真的合并了）")
+	_check(card.encloses(sub_rect), "教练副句整块落在飞行面板卡片内")
+	_check(card.encloses(bar_rect), "教练进度条整块落在飞行面板卡片内")
+	_check(String(_hud._coach_main.text).contains("W"), "教练主句是第②步推油门（含 W）")
+
+	# ── ② 追尾：卡片与左上角读数 _c_tl 零重叠 ──
+	var c_tl: Rect2 = _hud._instrument_hud._c_tl.get_global_rect()
+	_check(not card.intersects(c_tl),
+		"追尾：卡片与左上角读数 _c_tl 零重叠（卡片 x %.0f…%.0f vs 读数 x %.0f…%.0f）"
+			% [card.position.x, card.end.x, c_tl.position.x, c_tl.end.x])
+	await _snap("coach_cockpit_ctrl_chase.png")
 
 	# ── 切座舱 ──
 	cam.set_mode(AircraftCamera.ViewMode.FIRST_PERSON)
@@ -131,110 +150,34 @@ func _run() -> void:
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
 		"已切到第一人称座舱")
 	await _wait_physics(2)
-	_check(is_equal_approx(coach._bottom_reserve, TakeoffCoach.BOTTOM_RESERVE_COCKPIT),
-		"座舱视角 reserve=200.0（实测 %.1f）" % coach._bottom_reserve)
 
-	var size := coach.get_size()
-	var w := minf(520.0, size.x - 2.0 * SIDE_KEEP)
-	var rect := Rect2(Vector2(size.x * 0.5 - w * 0.5, size.y - coach._bottom_reserve),
-		Vector2(w, 58.0))
-	var glass := Rect2(Vector2(size.x * 0.5 - GLASS_HALF_W, size.y - GLASS_TOP),
+	# ── ③ 座舱：卡片与玻璃 HUD 底部读数带零重叠 ──
+	var vp := get_viewport().get_visible_rect().size
+	var glass := Rect2(Vector2(vp.x * 0.5 - GLASS_HALF_W, vp.y - GLASS_TOP),
 		Vector2(GLASS_HALF_W * 2.0, GLASS_TOP - GLASS_BOTTOM))
-	print("DBG  viewport=", size, " cockpit rect=", rect, " glass band=", glass)
-
-	# 几何断言：横条必须整块落在读数带**上方**（不遮挡玻璃 HUD 三行读数）。
-	_check(rect.intersection(glass).get_area() < 0.0001,
-		"教练条与玻璃 HUD 读数带零重叠（横条底 %.0f < 读数带顶 %.0f，间隙 %.0f px）"
-			% [rect.end.y, glass.position.y, glass.position.y - rect.end.y])
-	# 1280×720 与 1560×720（最小横向投影分辨率）下的期望值。
-	for want: Vector2i in [Vector2i(1280, 720), Vector2i(1560, 720)]:
-		var ew := minf(520.0, float(want.x) - 2.0 * SIDE_KEEP)
-		var ex := float(want.x) * 0.5 - ew * 0.5
-		_check(absf(rect.size.x - ew) < 0.001,
-			"%d×%d 横条宽 %.0f（minf 窄屏兜底未触发）" % [want.x, want.y, rect.size.x])
-		if absf(float(want.x) - size.x) < 0.001:
-			_check(absf(rect.position.x - ex) < 0.001,
-				"%d×%d 横条左界 %.0f（期望 %.0f）" % [want.x, want.y, rect.position.x, ex])
-	_check(absf(rect.position.y - (size.y - 200.0)) < 0.001,
-		"座舱横条顶边 y=%.0f（期望 %.0f）" % [rect.position.y, size.y - 200.0])
-
-	var path := _shot_path("coach_7_cockpit.png")
-
-	# 像素取证：冻结场景树，只切教练显隐各拍一张，diff 出教练真正画出来的像素，
-	# 与计算的 rect 比。比抠描边色稳（座舱场景本身有黄色物体会污染阈值）；
-	# 冻结是必须的——不冻的话相机阻尼/物理在两帧间继续走，diff 会糊满全屏
-	# （实测未冻结时外包矩形 1280×667，噪声把教练淹了）。
-	get_tree().paused = true
-	coach.visible = true
-	coach.queue_redraw()
-	await _wait(2)
-	await RenderingServer.frame_post_draw
-	var img: Image = get_viewport().get_texture().get_image()
-	img.save_png(path)
-	coach.visible = false
-	await _wait(1)
-	await RenderingServer.frame_post_draw
-	var img_off: Image = get_viewport().get_texture().get_image()
-	get_tree().paused = false
-	coach.visible = true
-	print("DBG  saved ", path, "（座舱、教练可见）")
-	var bbox := _diff_bbox(img, img_off)
-	print("DBG  coach 画出来的像素外包矩形=", bbox, "（计算 rect=", rect, "）")
-	if bbox.get_area() > 0.0:
-		_check(absf(bbox.size.x - rect.size.x) < 6.0
-				and absf(bbox.size.y - rect.size.y) < 6.0,
-			"像素外包矩形与计算矩形同尺寸（%.0f×%.0f vs %.0f×%.0f）"
-				% [bbox.size.x, bbox.size.y, rect.size.x, rect.size.y])
-		_check(absf(bbox.position.y - rect.position.y) < 5.0
-				and absf(bbox.position.x - rect.position.x) < 6.0,
-			"像素位置与计算位置一致（y %.0f vs %.0f，x %.0f vs %.0f）"
-				% [bbox.position.y, rect.position.y, bbox.position.x, rect.position.x])
-		_check(bbox.end.y <= glass.position.y,
-			"像素证据：教练图形底边 %.0f 未侵入读数带顶 %.0f（余 %.0f px）"
-				% [bbox.end.y, glass.position.y, glass.position.y - bbox.end.y])
-	else:
-		_check(false, "diff 未找到教练图形（界面没画出来？）")
-
-	# 不吃鸟：Coach 在座舱视角下仍可见（不该被清掉）。
-	_check(coach.visible, "座舱视角下教练条仍可见")
+	card = _hud._flight_panel.get_global_rect()
+	print("DBG  viewport=", vp, " card=", card, " glass band=", glass)
+	_check(not card.intersects(glass),
+		"座舱：卡片与玻璃 HUD 读数带零重叠（卡片底 %.0f < 读数带顶 %.0f，间隙 %.0f px）"
+			% [card.end.y, glass.position.y, glass.position.y - card.end.y])
+	_check(_hud._coach_main.is_visible_in_tree(),
+		"座舱视角下教练区仍显示（不因切视角被清掉）")
+	await _snap("coach_cockpit_view.png")
 
 	SaveGuard.restore()
 	print("COACH_COCKPIT_DONE fails=%d" % _fails)
 	get_tree().quit(1 if _fails > 0 else 0)
 
 
-func _snap(coach: TakeoffCoach, file_name: String) -> void:
+func _snap(file_name: String) -> void:
 	await _wait(2)
 	await RenderingServer.frame_post_draw
 	var path := _shot_path(file_name)
 	get_viewport().get_texture().get_image().save_png(path)
-	print("DBG  saved ", path, " reserve=", coach._bottom_reserve,
-		" visible=", coach.visible)
+	print("DBG  saved ", path)
 
 
 func _shot_path(file_name: String) -> String:
 	var dir := ProjectSettings.globalize_path(SHOT_DIR)
 	DirAccess.make_dir_recursive_absolute(dir)
 	return dir.path_join(file_name)
-
-
-## 两屏差异像素的外包矩形（差异阈值偏大以吸收两帧间的轻微噪声）。
-func _diff_bbox(a: Image, b: Image) -> Rect2:
-	if a.get_size() != b.get_size():
-		return Rect2()
-	var min_x := 1 << 30
-	var min_y := 1 << 30
-	var max_x := -(1 << 30)
-	var max_y := -(1 << 30)
-	for y in range(0, a.get_height()):
-		for x in range(0, a.get_width()):
-			var ca := a.get_pixel(x, y)
-			var cb := b.get_pixel(x, y)
-			if absf(ca.r - cb.r) + absf(ca.g - cb.g) + absf(ca.b - cb.b) > 0.12:
-				min_x = mini(min_x, x)
-				min_y = mini(min_y, y)
-				max_x = maxi(max_x, x)
-				max_y = maxi(max_y, y)
-	if max_x < min_x:
-		return Rect2()
-	return Rect2(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
