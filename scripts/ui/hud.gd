@@ -109,6 +109,11 @@ var _flight_speed: Label
 var _flight_altitude: Label
 var _flight_throttle: Label
 var _flight_stall: Label
+## D-052：卡片标题与「座舱视角下卡片是否已靠左」的布防状态。
+## 座舱视角卡片挪到左上并只留教练区（数据行让位给仪表），追尾视角维持
+## 顶部居中的全读数——两套布局只在视角切换时重排一次。
+var _flight_title: Label
+var _panel_at_left := false
 ## 飞行面板卡片内的起飞教练区（D-046）：原为屏幕底部独立横条，按用户要求
 ## 「2区和3区合并按照2区风格展示」并进本卡片——分隔线 + 主句 + 副句 + 进度条，
 ## 全部用卡片既有的 Label 行风格，不引入新的视觉语言。巡航/失速时整体隐藏，
@@ -667,6 +672,7 @@ func _build_flight_panel(root: Control) -> void:
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color(0.80, 0.90, 1.0))
 	box.add_child(title)
+	_flight_title = title
 
 	_flight_speed = _flight_line(box, Color(1.0, 1.0, 1.0, 0.95))
 	_flight_altitude = _flight_line(box, Color(1.0, 1.0, 1.0, 0.95))
@@ -811,16 +817,21 @@ func _build_flight_touch(root: Control) -> void:
 
 	# 左下：俯仰/滚转单杆（复用 VirtualJoystick；上推=抬头，右推=右滚）。
 	var stick := VirtualJoystick.new()
+	pad.add_child(stick)
+	# 尺寸必须在 add_child **之后**读：VirtualJoystick 在 _ready 里才写
+	# custom_minimum_size，之前读到的是 (0,0)。首版据此算 offset，摇杆被
+	# 摆成 0×0 的控件——圆圈照样画得出来（Control 默认不裁剪），但
+	# _gui_input 的命中矩形是空矩形，触摸永远打不中 = 移动端完全无法操纵
+	# 飞机（P0）。目标平台是中低端 Android，这条必须钉死。
+	var s := stick.custom_minimum_size
 	stick.anchor_left = 0.0
 	stick.anchor_top = 1.0
 	stick.anchor_right = 0.0
 	stick.anchor_bottom = 1.0
-	var s := stick.custom_minimum_size
 	stick.offset_left = 32.0
 	stick.offset_top = -(s.y + 32.0)
 	stick.offset_right = 32.0 + s.x
 	stick.offset_bottom = -32.0
-	pad.add_child(stick)
 	stick.value_changed.connect(_on_ft_joystick)
 
 	# 右下：油门竖滑杆（上推=加油门）。
@@ -886,6 +897,11 @@ func _build_flight_touch(root: Control) -> void:
 	row.anchor_bottom = 0.0
 	row.offset_right = -16.0
 	row.offset_top = 16.0
+	# 只给右/上偏移时 Control 会从锚点向右溢出屏幕（HBox 的最小宽度把
+	# size.x 撑成 300+，而 position.x 仍是屏宽 −16）——必须自右向左生长，
+	# 否则移动端「视角/地图/发动机/下机」四个按钮全在屏外。
+	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	row.grow_vertical = Control.GROW_DIRECTION_END
 	row.add_theme_constant_override("separation", 8)
 	pad.add_child(row)
 	var view_btn := Button.new()
@@ -895,6 +911,14 @@ func _build_flight_touch(root: Control) -> void:
 	view_btn.pressed.connect(_on_ft_view)
 	row.add_child(view_btn)
 	_ft_view = view_btn
+	# 地图（D-052）：移动端没有 M 键，此前**完全没有入口**——战术地图在
+	# 手机上等于不存在。按钮直接复用键盘 M 的 _toggle_tactical_map。
+	var map_btn := Button.new()
+	map_btn.text = "地图"
+	map_btn.custom_minimum_size = Vector2(72, 56)
+	map_btn.focus_mode = Control.FOCUS_NONE
+	map_btn.pressed.connect(_toggle_tactical_map)
+	row.add_child(map_btn)
 	var engine_btn := Button.new()
 	engine_btn.text = "发动机"
 	engine_btn.custom_minimum_size = Vector2(88, 56)
@@ -1067,6 +1091,36 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 	_refresh_flight_panel()
 
 
+## 当前是否第一人称座舱视角（卡片布局与数据行显隐的判据）。
+func _is_first_person() -> bool:
+	return _flight_camera != null and _flight_camera.has_method("current_mode") \
+		and _flight_camera.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON
+
+
+## 飞行卡片位置（D-052）：座舱靠左上（y120 起，避让左上角生命/饥饿读数块
+## y16~100），追尾回顶部居中。只在视角切换时重排一次，不每帧写 offset。
+## 座舱起点必须让过 console 宽度：CockpitInstruments 是后挂的兄弟节点、画在
+## 上层，x<console_w 的内容会被整个盖掉（实测卡片只剩右半截文字）。
+func _layout_flight_panel(fp: bool) -> void:
+	if _flight_panel == null or _panel_at_left == fp:
+		return
+	_panel_at_left = fp
+	var s := CockpitInstruments.ui_scale(get_viewport().get_visible_rect().size)
+	var x0 := CockpitInstruments.CONSOLE_W * s + 16.0
+	if fp:
+		_flight_panel.anchor_left = 0.0
+		_flight_panel.anchor_right = 0.0
+		_flight_panel.offset_left = x0
+		_flight_panel.offset_right = x0 + 236.0
+		_flight_panel.offset_top = 120.0
+	else:
+		_flight_panel.anchor_left = 0.5
+		_flight_panel.anchor_right = 0.5
+		_flight_panel.offset_left = -118.0
+		_flight_panel.offset_right = 118.0
+		_flight_panel.offset_top = 16.0
+
+
 ## delta 供起飞教练推进内部计时（呼吸闪烁 / 成功停留）；非每帧调用点传 0.0。
 func _refresh_flight_panel(delta: float = 0.0) -> void:
 	if _flight_panel == null:
@@ -1076,6 +1130,19 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 		_flight_panel.visible = false
 		return
 	_flight_panel.visible = true
+	# 座舱视角：卡片挪到左上、只留「失速行 + 教练区」（D-052）。
+	# 根因：卡片 236×~205 悬在屏幕顶部正中，正压在起飞滑跑时最需要看的
+	# 跑道朝向/地平线上；且顶部警告横幅（y150..190）会直接压在卡片下半部，
+	# 实测「发动机 运转」与「失速了！推杆低头」叠成一团。座舱里 SPD/ALT/
+	# 航向/油门/燃油已全部有表，卡片的数据行纯属重复。
+	var fp := _is_first_person()
+	_layout_flight_panel(fp)
+	_flight_title.visible = not fp
+	_flight_speed.visible = not fp
+	_flight_altitude.visible = not fp
+	_flight_throttle.visible = not fp
+	_flight_view.visible = not fp
+	_flight_engine.visible = not fp
 	var reading := craft.snapshot()
 	var warning := bool(reading["stall_warning"])
 	_flight_speed.text = "空速  %d km/h   失速 %d" % [
@@ -1129,6 +1196,10 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 				"font_color", Color(col.r, col.g, col.b, 0.9))
 		else:
 			_coach_bar.visible = false
+	# 座舱视角：一行内容都没有（无失速、教练区收起）时整卡收起——否则
+	# PanelContainer 只剩一条空面板边框悬在左上（实测像一条「神秘胶囊」）。
+	if fp and not _coach_main.visible and not _flight_stall.visible:
+		_flight_panel.visible = false
 
 
 ## 油门条：10 格实心/空心，比纯数字更快读出推杆位置。

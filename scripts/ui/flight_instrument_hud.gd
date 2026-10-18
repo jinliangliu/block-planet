@@ -148,6 +148,12 @@ func _apply_visibility(mode: int) -> void:
 	# 警告横幅：有警告且非地图/回放时显示（_refresh_warn 再细化内容）。
 	var has_alerts := not _instruments.alerts().is_empty()
 	_warn.visible = has_alerts and not map_like
+	# 横幅位置（D-052）：座舱视角卡片已挪到左上，横幅回到顶部中央（最醒目
+	# 且不挡视野）；追尾视角卡片占顶部中央 y16~221（含教练区），横幅必须
+	# 压在它下沿之下——首版固定 y150..190 与卡片直接对穿，实测「发动机
+	# 运转」和「失速了！推杆低头」叠成一团。
+	_warn.offset_top = 16.0 if fp else 240.0
+	_warn.offset_bottom = _warn.offset_top + 40.0
 
 
 func _hide_all() -> void:

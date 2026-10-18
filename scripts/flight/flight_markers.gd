@@ -92,7 +92,11 @@ func set_runway_guide(entry: Vector3, axis: Vector3) -> void:
 	# 地面箭头：从 entry 沿 axis 朝目标列 6 个箭头，间隔 40m。
 	for i in range(6):
 		var pos := entry + flat * (float(i) * 40.0 + 20.0)
-		pos.y = _ground_y(pos) + 0.3
+		# 高度取 entry.y（机场面）。D-034 首版调 _ground_y() 而它恒返回 0，
+		# 本工程地形通常在 y30~70——整列箭头埋在方块里，进近引导实际从未
+		# 可见过（D-052 审核发现）。机场/降落场是平的人工平台，用 entry.y
+		# 就是正确地面，不需要逐点采样地形。
+		pos.y = entry.y + 0.3
 		_make_arrow(pos, flat, 3.0)
 	# 3° 下滑道双轨：从 entry 上方（entry.y + 250·tan3°≈13m）沿 3° 下降引向 entry。
 	var start := entry + Vector3(0.0, 250.0 * tan(deg_to_rad(3.0)), 0.0)
@@ -167,8 +171,3 @@ func _make_line(a: Vector3, b: Vector3, thick: float, color: Color) -> void:
 	_runway_group.add_child(box)
 	box.global_position = (a + b) * 0.5
 	box.look_at(b, Vector3.UP)
-
-
-## 取某水平位置处的地表高度（带 fallback 0）：无世界引用即退回目标 y。
-func _ground_y(p: Vector3) -> float:
-	return 0.0

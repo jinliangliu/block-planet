@@ -9,9 +9,13 @@ extends Node
 ##   ⑤ 裁剪：线段×矩形（全在外返回空 / 跨边返回 2 点且都在窗内）；
 ##      多边形×半平面保留正确半侧；
 ##   ⑥ 控件状态：refresh 后 ALT/SPD 文案与警告灯随 FlightInstruments 变；
-##   ⑦ 座舱像素内装几何（D-050/D-051）：框体/console/dash 不出屏、dash 包住
-##      四件（底板在仪表后）、console 不侵占航向带与 dash、风挡斜边在 dash
-##      上方收敛完（PILLAR_TOP_W < CONSOLE_W）、导轨不压顶部卡片。
+##   ⑦ 座舱像素内装几何（D-050/D-051/D-052）：框体/console/dash/六件仪表
+##      不出屏、dash 包住六件（底板在仪表后）、console 不侵占航向带与 dash、
+##      风挡斜边在 dash 上方收敛完、导轨不压顶部卡片、盘与盘/带互不重叠。
+##   ⑧ 分辨率自适应（D-052）：同一套基准常量在 960×540 / 1080×608 /
+##      1280×720 / 1920×1080 下，仪表「占屏比例」一致（这才是用户说的
+##      「尺寸不合理」的根因：固定像素在小窗口好看、在 1080p 手机缩一半）。
+##   ⑨ 读数拆字：split_value("4500m") → ["4500","m"]（数字窗分行排字用）。
 ## 运行：Godot_v4.6.3-stable_win64.exe --headless --path . res://tests/cockpit_instruments_probe.tscn
 
 var _failed := 0
@@ -30,23 +34,28 @@ func _run() -> void:
     _check_clip()
     _check_widget_state()
     _check_frame()
+    _check_scaling()
+    _check_split_value()
     _finish()
 
 
 ## ① 俯仰钳制（用户 spec：±60° 超过截断）。
 func _check_pitch_clamp() -> void:
-    # 与 _AttitudeGauge 同式：窗半高 / PITCH_MAX。D-051 缩回后
-    # GAUGE_SZ=148、BEZEL=8 → 窗半高 (148-16)/2 = 66。
-    var ppd := 66.0 / 60.0
+    # 与 _AttitudeGauge 同式：钳制与半径无关，ppd 取任意值验证公式本身。
+    var ppd := 1.25
     _check(absf(CockpitInstruments.pitch_offset_px(80.0, ppd) - 60.0 * ppd) < 1e-6,
         "① 俯仰 +80° 被钳到 +60°（偏移 %.2f px，不无限滚动）" % CockpitInstruments.pitch_offset_px(80.0, ppd))
     _check(absf(CockpitInstruments.pitch_offset_px(-95.0, ppd) + 60.0 * ppd) < 1e-6,
         "① 俯仰 -95° 被钳到 -60°")
     _check(absf(CockpitInstruments.pitch_offset_px(30.0, ppd) - 30.0 * ppd) < 1e-6,
         "① 区内 ±30° 不钳（线性 %.2f px）" % CockpitInstruments.pitch_offset_px(30.0, ppd))
-    # 钳后偏移永不越出窗口半高（否则天地层整体跑出表盘）。
-    _check(absf(CockpitInstruments.pitch_offset_px(1000.0, ppd)) <= 66.0 + 1e-6,
-        "① 极端俯仰偏移仍 ≤ 窗半高（画面截断在窗内）")
+    # 真实盘的 ppd（D-052 圆盘）：半窗 0.86×内半径 / 60°。
+    var s := CockpitInstruments.ui_scale(Vector2(1080.0, 608.0))
+    var rw := (CockpitInstruments.GAUGE_SZ * s) * 0.5 - CockpitInstruments.BEZEL * s
+    var ppd_real := (rw * 0.86) / CockpitInstruments.PITCH_MAX
+    _check(absf(CockpitInstruments.pitch_offset_px(1000.0, ppd_real)) <= rw * 0.87,
+        "① 极端俯仰偏移仍 ≤ 有效半径（天地截断在圆内，%.1f px）"
+            % CockpitInstruments.pitch_offset_px(1000.0, ppd_real))
 
 
 ## ② 航向取模连续性。
@@ -160,72 +169,144 @@ func _check_widget_state() -> void:
     cluster.queue_free()
 
 
-## ⑦ 座舱像素内装几何（D-050/D-051）：纯函数 frame_rects 的布局不变量。
+## ⑦ 座舱像素内装几何（D-050/D-051/D-052）：纯函数 metrics 的布局不变量。
+## 四档分辨率全跑一遍——几何契约必须在任何视口下成立（D-052 的核心）。
 func _check_frame() -> void:
-    var vp := Vector2(1280.0, 720.0)
-    var f := CockpitInstruments.frame_rects(vp)
-    var rail: Rect2 = f["rail"]
-    var console_l: Rect2 = f["console_l"]
-    var console_r: Rect2 = f["console_r"]
-    var dash: Rect2 = f["dash"]
-    var lip: Rect2 = f["lip"]
-    _check_rect_in(rail, vp, "顶导轨")
-    _check_rect_in(console_l, vp, "左 console")
-    _check_rect_in(console_r, vp, "右 console")
-    _check_rect_in(dash, vp, "dash 底板")
-    _check_rect_in(lip, vp, "dash 顶沿")
-    # 簇四件矩形（与 CockpitInstruments._place 同式，从公开常量派生）。
-    var cx := vp.x * 0.5
-    var h := vp.y
-    var tape := Rect2(cx - CockpitInstruments.TAPE_W * 0.5,
-        h - (CockpitInstruments.MARGIN_B + CockpitInstruments.GAUGE_SZ
-            + 8.0 + CockpitInstruments.TAPE_H),
-        CockpitInstruments.TAPE_W, CockpitInstruments.TAPE_H)
-    var gauge := Rect2(cx - CockpitInstruments.GAUGE_SZ * 0.5,
-        h - (CockpitInstruments.MARGIN_B + CockpitInstruments.GAUGE_SZ),
-        CockpitInstruments.GAUGE_SZ, CockpitInstruments.GAUGE_SZ)
-    var mid := h - (CockpitInstruments.MARGIN_B + CockpitInstruments.GAUGE_SZ * 0.5)
-    var off := CockpitInstruments.GAUGE_SZ * 0.5 + CockpitInstruments.BOX_GAP
-    var alt := Rect2(cx + off, mid - CockpitInstruments.BOX_H * 0.5,
-        CockpitInstruments.BOX_W, CockpitInstruments.BOX_H)
-    var spd := Rect2(cx - off - CockpitInstruments.BOX_W,
-        mid - CockpitInstruments.BOX_H * 0.5,
-        CockpitInstruments.BOX_W, CockpitInstruments.BOX_H)
-    # dash 是四件的底板：每件必须整个落在 dash 内（先画 dash、仪表画其上）。
-    _check(dash.encloses(tape), "⑦ dash 包住航向带")
-    _check(dash.encloses(gauge), "⑦ dash 包住地平仪")
-    _check(dash.encloses(alt), "⑦ dash 包住 ALT 框")
-    _check(dash.encloses(spd), "⑦ dash 包住 SPD 框")
-    # console 不侵占航向带与 dash（窄屏下带宽是硬约束；console 是框体，
-    # 压到 dash 上会出现两道竖插到底板的亮边）。
-    _check(console_l.end.x <= tape.position.x + 1e-6,
-        "⑦ 左 console 不压航向带（%.0f ≤ %.0f）" % [console_l.end.x, tape.position.x])
-    _check(console_r.position.x >= tape.end.x - 1e-6,
-        "⑦ 右 console 不压航向带（%.0f ≥ %.0f）" % [console_r.position.x, tape.end.x])
-    _check(dash.position.x >= console_l.end.x
-        and dash.end.x <= console_r.position.x, "⑦ dash 不侵入左右 console")
-    # 风挡斜边：顶端必须比 console 直壁窄（否则不成斜边）+ 斜边必须在 dash
-    # 顶沿上方收敛完（否则斜边会切进 dash 底板）。
-    _check(CockpitInstruments.PILLAR_TOP_W < CockpitInstruments.CONSOLE_W,
-        "⑦ 风挡斜边顶端比 console 窄（%.0f < %.0f，真的向内收）"
-            % [CockpitInstruments.PILLAR_TOP_W, CockpitInstruments.CONSOLE_W])
-    _check(CockpitInstruments.PILLAR_BASE_Y < dash.position.y,
-        "⑦ 斜边在 dash 上方收敛完（%.0f < %.0f）"
-            % [CockpitInstruments.PILLAR_BASE_Y, dash.position.y])
-    # console 不侵入顶部飞行卡片区（卡片 y 16 起、含教练区实测底 ≤221，D-046）。
-    _check(console_l.position.y >= 221.0,
-        "⑦ 左 console 不侵入顶部卡片区（顶 %.0f ≥ 221）" % console_l.position.y)
-    # 导轨不压顶部飞行卡片（卡片 y 16 起）。
-    _check(rail.end.y <= 16.0 + 1e-6,
-        "⑦ 顶导轨不压飞行卡片（导轨底 %.0f ≤ 卡片顶 16）" % rail.end.y)
-    # dash 宽与簇联动（改 TAPE_W 不用手改魔数）。
-    _check(absf(dash.size.x
-        - (CockpitInstruments.TAPE_W + CockpitInstruments.DASH_PAD * 2.0)) < 1e-6,
-        "⑦ dash 宽 = 航向带 + 2×DASH_PAD（%.0f px）" % dash.size.x)
-    # dash 底沿即屏底（座舱地板），lip 贴在 dash 顶沿。
-    _check(absf(dash.end.y - vp.y) < 1e-6, "⑦ dash 底沿 = 屏底（座舱地板）")
-    _check(absf(lip.position.y - dash.position.y) < 1e-6
-        and absf(lip.size.x - dash.size.x) < 1e-6, "⑦ dash 顶沿勾边与 dash 对齐")
+    for vp in [Vector2(960.0, 540.0), Vector2(1080.0, 608.0),
+            Vector2(1280.0, 720.0), Vector2(1920.0, 1080.0)]:
+        _check_frame_at(vp)
+
+
+func _check_frame_at(vp: Vector2) -> void:
+    var m := CockpitInstruments.metrics(vp)
+    var tag := "%dx%d" % [int(vp.x), int(vp.y)]
+    var s := float(m["s"])
+    var rail: Rect2 = m["rail"]
+    var console_l: Rect2 = m["console_l"]
+    var console_r: Rect2 = m["console_r"]
+    var dash: Rect2 = m["dash"]
+    var lip: Rect2 = m["lip"]
+    var tape: Rect2 = m["tape"]
+    var gauge: Rect2 = m["gauge"]
+    var alt: Rect2 = m["alt"]
+    var spd: Rect2 = m["spd"]
+    var thr: Rect2 = m["thr"]
+    var fuel: Rect2 = m["fuel"]
+    _check_rect_in(rail, vp, tag + " 顶导轨")
+    _check_rect_in(console_l, vp, tag + " 左 console")
+    _check_rect_in(console_r, vp, tag + " 右 console")
+    _check_rect_in(dash, vp, tag + " dash 底板")
+    _check_rect_in(lip, vp, tag + " dash 顶沿")
+    _check_rect_in(tape, vp, tag + " 航向带")
+    _check_rect_in(gauge, vp, tag + " 地平仪")
+    _check_rect_in(alt, vp, tag + " ALT 盘")
+    _check_rect_in(spd, vp, tag + " SPD 盘")
+    _check_rect_in(thr, vp, tag + " 油门条")
+    _check_rect_in(fuel, vp, tag + " 燃油条")
+    # dash 是六件的底板：每件必须整个落在 dash 内（先画 dash、仪表画其上）。
+    _check(dash.encloses(tape) and dash.encloses(gauge) and dash.encloses(alt)
+        and dash.encloses(spd) and dash.encloses(thr) and dash.encloses(fuel),
+        "⑦ %s dash 包住六件仪表（底板在仪表后）" % tag)
+    # console / 导轨不侵占仪表与 dash。
+    _check(console_l.end.x <= tape.position.x + 1e-6
+        and console_r.position.x >= tape.end.x - 1e-6,
+        "⑦ %s 侧 console 不压航向带（%.0f / %.0f ≤ %s）"
+            % [tag, console_l.end.x, console_r.position.x, str(tape)])
+    _check(console_l.end.x <= dash.position.x + 1e-6
+        and console_r.position.x >= dash.end.x - 1e-6,
+        "⑦ %s dash 不侵入左右 console" % tag)
+    _check(rail.end.y <= tape.position.y + 1e-6, "⑦ %s 顶导轨不压航向带" % tag)
+    # 风挡斜边：顶端比 console 直壁窄（真的向内收）+ 斜边在 dash 上方收敛完。
+    _check(float(m["pillar_top_w"]) < float(m["console_w"]),
+        "⑦ %s 风挡斜边顶端比 console 窄（%.0f < %.0f，真的向内收）"
+            % [tag, float(m["pillar_top_w"]), float(m["console_w"])])
+    _check(float(m["pillar_base_y"]) < dash.position.y,
+        "⑦ %s 斜边在 dash 上方收敛完（%.0f < %.0f）"
+            % [tag, float(m["pillar_base_y"]), dash.position.y])
+    # 六件互不重叠（航向带 / 三盘 / 两竖条）——两两检查，10 对。
+    var rects := {"tape": tape, "gauge": gauge, "alt": alt, "spd": spd,
+        "thr": thr, "fuel": fuel}
+    var keys := rects.keys()
+    var overlap := ""
+    for i in range(keys.size()):
+        for j in range(i + 1, keys.size()):
+            var a: Rect2 = rects[keys[i]]
+            var b: Rect2 = rects[keys[j]]
+            if a.intersects(b):
+                overlap += "%s×%s " % [keys[i], keys[j]]
+    _check(overlap.is_empty(), "⑦ %s 六件仪表互不重叠（%s）"
+        % [tag, "无重叠" if overlap.is_empty() else overlap])
+    # 盘排水平居中（主表圆心 = 屏宽中线）+ 左右对称。
+    # 容差 1e-3：metrics 是 double 计算但 Rect2 存 float32，1.184 倍缩放链
+    # 在 1000 量级坐标上固有误差 ~1e-4；真实布局错误差 ≥1 px。
+    _check(absf(gauge.get_center().x - vp.x * 0.5) < 1e-3,
+        "⑦ %s 地平仪居中（圆心 x=%.1f）" % [tag, gauge.get_center().x])
+    _check(absf((spd.position.x - dash.position.x)
+        - (dash.end.x - alt.end.x)) < 1e-3,
+        "⑦ %s 左右仪表槽对称（%.3f / %.3f）" % [tag,
+            spd.position.x - dash.position.x, dash.end.x - alt.end.x])
+    # dash 底沿即屏底（座舱地板）、lip 贴 dash 顶沿、宽 = 航向带 + 2×DASH_PAD。
+    _check(absf(dash.end.y - vp.y) < 1e-3, "⑦ %s dash 底沿 = 屏底（座舱地板）" % tag)
+    _check(absf(lip.position.y - dash.position.y) < 1e-3
+        and absf(lip.size.x - dash.size.x) < 1e-3, "⑦ %s dash 顶沿与 dash 对齐" % tag)
+    _check(absf(dash.size.x - (tape.size.x
+        + CockpitInstruments.DASH_PAD * 2.0 * s)) < 1e-3,
+        "⑦ %s dash 宽 = 航向带 + 2×DASH_PAD（%.1f px）" % [tag, dash.size.x])
+    # 仪表板占屏高的比例落在战雷式区间（0.28..0.40），不压掉视野。
+    # D-051 交付值为 30%（用户已要求「缩小」过一次），D-052 圆盘化后 32.8%
+    # —— 判定区间以此为准，上调即视为回归。
+    var ratio := dash.size.y / vp.y
+    _check(ratio > 0.28 and ratio < 0.40,
+        "⑦ %s 仪表板占屏高 %.1f%%（D-051 量级 28~40%%）" % [tag, ratio * 100.0])
+
+
+## ⑧ 宽高比自适应（D-052）：项目用 stretch=canvas_items + aspect=expand，逻辑
+## 视口宽恒 1280，但**高度随宽高比在 590~720 漂移**——固定像素布局会让仪表
+## 占屏高在 21%~26% 之间摆。等比缩放后必须恒定。
+func _check_scaling() -> void:
+    _check(absf(CockpitInstruments.ui_scale(Vector2(1280.0, 720.0)) - 1.0) < 1e-6,
+        "⑧ 基准视口 1280×720 缩放 = 1.0（= project.godot 逻辑视口）")
+    var s_hd := CockpitInstruments.ui_scale(Vector2(1920.0, 1080.0))
+    _check(absf(s_hd - 1.5) < 1e-6,
+        "⑧ 1920×1080 缩放 = 1.5（纯函数按物理尺寸等比；运行时 canvas_items "
+        + "传进来的是逻辑尺寸 1280×720，故实际恒为 1.0）")
+    # 19.5:9 手机：aspect=expand 让逻辑高度掉到 1280×590.8。
+    var s_wide := CockpitInstruments.ui_scale(Vector2(1280.0, 590.8))
+    _check(absf(s_wide - 590.8 / 720.0) < 1e-3,
+        "⑧ 宽屏手机 1280×591 缩放 = %.3f（按高度约束收紧）" % s_wide)
+    _check(absf(CockpitInstruments.ui_scale(Vector2(320.0, 240.0))
+        - CockpitInstruments.SCALE_MIN) < 1e-6, "⑧ 极小视口钳到 SCALE_MIN")
+    _check(absf(CockpitInstruments.ui_scale(Vector2(7680.0, 4320.0))
+        - CockpitInstruments.SCALE_MAX) < 1e-6, "⑧ 8K 视口钳到 SCALE_MAX")
+    # 主表「直径 / 屏高」在各宽高比下的离散度 < 0.5%（固定像素实现会差 ~20%）。
+    # 只列「宽度足够（≥1280）」的视口：等比缩放按窄边取值，4:3 竖屏由宽度
+    # 约束、仪表会整体变小——那是刻意的防溢出行为，不是漂移。
+    var ratios: Array[float] = []
+    for vp in [Vector2(1280.0, 590.8), Vector2(1280.0, 720.0),
+            Vector2(1280.0, 640.0), Vector2(1920.0, 1080.0),
+            Vector2(2340.0, 1080.0)]:
+        var m := CockpitInstruments.metrics(vp)
+        ratios.append((m["gauge"] as Rect2).size.y / vp.y)
+    var lo := 9.0
+    var hi := 0.0
+    for r in ratios:
+        lo = minf(lo, r)
+        hi = maxf(hi, r)
+    _check(hi - lo < 0.005,
+        "⑧ 主表占屏高比例跨宽高比恒定（%.3f..%.3f，离散 %.4f < 0.005）"
+            % [lo, hi, hi - lo])
+    _check(lo > 0.19 and hi < 0.23,
+        "⑧ 主表占屏高 ≈ 21%%（D-051 缩小后的量级，实测 %.1f%%）" % (lo * 100.0))
+
+
+## ⑨ 读数拆字：数字窗分「数字 + 单位」两行排（探针契约保留完整字符串）。
+func _check_split_value() -> void:
+    var a: Array = CockpitInstruments.split_value("4500m")
+    _check(a[0] == "4500" and a[1] == "m", "⑨ split_value(\"4500m\") → 4500 / m")
+    var b: Array = CockpitInstruments.split_value("113 km/h")
+    _check(b[0] == "113" and b[1] == " km/h", "⑨ split_value(\"113 km/h\") → 113 / ' km/h'")
+    var c: Array = CockpitInstruments.split_value("—")
+    _check(c[0] == "" and c[1] == "—", "⑨ 无数字时整体归入单位段（不吞字）")
 
 
 ## 矩形完全落在视口内（容差 1e-6，float32 几何）。
