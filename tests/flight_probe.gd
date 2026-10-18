@@ -440,6 +440,10 @@ func _run() -> void:
 		main_scene, start + Vector3(-6.0, 0.0, 6.0), RUNWAY_HEADING)
 	player.ride_aircraft(tel_craft)
 	await _frames(30)
+	# D-049：登机默认第一人称座舱（无头侧回归闸；窗口侧另有 flight_view_probe /
+	# flight_panel_shot / coach_cockpit_shot 三条同级断言）。
+	_check(main_scene._flight_camera.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
+		"登机默认第一人称座舱（D-049：默认登机后进入第一人称视角）")
 	# 状态块在驾驶中隐藏（D-046，用户要求「登机后1区不显示」）：容器 visible=false，
 	# 三个读数随容器一起不可见。显隐断言一律用 is_visible_in_tree()：子节点自己的
 	# visible 标记仍为 true，只有「自身 + 祖先链」全可见才算真显示，逐节点断言会假绿。

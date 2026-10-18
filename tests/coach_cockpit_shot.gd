@@ -108,8 +108,14 @@ func _run() -> void:
 
 	var cam: AircraftCamera = _player.flight_camera
 	_check(cam != null, "AircraftCamera 已注入 Player.flight_camera")
+	# D-049：登机默认第一人称座舱（用户要求「默认登机后进入第一人称视角」）。
+	# ② 的追尾几何/截图改由一次 C 键切出覆盖（互切双向可用本身也是回归点）。
+	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
+		"默认视角为第一人称座舱（D-049）")
+	cam.toggle_first_third()   # → 追尾
+	await _wait(90)   # 视角阻尼收敛，与 flight_view_probe 同等待时长
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE,
-		"默认视角为追尾 CHASE")
+		"C 键切到追尾（② 追尾几何取证的起点）")
 	_check(_craft.rider == _player,
 		"drive_remotely() 未抹掉 rider（aircraft.gd:347 的坑，已按真人状态补回）")
 
@@ -139,10 +145,10 @@ func _run() -> void:
 	await _snap("coach_cockpit_ctrl_chase.png")
 
 	# ── 切座舱 ──
-	cam.set_mode(AircraftCamera.ViewMode.FIRST_PERSON)
+	cam.toggle_first_third()   # → 第一人称座舱
 	await _wait(90)   # 视角阻尼收敛，与 flight_view_probe 同等待时长
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
-		"已切到第一人称座舱")
+		"C 键切回第一人称座舱")
 	await _wait_physics(2)
 
 	# ── ③ 座舱：卡片与座舱仪表簇（D-047）零重叠 ──

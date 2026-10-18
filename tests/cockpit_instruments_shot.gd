@@ -41,6 +41,20 @@ func _wait_physics(n: int) -> void:
 		await get_tree().physics_frame
 
 
+## 视角阻尼收敛等待 + 比例俯仰稳高（D-049 踩坑）：drive_remotely 下
+## _prepare_input 不碰 controls，探针不写杆量就永远保持上一帧的值——相机
+## 切换等 3 秒的功夫，巡航段最后的 −0.35 全杆俯仰会把飞机全杆俯冲扎出
+## 净空垫撞山解体（实测 impact 46.9 m/s）。故任何「等相机」的窗口都必须
+## 继续写高度保持，与巡航段同一写法。alt = 目标 AGL（巡航高度）。
+func _hold_and_wait(n: int, alt: float) -> void:
+	for i in range(n):
+		var agl := float(_craft.snapshot()["altitude_agl"])
+		_craft.controls.pitch = clampf((alt - agl) * 0.08, -0.35, 0.5)
+		await get_tree().physics_frame
+		if _craft.is_wrecked():
+			return
+
+
 func _snap(file_name: String) -> void:
 	await _wait(2)
 	await RenderingServer.frame_post_draw
@@ -155,9 +169,17 @@ func _run() -> void:
 	_dbg_state("hold_end")
 
 	var cam: AircraftCamera = _player.flight_camera
-	cam.set_mode(AircraftCamera.ViewMode.FIRST_PERSON)
-	await _wait(90)   # 视角阻尼收敛（同 flight_view_probe）
-	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON, "已切第一人称座舱")
+	# D-049：登机即第一人称座舱——上面的起飞/巡航段全程就在座舱视角里飞
+	# （用户要求「默认登机后进入第一人称视角，界面突出座舱驾驶界面」）。
+	# 先把默认值钉死，再 C 键往返一次：覆盖互切后仍能回到座舱取证。
+	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
+		"登机默认第一人称座舱（D-049，起飞段全程座舱视角）")
+	cam.toggle_first_third()   # → 追尾
+	await _hold_and_wait(90, CRUISE_ALT)   # 视角阻尼收敛（同 flight_view_probe）
+	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE, "C 切到追尾")
+	cam.toggle_first_third()   # → 座舱
+	await _hold_and_wait(90, CRUISE_ALT)
+	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON, "C 切回座舱")
 
 	# ── ③ 几何断言（先于截图，布局已稳定）──
 	var cluster: CockpitInstruments = _hud._instrument_hud._cockpit
@@ -214,17 +236,10 @@ func _run() -> void:
 	_check(_craft.global_transform.basis.is_equal_approx(_craft._state.basis),
 		"节点位姿跟随飞行模型（basis 逐列一致）")
 	await _snap("cockpit_inst_bank.png")
-	# 回正，避免长时间带坡漂移出平整区。两轴都写 0 才触发辅助的松杆配平
-	# （stick_free 要三轴近零）——只清 roll 的话上一帧的 pitch 杆量会留在
-	# controls 里，辅助不接管、坡度恒定 25°，飞机会带着杆量俯冲 4 秒。
-	_craft.controls.pitch = 0.0
-	_craft.controls.roll = 0.0
-	for i in range(240):
-		await get_tree().physics_frame
-		if _craft.is_wrecked():
-			break
-		if absf(_hud.instrument_hud().instruments_ref().roll_deg) < 5.0:
-			break
+	# 不回正、不拖延：下面的低空段与收尾段都走 place()（make_state 全新状态
+	# + 速度归零 + 姿态水平 + 满油），预先带的坡度会被 place 整个覆盖。而转弯
+	# 取证末飞机正以 ~22 m/s 俯冲（D-049 实测：放任 4 秒回正会飘出净空垫撞
+	# 山解体，place() 又不复活残骸）——截图后直接进 place，把暴露窗口压到几帧。
 
 	# ── ② 低空俯冲触发过低警告（ALT 变红闪烁）──
 	# 放到净空垫上方 18m、给 -3 m/s 下沉：无前向速度即近似自由落体，1 秒后

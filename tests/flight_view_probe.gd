@@ -88,6 +88,15 @@ func _run() -> void:
 	_check(craft.piloted, "② 登机：piloted=true")
 	_check(cam.is_active(), "② 登机即激活飞行相机")
 	_check(recorder.is_recording(), "② 登机即开始轨迹录制")
+	# D-049：登机默认第一人称座舱（默认登机后进入第一人称视角）。随后按 C
+	# 切到追尾，恢复 ④⑤⑥ 的既有起点——自由观察/后视的退出回落断言都以
+	# _base_mode == CHASE 为前提，直接接着测会把它们全变成座舱分支。
+	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
+		"② 登机默认第一人称座舱（D-049）")
+	cam.toggle_first_third()   # → 追尾
+	await _frames(2)
+	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE,
+		"② C 键从座舱切到追尾（互切双向可用）")
 
 	# ── ③ 发动机：默认熄火；F 启动后油门门控放开；熄火后油门锁 0 ──
 	_check(not craft.engine_running, "③ 登机后发动机默认熄火")

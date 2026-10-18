@@ -205,6 +205,10 @@ func _on_flight_ride_changed(riding: bool) -> void:
 		var craft := _player.aircraft()
 		if craft != null and is_instance_valid(craft):
 			_flight_camera.setup(craft, _player)
+			# D-049：登机默认第一人称座舱（用户要求「默认登机后进入第一人称
+			# 视角，界面突出座舱驾驶界面」）。须在 set_active 之前——set_active
+			# 会把相机吸附到 _mode 的目标位姿，先复位才不会从追尾位飞进座舱。
+			_flight_camera.reset_to_cockpit()
 			_flight_camera.set_active(true)
 			_recorder.start()
 			# D-034：座舱 3D 面板挂飞机下（蓝图机自动隐藏）；世界标注挂世界下。

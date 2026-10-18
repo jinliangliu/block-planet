@@ -91,11 +91,12 @@ func _run() -> void:
 	await _frames(40)
 	Input.action_release("move_forward")
 
-	# ── ③ 第一人称座舱：座舱玻璃 HUD + 低头可见 3D 仪表盘 ──
-	cam.toggle_first_third()  # → 第一人称座舱
-	await _frames(60)
+	# ── ③ 第一人称座舱：登机默认视角（D-049）──
+	# 用户要求「默认登机后进入第一人称视角，界面突出座舱驾驶界面」——登机即
+	# 座舱，无需按键；本断言是 D-049 的窗口侧回归闸。
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
-		"③ 第一人称座舱视角")
+		"③ 登机默认第一人称座舱（D-049）")
+	await _frames(60)
 	await _shot("flight_panel_cockpit.png")
 
 	# ── ④ 第三人称追尾：屏幕四角 HUD + 小地图 ──

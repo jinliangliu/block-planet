@@ -31,7 +31,9 @@ func _run() -> void:
 
 ## ① 俯仰钳制（用户 spec：±60° 超过截断）。
 func _check_pitch_clamp() -> void:
-    var ppd := 68.0 / 60.0   # 与 _AttitudeGauge 同式：窗半高 / PITCH_MAX
+    # 与 _AttitudeGauge 同式：窗半高 / PITCH_MAX。D-049 放大后
+    # GAUGE_SZ=176、BEZEL=9 → 窗半高 (176-18)/2 = 79。
+    var ppd := 79.0 / 60.0
     _check(absf(CockpitInstruments.pitch_offset_px(80.0, ppd) - 60.0 * ppd) < 1e-6,
         "① 俯仰 +80° 被钳到 +60°（偏移 %.2f px，不无限滚动）" % CockpitInstruments.pitch_offset_px(80.0, ppd))
     _check(absf(CockpitInstruments.pitch_offset_px(-95.0, ppd) + 60.0 * ppd) < 1e-6,
@@ -39,14 +41,14 @@ func _check_pitch_clamp() -> void:
     _check(absf(CockpitInstruments.pitch_offset_px(30.0, ppd) - 30.0 * ppd) < 1e-6,
         "① 区内 ±30° 不钳（线性 %.2f px）" % CockpitInstruments.pitch_offset_px(30.0, ppd))
     # 钳后偏移永不越出窗口半高（否则天地层整体跑出表盘）。
-    _check(absf(CockpitInstruments.pitch_offset_px(1000.0, ppd)) <= 68.0 + 1e-6,
+    _check(absf(CockpitInstruments.pitch_offset_px(1000.0, ppd)) <= 79.0 + 1e-6,
         "① 极端俯仰偏移仍 ≤ 窗半高（画面截断在窗内）")
 
 
 ## ② 航向取模连续性。
 func _check_tape_wrap() -> void:
     var cx := 640.0
-    var ppx := 5.0
+    var ppx := 6.0   # 与 TAPE_PPX 同步（D-049：712px 带 / 6px 每度）
     var h := 359.5
     var x359 := CockpitInstruments.tape_x(359.0, h, cx, ppx)
     var x0 := CockpitInstruments.tape_x(0.0, h, cx, ppx)

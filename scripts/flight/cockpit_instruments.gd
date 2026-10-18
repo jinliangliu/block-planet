@@ -23,6 +23,10 @@ extends Control
 ##
 ## 渲染层级：本控件是屏幕 HUD 覆盖层的子节点（最上层 2D 层），叠加在
 ## 座舱 3D 视野之上——纯 2D 绘制，不用 3D / ViewportTexture（用户 spec）。
+##
+## D-049：登机默认第一人称 + 「界面突出座舱驾驶界面」——整套尺寸放大
+## ~16%（152→176 等），座舱视角下左侧 12 行详细清单让位（见
+## flight_instrument_hud._apply_visibility），本簇成为座舱唯一飞行读数。
 
 # ── 配色（黑底白刻度 + 低饱和天地色）────────────────────────────
 const COL_BEZEL := Color(0.05, 0.05, 0.06)
@@ -32,19 +36,25 @@ const COL_GROUND := Color(0.46, 0.36, 0.24)
 const COL_WARN := Color(0.95, 0.30, 0.26)
 
 # ── 簇布局（四件均锚底居中，偏移自屏幕底边起算）──────────────────
-const MARGIN_B := 60.0     # 簇底距屏幕底
-const GAUGE_SZ := 152.0    # 地平仪外径（方）
-const BEZEL := 8.0         # 地平仪黑框宽
-const TAPE_W := 620.0      # 航向带宽
-const TAPE_H := 60.0       # 航向带总高（40 刻度带 + 20 航向数字）
-const TAPE_STRIP := 40.0
-const BOX_W := 154.0       # 数字读数框（ALT / SPD）
-const BOX_H := 120.0
-const TAPE_PPX := 5.0      # 航向带像素/度（620px ≈ ±62° 视野）
+## D-049 起整套放大 ~16%（152→176 等）：登机默认座舱视角，仪表簇是飞行
+## 画面的主视觉，原尺寸在 1280×720 上偏小、「界面突出座舱驾驶界面」要求
+## 放大。所有内部刻度/字号同步放大，几何关系（零重叠/不出屏）由窗口探针断言。
+const MARGIN_B := 60.0     # 簇底距屏幕底（下方留 8 px 给驾驶提示行，见 HUD）
+const GAUGE_SZ := 176.0    # 地平仪外径（方）
+const BEZEL := 9.0         # 地平仪黑框宽
+const TAPE_W := 712.0      # 航向带宽
+const TAPE_H := 68.0       # 航向带总高（46 刻度带 + 22 航向数字）
+const TAPE_STRIP := 46.0
+const BOX_W := 178.0       # 数字读数框（ALT / SPD）
+const BOX_H := 138.0
+const TAPE_PPX := 6.0      # 航向带像素/度（712px ≈ ±59° 视野）
 const PITCH_MAX := 60.0    # 俯仰钳制（用户 spec：超过截断、不无限滚动）
 const BLINK_MS := 600.0    # 闪烁周期（与警告横幅一致）
 const LADDER := [10.0, 20.0, 30.0]            # 俯仰阶梯标注角（度）
 const ROLL_TICKS := [0.0, 10.0, 20.0, 30.0, 45.0, 60.0]  # 横滚刻度（正=右滚）
+## 读数框内边距屏幕中心的水平距（地平仪半宽 + 间隙）：与 GAUGE_SZ 联动，
+## 改外径不用手改这里的魔数。
+const BOX_GAP := 20.0
 
 ## 四件子控件（公开供探针取几何矩形）。
 var tape: _HeadingTape = null
@@ -65,10 +75,11 @@ func _ready() -> void:
         MARGIN_B + GAUGE_SZ, MARGIN_B)
     # 左右读数框垂直居中于地平仪（地平仪中心在底边上方 MARGIN_B+GAUGE/2）。
     var mid := MARGIN_B + GAUGE_SZ * 0.5
+    var off := GAUGE_SZ * 0.5 + BOX_GAP
     alt_box = _DigitalBox.new()
-    _place(alt_box, 96.0, 96.0 + BOX_W, mid + BOX_H * 0.5, mid - BOX_H * 0.5)
+    _place(alt_box, off, off + BOX_W, mid + BOX_H * 0.5, mid - BOX_H * 0.5)
     spd_box = _DigitalBox.new()
-    _place(spd_box, -96.0 - BOX_W, -96.0, mid + BOX_H * 0.5, mid - BOX_H * 0.5)
+    _place(spd_box, -off - BOX_W, -off, mid + BOX_H * 0.5, mid - BOX_H * 0.5)
 
 
 ## 锚底居中的放置：l/r 为相对屏幕中心横线的偏移，t/b 为自屏幕底边的高度。
@@ -211,7 +222,7 @@ class _HeadingTape extends Control:
         var strip := Rect2(Vector2.ZERO, Vector2(s.x, TAPE_STRIP))
         draw_rect(strip, COL_MARK, false, 1.0)
         var cx := s.x * 0.5
-        # 刻度：±70° 覆盖（带宽 620 / 5 = ±62° 视野，留标签余量）。
+        # 刻度：±70° 覆盖（带宽 712 / 6 ≈ ±59° 视野，留标签余量）。
         # deg 先归一再取最短角差 → 359°→0° 无缝。
         var d0 := floori((_heading - 70.0) / 5.0) * 5
         var d1 := ceili((_heading + 70.0) / 5.0) * 5
@@ -221,7 +232,7 @@ class _HeadingTape extends Control:
             var mid := posmod(d, 10) == 0
             var x := CockpitInstruments.tape_x(float(d), _heading, cx, TAPE_PPX)
             if x >= -24.0 and x <= s.x + 24.0:
-                var th := 12.0 if major else (7.0 if mid else 4.0)
+                var th := 14.0 if major else (8.0 if mid else 5.0)
                 var tw := 2.0 if major else 1.0
                 draw_rect(Rect2(Vector2(roundf(x - tw * 0.5), 0.0), Vector2(tw, th)),
                     COL_MARK, true)
@@ -230,17 +241,17 @@ class _HeadingTape extends Control:
                     var lbl := "N" if dd < 0.5 else ("E" if absf(dd - 90.0) < 0.5 \
                         else ("S" if absf(dd - 180.0) < 0.5 \
                         else ("W" if absf(dd - 270.0) < 0.5 else "%03d" % int(dd))))
-                    draw_string(ThemeDB.fallback_font, Vector2(roundf(x), 17.0), lbl,
-                        HORIZONTAL_ALIGNMENT_CENTER, 44.0, 13, COL_MARK)
+                    draw_string(ThemeDB.fallback_font, Vector2(roundf(x), 19.0), lbl,
+                        HORIZONTAL_ALIGNMENT_CENTER, 48.0, 14, COL_MARK)
             d += 5
         # 中间竖线（当前机头朝向）+ 顶部倒三角。
         draw_rect(Rect2(Vector2(roundf(cx - 1.0), 0.0), Vector2(2.0, TAPE_STRIP)),
             COL_MARK, true)
         draw_colored_polygon(PackedVector2Array([
-            Vector2(cx - 6.0, 0.0), Vector2(cx + 6.0, 0.0), Vector2(cx, 6.0)]), COL_MARK)
+            Vector2(cx - 7.0, 0.0), Vector2(cx + 7.0, 0.0), Vector2(cx, 7.0)]), COL_MARK)
         # 带下三位航向数。
-        draw_string(ThemeDB.fallback_font, Vector2(cx, TAPE_STRIP + 3.0),
-            "%03d°" % int(floorf(_heading)), HORIZONTAL_ALIGNMENT_CENTER, 120.0, 16, COL_MARK)
+        draw_string(ThemeDB.fallback_font, Vector2(cx, TAPE_STRIP + 4.0),
+            "%03d°" % int(floorf(_heading)), HORIZONTAL_ALIGNMENT_CENTER, 140.0, 18, COL_MARK)
 
 
 # ── 地平仪：天地背景 + 固定飞机标记 ─────────────────────────────
@@ -288,31 +299,31 @@ class _AttitudeGauge extends Control:
             for sign in [-1.0, 1.0]:
                 var ang := pf * float(sign)
                 var ly := dy - ang * ppd
-                var hl := 22.0 if pf >= 20.0 else 14.0
+                var hl := 26.0 if pf >= 20.0 else 16.0
                 var e0 := wc + CockpitInstruments.rot2(a, -hl, ly)
                 var e1 := wc + CockpitInstruments.rot2(a, hl, ly)
                 var lseg := CockpitInstruments.clip_seg_rect(e0, e1, win)
                 if lseg.size() == 2:
-                    _thick_seg(lseg[0], lseg[1], 1.0, COL_MARK)
+                    _thick_seg(lseg[0], lseg[1], 1.5, COL_MARK)
                     if pf >= 20.0:
                         _draw_rot_text(lseg[0], a, "%d" % int(ang))
         # 横滚刻度（随天地转，顶部弧线；±60°）。
-        var rr := wh - 6.0
+        var rr := wh - 7.0
         for phi in ROLL_TICKS:
             for sign in [-1.0, 1.0]:
                 var ang := float(phi) * float(sign)
                 var rad := deg_to_rad(ang)
                 var major := absf(ang) < 0.5 or absf(absf(ang) - 30.0) < 0.5 \
                     or absf(absf(ang) - 60.0) < 0.5
-                var rh := 3.0 if major else 1.5
+                var rh := 3.5 if major else 2.0
                 var c0 := Vector2(sin(rad) * rr, -cos(rad) * rr)
                 var rd := Vector2(sin(rad), -cos(rad))
                 var td := Vector2(rd.y, -rd.x)
                 var local := PackedVector2Array([
-                    c0 - rd * rh - td * 1.5,
-                    c0 + rd * rh - td * 1.5,
-                    c0 + rd * rh + td * 1.5,
-                    c0 - rd * rh + td * 1.5,
+                    c0 - rd * rh - td * 2.0,
+                    c0 + rd * rh - td * 2.0,
+                    c0 + rd * rh + td * 2.0,
+                    c0 - rd * rh + td * 2.0,
                 ])
                 var poly := PackedVector2Array()
                 for v in local:
@@ -320,16 +331,16 @@ class _AttitudeGauge extends Control:
                 draw_colored_polygon(poly, COL_MARK)
         # 固定层（不随姿态动）：顶部指针 + 窗框 + 小十字 + 飞机标记。
         draw_colored_polygon(PackedVector2Array([
-            Vector2(wc.x - 5.0, win.position.y),
-            Vector2(wc.x + 5.0, win.position.y),
-            Vector2(wc.x, win.position.y + 7.0)]), COL_MARK)
+            Vector2(wc.x - 6.0, win.position.y),
+            Vector2(wc.x + 6.0, win.position.y),
+            Vector2(wc.x, win.position.y + 8.0)]), COL_MARK)
         draw_rect(win, COL_MARK, false, 1.0)
         var cross := Color(1.0, 1.0, 1.0, 0.55)
-        draw_rect(Rect2(Vector2(wc.x - 7.0, wc.y - 0.5), Vector2(14.0, 1.0)), cross, true)
-        draw_rect(Rect2(Vector2(wc.x - 0.5, wc.y - 7.0), Vector2(1.0, 14.0)), cross, true)
-        draw_rect(Rect2(Vector2(wc.x - 30.0, wc.y - 1.0), Vector2(21.0, 2.0)), COL_MARK, true)
-        draw_rect(Rect2(Vector2(wc.x + 9.0, wc.y - 1.0), Vector2(21.0, 2.0)), COL_MARK, true)
-        draw_rect(Rect2(Vector2(wc.x - 1.0, wc.y - 9.0), Vector2(2.0, 9.0)), COL_MARK, true)
+        draw_rect(Rect2(Vector2(wc.x - 8.0, wc.y - 0.5), Vector2(16.0, 1.0)), cross, true)
+        draw_rect(Rect2(Vector2(wc.x - 0.5, wc.y - 8.0), Vector2(1.0, 16.0)), cross, true)
+        draw_rect(Rect2(Vector2(wc.x - 34.0, wc.y - 1.0), Vector2(24.0, 2.0)), COL_MARK, true)
+        draw_rect(Rect2(Vector2(wc.x + 10.0, wc.y - 1.0), Vector2(24.0, 2.0)), COL_MARK, true)
+        draw_rect(Rect2(Vector2(wc.x - 1.0, wc.y - 10.0), Vector2(2.0, 10.0)), COL_MARK, true)
 
     ## 硬边粗线段：沿线方向的细四边形（不用 draw_line，避免抗锯齿）。
     func _thick_seg(p0: Vector2, p1: Vector2, w: float, col: Color) -> void:
@@ -343,8 +354,8 @@ class _AttitudeGauge extends Control:
     ## 不是 Transform2D——位置即锚点，旋转角即天地层角度。
     func _draw_rot_text(anchor: Vector2, a: float, txt: String) -> void:
         draw_set_transform(anchor, a, Vector2.ONE)
-        draw_string(ThemeDB.fallback_font, Vector2(-6.0, -5.0), txt,
-            HORIZONTAL_ALIGNMENT_RIGHT, 30.0, 11, COL_MARK)
+        draw_string(ThemeDB.fallback_font, Vector2(-7.0, -6.0), txt,
+            HORIZONTAL_ALIGNMENT_RIGHT, 34.0, 12, COL_MARK)
         draw_set_transform(Vector2.ZERO)
 
 
@@ -363,11 +374,11 @@ class _DigitalBox extends Control:
     func _draw() -> void:
         draw_rect(Rect2(Vector2.ZERO, size), COL_BEZEL, true)
         draw_rect(Rect2(Vector2.ZERO, size), COL_MARK, false, 1.0)
-        draw_string(ThemeDB.fallback_font, Vector2(10.0, 13.0), _label,
-            HORIZONTAL_ALIGNMENT_LEFT, -1, 13, COL_MARK)
+        draw_string(ThemeDB.fallback_font, Vector2(11.0, 15.0), _label,
+            HORIZONTAL_ALIGNMENT_LEFT, -1, 14, COL_MARK)
         var col := COL_MARK
         if _warn:
             col = Color(COL_WARN.r, COL_WARN.g, COL_WARN.b,
                 CockpitInstruments.blink_alpha(Time.get_ticks_msec()))
-        draw_string(ThemeDB.fallback_font, Vector2(size.x * 0.5, size.y * 0.5 + 14.0), _value,
-            HORIZONTAL_ALIGNMENT_CENTER, size.x - 12.0, 26, col)
+        draw_string(ThemeDB.fallback_font, Vector2(size.x * 0.5, size.y * 0.5 + 16.0), _value,
+            HORIZONTAL_ALIGNMENT_CENTER, size.x - 14.0, 30, col)

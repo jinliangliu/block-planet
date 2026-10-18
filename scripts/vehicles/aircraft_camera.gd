@@ -135,6 +135,19 @@ func set_mode(mode: ViewMode) -> void:
 	view_mode_changed.emit(mode)
 
 
+## 登机默认视角（D-049）：每次登机复位到第一人称座舱——「默认登机后进入
+## 第一人称视角，界面突出座舱驾驶界面」。必须同时写 _mode 与 _base_mode：
+## 后视/自由观察/地图都是覆盖层，退出时 set_mode(_base_mode) 会掀回底层
+## 模式，只写 _mode 的话覆盖层一退就弹回追尾。自由观察偏移一并清零——
+## 新登机不该继承上一次飞行攒下的环顾角度。
+func reset_to_cockpit() -> void:
+	_base_mode = ViewMode.FIRST_PERSON
+	_look_yaw = 0.0
+	_look_pitch = 0.0
+	if _mode != ViewMode.FIRST_PERSON:
+		set_mode(ViewMode.FIRST_PERSON)
+
+
 ## C 键：第一 / 第三人称互切（任何覆盖层模式下也会退出覆盖层）。
 func toggle_first_third() -> void:
 	if _mode == ViewMode.REPLAY:

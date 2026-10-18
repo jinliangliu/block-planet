@@ -141,7 +141,10 @@ func _apply_visibility(mode: int) -> void:
 	_cockpit.visible = fp
 	_minimap.visible = chase
 	var detail := FlightSettings.current().hud_detail
-	_panel.visible = detail and not map_like
+	# D-049：座舱视角下隐藏 12 行详细清单——座舱仪表簇（地平仪/ALT/航向带/
+	# SPD）就是座舱面板本身，文字清单与它大面积重复且抢注意力；追尾/后视/
+	# 环顾等「机体在屏外」的视角才需要文字全读数。地图/回放同样不显示。
+	_panel.visible = detail and not map_like and not fp
 	# 警告横幅：有警告且非地图/回放时显示（_refresh_warn 再细化内容）。
 	var has_alerts := not _instruments.alerts().is_empty()
 	_warn.visible = has_alerts and not map_like

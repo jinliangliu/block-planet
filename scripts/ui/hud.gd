@@ -996,19 +996,20 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 	# 从 M 地图选择器查看，飞行中不损失信息。
 	if _map_name_label != null:
 		_map_name_label.visible = not _riding
-	# 提示行（Toast）：驾驶时从顶部居中挪到**底部居中**。飞行面板卡片就锚在顶部
-	# 居中（y 16 起，含教练区时高约 215 px），Toast 留在 y 64…96 会整行压在卡片
-	# 的空速/离地读数上——登机提示长达三行时尤其明显（用户截图外的既有瑕疵）。
-	# 底部居中是 D-046 把教练条并入卡片后空出来的位置：与左下/右下角读数
-	# （x ≤ 246 / ≥ W-246）和座舱玻璃读数带（y H-120…H-60，此处取 H-160…H-128，
-	# 余 8 px）都不相交。下机经同一信号复位到顶部居中（_show_toast 只改文本与
-	# 透明度、不碰锚点，移位不会被它覆盖）。
+	# 提示行（Toast）：驾驶时从顶部居中挪到**底部居中、座舱仪表簇下方**
+	# （y H-52…H-20）。D-046 挪到底部居中是为避让顶部飞行面板卡片；D-049
+	# 座舱仪表簇放大后占 y≈H-312…H-60 的整条底中带，旧位置（H-160…H-128）
+	# 正压在地平仪与 ALT/SPD 框上——登机/奖励提示会糊住座舱主仪表。簇下方
+	# 8 px 处对两种视角都干净：座舱下簇已让出；追尾四角读数只到 x≤246 /
+	# x≥W-246（提示行 x 320…960 不碰）；触屏摇杆/油门杆在 x≤160 / x≥W-80。
+	# 下机经同一信号复位到顶部居中（_show_toast 只改文本与透明度、不碰锚点，
+	# 移位不会被它覆盖）。
 	if _toast_label != null:
 		if _riding:
 			_toast_label.anchor_top = 1.0
 			_toast_label.anchor_bottom = 1.0
-			_toast_label.offset_top = -160.0
-			_toast_label.offset_bottom = -128.0
+			_toast_label.offset_top = -52.0
+			_toast_label.offset_bottom = -20.0
 		else:
 			_toast_label.anchor_top = 0.0
 			_toast_label.anchor_bottom = 0.0
