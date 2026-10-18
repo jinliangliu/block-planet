@@ -219,15 +219,21 @@ func _run() -> void:
 		"座舱视角隐藏 3D 外部机模（D-050，不再横贯全屏的机翼）")
 	var frame := CockpitInstruments.frame_rects(vp)
 	var dash_r: Rect2 = frame["dash"]
-	var post_l: Rect2 = frame["post_l"]
-	var post_r: Rect2 = frame["post_r"]
+	var console_l: Rect2 = frame["console_l"]
+	var console_r: Rect2 = frame["console_r"]
 	var rail: Rect2 = frame["rail"]
 	_check(dash_r.encloses(tape_r) and dash_r.encloses(gauge_r)
 		and dash_r.encloses(alt_r) and dash_r.encloses(spd_r),
 		"dash 底板包住四件仪表（座舱内装分层：先画框、仪表坐上）")
-	_check(not post_l.intersects(tape_r) and not post_r.intersects(tape_r)
+	_check(not console_l.intersects(tape_r) and not console_r.intersects(tape_r)
 		and not rail.intersects(card),
 		"座舱框不压航向带与顶部卡片")
+	# D-051：侧 console / 风挡支柱是框体，不得压任何一件仪表与 dash。
+	_check(not console_l.intersects(dash_r) and not console_r.intersects(dash_r)
+		and not console_l.intersects(gauge_r) and not console_r.intersects(gauge_r)
+		and not console_l.intersects(alt_r) and not console_r.intersects(alt_r)
+		and not console_l.intersects(spd_r) and not console_r.intersects(spd_r),
+		"侧 console 不压 dash 与四件仪表（D-051 座舱感框体）")
 
 	# ── ① 转弯带坡度 ──
 	# 比例俯仰保持高度 + 半幅副翼：30 m/s 入场能量下约 2~3 s 建立 22° 坡度。

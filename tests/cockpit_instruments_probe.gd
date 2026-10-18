@@ -9,8 +9,9 @@ extends Node
 ##   ⑤ 裁剪：线段×矩形（全在外返回空 / 跨边返回 2 点且都在窗内）；
 ##      多边形×半平面保留正确半侧；
 ##   ⑥ 控件状态：refresh 后 ALT/SPD 文案与警告灯随 FlightInstruments 变；
-##   ⑦ 座舱像素内装几何（D-050）：框体/dash 不出屏、dash 包住四件（底板
-##      在仪表后）、立柱不侵占航向带、导轨不压顶部卡片。
+##   ⑦ 座舱像素内装几何（D-050/D-051）：框体/console/dash 不出屏、dash 包住
+##      四件（底板在仪表后）、console 不侵占航向带与 dash、风挡斜边在 dash
+##      上方收敛完（PILLAR_TOP_W < CONSOLE_W）、导轨不压顶部卡片。
 ## 运行：Godot_v4.6.3-stable_win64.exe --headless --path . res://tests/cockpit_instruments_probe.tscn
 
 var _failed := 0
@@ -34,9 +35,9 @@ func _run() -> void:
 
 ## ① 俯仰钳制（用户 spec：±60° 超过截断）。
 func _check_pitch_clamp() -> void:
-    # 与 _AttitudeGauge 同式：窗半高 / PITCH_MAX。D-049 放大后
-    # GAUGE_SZ=176、BEZEL=9 → 窗半高 (176-18)/2 = 79。
-    var ppd := 79.0 / 60.0
+    # 与 _AttitudeGauge 同式：窗半高 / PITCH_MAX。D-051 缩回后
+    # GAUGE_SZ=148、BEZEL=8 → 窗半高 (148-16)/2 = 66。
+    var ppd := 66.0 / 60.0
     _check(absf(CockpitInstruments.pitch_offset_px(80.0, ppd) - 60.0 * ppd) < 1e-6,
         "① 俯仰 +80° 被钳到 +60°（偏移 %.2f px，不无限滚动）" % CockpitInstruments.pitch_offset_px(80.0, ppd))
     _check(absf(CockpitInstruments.pitch_offset_px(-95.0, ppd) + 60.0 * ppd) < 1e-6,
@@ -44,14 +45,14 @@ func _check_pitch_clamp() -> void:
     _check(absf(CockpitInstruments.pitch_offset_px(30.0, ppd) - 30.0 * ppd) < 1e-6,
         "① 区内 ±30° 不钳（线性 %.2f px）" % CockpitInstruments.pitch_offset_px(30.0, ppd))
     # 钳后偏移永不越出窗口半高（否则天地层整体跑出表盘）。
-    _check(absf(CockpitInstruments.pitch_offset_px(1000.0, ppd)) <= 79.0 + 1e-6,
+    _check(absf(CockpitInstruments.pitch_offset_px(1000.0, ppd)) <= 66.0 + 1e-6,
         "① 极端俯仰偏移仍 ≤ 窗半高（画面截断在窗内）")
 
 
 ## ② 航向取模连续性。
 func _check_tape_wrap() -> void:
     var cx := 640.0
-    var ppx := 6.0   # 与 TAPE_PPX 同步（D-049：712px 带 / 6px 每度）
+    var ppx := 5.0   # 与 TAPE_PPX 同步（D-051：600px 带 / 5px 每度）
     var h := 359.5
     var x359 := CockpitInstruments.tape_x(359.0, h, cx, ppx)
     var x0 := CockpitInstruments.tape_x(0.0, h, cx, ppx)
@@ -159,18 +160,18 @@ func _check_widget_state() -> void:
     cluster.queue_free()
 
 
-## ⑦ 座舱像素内装几何（D-050）：纯函数 frame_rects 的布局不变量。
+## ⑦ 座舱像素内装几何（D-050/D-051）：纯函数 frame_rects 的布局不变量。
 func _check_frame() -> void:
     var vp := Vector2(1280.0, 720.0)
     var f := CockpitInstruments.frame_rects(vp)
     var rail: Rect2 = f["rail"]
-    var post_l: Rect2 = f["post_l"]
-    var post_r: Rect2 = f["post_r"]
+    var console_l: Rect2 = f["console_l"]
+    var console_r: Rect2 = f["console_r"]
     var dash: Rect2 = f["dash"]
     var lip: Rect2 = f["lip"]
     _check_rect_in(rail, vp, "顶导轨")
-    _check_rect_in(post_l, vp, "左立柱")
-    _check_rect_in(post_r, vp, "右立柱")
+    _check_rect_in(console_l, vp, "左 console")
+    _check_rect_in(console_r, vp, "右 console")
     _check_rect_in(dash, vp, "dash 底板")
     _check_rect_in(lip, vp, "dash 顶沿")
     # 簇四件矩形（与 CockpitInstruments._place 同式，从公开常量派生）。
@@ -195,20 +196,32 @@ func _check_frame() -> void:
     _check(dash.encloses(gauge), "⑦ dash 包住地平仪")
     _check(dash.encloses(alt), "⑦ dash 包住 ALT 框")
     _check(dash.encloses(spd), "⑦ dash 包住 SPD 框")
-    # 立柱不侵占航向带（窄屏下带宽是硬约束）。
-    _check(post_l.end.x <= tape.position.x + 1e-6,
-        "⑦ 左立柱不压航向带（%.0f ≤ %.0f）" % [post_l.end.x, tape.position.x])
-    _check(post_r.position.x >= tape.end.x - 1e-6,
-        "⑦ 右立柱不压航向带（%.0f ≥ %.0f）" % [post_r.position.x, tape.end.x])
+    # console 不侵占航向带与 dash（窄屏下带宽是硬约束；console 是框体，
+    # 压到 dash 上会出现两道竖插到底板的亮边）。
+    _check(console_l.end.x <= tape.position.x + 1e-6,
+        "⑦ 左 console 不压航向带（%.0f ≤ %.0f）" % [console_l.end.x, tape.position.x])
+    _check(console_r.position.x >= tape.end.x - 1e-6,
+        "⑦ 右 console 不压航向带（%.0f ≥ %.0f）" % [console_r.position.x, tape.end.x])
+    _check(dash.position.x >= console_l.end.x
+        and dash.end.x <= console_r.position.x, "⑦ dash 不侵入左右 console")
+    # 风挡斜边：顶端必须比 console 直壁窄（否则不成斜边）+ 斜边必须在 dash
+    # 顶沿上方收敛完（否则斜边会切进 dash 底板）。
+    _check(CockpitInstruments.PILLAR_TOP_W < CockpitInstruments.CONSOLE_W,
+        "⑦ 风挡斜边顶端比 console 窄（%.0f < %.0f，真的向内收）"
+            % [CockpitInstruments.PILLAR_TOP_W, CockpitInstruments.CONSOLE_W])
+    _check(CockpitInstruments.PILLAR_BASE_Y < dash.position.y,
+        "⑦ 斜边在 dash 上方收敛完（%.0f < %.0f）"
+            % [CockpitInstruments.PILLAR_BASE_Y, dash.position.y])
+    # console 不侵入顶部飞行卡片区（卡片 y 16 起、含教练区实测底 ≤221，D-046）。
+    _check(console_l.position.y >= 221.0,
+        "⑦ 左 console 不侵入顶部卡片区（顶 %.0f ≥ 221）" % console_l.position.y)
     # 导轨不压顶部飞行卡片（卡片 y 16 起）。
     _check(rail.end.y <= 16.0 + 1e-6,
         "⑦ 顶导轨不压飞行卡片（导轨底 %.0f ≤ 卡片顶 16）" % rail.end.y)
-    # dash 宽与簇联动（改 TAPE_W 不用手改魔数），且不侵入左右立柱。
+    # dash 宽与簇联动（改 TAPE_W 不用手改魔数）。
     _check(absf(dash.size.x
         - (CockpitInstruments.TAPE_W + CockpitInstruments.DASH_PAD * 2.0)) < 1e-6,
         "⑦ dash 宽 = 航向带 + 2×DASH_PAD（%.0f px）" % dash.size.x)
-    _check(dash.position.x >= post_l.end.x
-        and dash.end.x <= post_r.position.x, "⑦ dash 不侵入左右立柱")
     # dash 底沿即屏底（座舱地板），lip 贴在 dash 顶沿。
     _check(absf(dash.end.y - vp.y) < 1e-6, "⑦ dash 底沿 = 屏底（座舱地板）")
     _check(absf(lip.position.y - dash.position.y) < 1e-6
