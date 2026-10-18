@@ -242,7 +242,10 @@ func _build_panel() -> void:
 	_panel.anchor_right = 0.0; _panel.anchor_bottom = 1.0
 	_panel.offset_left = 16.0
 	_panel.offset_right = 280.0
-	_panel.offset_top = 105.0
+	# 与 _c_tl 共用同一条让位线（120）：左上角生命/饥饿读数块（姓名 + 爱心 + 饥饿）
+	# 占 y16~100，飞行中不再隐藏，故左上角一切元素统一从 y120 起，留出 20 px 间隙。
+	# 本面板与读数块同为 offset_left=16，横向完全重合，间距不足会直接贴脸。
+	_panel.offset_top = 120.0
 	_panel.offset_bottom = -190.0
 	add_child(_panel)
 	var box := VBoxContainer.new()

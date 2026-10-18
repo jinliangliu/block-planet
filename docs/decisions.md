@@ -1453,6 +1453,24 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 
 ---
 
+## D-045 登机后恢复显示姓名 / 血量 / 饥饿
+
+**背景**：用户反馈「登机后，玩家姓名、血量、饥饿度均不显示」。此前 `hud.gd` 的 `_on_aircraft_ride_changed` 在登机时执行 `_stats_box.visible = not _riding`，把左上角状态块（姓名 + 爱心 + 饥饿）整块隐藏，理由是「飞行中玩家就是飞机本身，身份与生存读数让位给飞行信息」。
+
+**结论**：推翻该隐藏设计，登机后状态块**照常显示**；删除该写入点（全项目唯一，grep 确认），不改为 `visible = true`（留着会让人误以为有别的分支会关掉它）。
+
+**依据**：① 飞行中玩家仍会因坠机、落水掉血，饥饿照常消耗，读数必须可见；② 姓名是儿童向玩家的身份锚点；③ 布局不构成障碍——飞行仪表 HUD 追尾视角左上角 `_c_tl` 从 y=120 起（`flight_instrument_hud.gd` `_mk_corner(..., 120.0)`，注释明写「避让左上角的生命/饥饿读数」），y0..120 天然为空；登船路径（D-042）本就未隐藏 `_stats_box`，两条载具路径由此统一。④ `_refresh_stats` 由 `health_changed` / `hunger_changed` 无条件驱动、不经 riding 门控，故恢复可见后数值照常刷新，不会「看得见但不更新」。
+
+**顺带修（同一主题，真冲突）**：
+- `flight_instrument_hud.gd` 详细清单 `_panel.offset_top` 105.0 → 120.0，与 `_c_tl` 共用同一条让位线（原 105 距状态块底边仅 ~11 px，且两者 `offset_left` 同为 16、横向完全重合）。
+- `takeoff_coach.gd` 新增 `set_bottom_reserve(px)`：默认 122.0（与历史一致），第一人称座舱视角 200.0，修掉教练条压在玻璃 HUD 速度/高度/航向三行上的真冲突（教练层画在上层）。视角判据链 `_craft.rider → rider.flight_camera → cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON`，与 `FlightInstrumentHUD.tick` 同源（Aircraft 自身不持相机）。
+
+**遗留（未派单）**：① 详细模式（H 键）下 `_panel` 与 `_c_tl` 交集 x120..280 / y120..184，四角读数压住左侧清单前 4 行；② 追尾右下角 `_c_br`（y H-80..H-16）与 160×160 仪表小地图（y H-176..H-16）重叠 160×64；③ 移动端零安全区处理（`get_display_safe_area` 全库 0 命中），反向横屏刘海会切到 (16,16) 起的状态块。
+
+**验证**：`tests/flight_probe.gd` 143 PASS / 0 FAIL / rc=0（含 6 条相关断言：登机后状态块仍显示 + 姓名/爱心/饥饿三条子读数 + 下机恢复两条）；`tests/flight_hud_shot.gd` 37 PASS / 0 FAIL，目检 `tmp/flight_hud_ground.png`（姓名「小方块」+ 5 心 + 饥饿 19/20）与 `flight_hud_cruise.png` 均在左上角且不与 `_c_tl` 重叠；`user://` 逐字节还原。全量回归 26 无头 + 7 窗口探针 0 FAIL。座舱视角避让另有专职断言探针 `tests/coach_cockpit_shot.gd`（16 PASS / 0 FAIL，已纳入回归窗口列表）：量化确认座舱下教练条 rect=(380,520) 520×58、玻璃读数带 rect=(480,600) 320×60，两者 y 向余 22 px 不重叠，且教练条实际绘出的像素外包矩形 (379,519) 522×60 与计算 rect 吻合；追尾下 `_bottom_reserve` 仍为 122.0（行为与历史一致）。
+
+---
+
 ## 附：待定/开放问题
 
 | 编号 | 问题 | 现状 |

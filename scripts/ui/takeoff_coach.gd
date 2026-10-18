@@ -34,6 +34,13 @@ const TAKEOFF_ALT := 15.0
 const SUCCESS_HOLD := 3.5
 ## 油门算「推满」的阈值。
 const FULL_THROTTLE := 0.85
+## 教练条底边距屏幕底部的距离（px）。历史值 122.0：底部居中横条（高 58）。
+const BOTTOM_RESERVE := 122.0
+## 座舱（第一人称）视角下的底边距：座舱玻璃 HUD 的底部三行读数带占
+## y H-120…H-60，而教练层是后 add_child 的（hud.gd 先加 _instrument_hud
+## 再加 _takeoff_coach）——画在上层，用 122.0 会把读数整块盖住，抬到
+## 200.0 后横条落在 y H-200…H-142，让开读数带。追尾视角没有这条带，保持 122.0。
+const BOTTOM_RESERVE_COCKPIT := 200.0
 
 var _craft: Aircraft = null
 var _elapsed := 0.0
@@ -41,6 +48,8 @@ var _elapsed := 0.0
 var _success_at := -1.0
 ## 本次驾驶是否已经完成过起飞（落回地面后重置，重新接管）。
 var _finished := false
+## 当前底边距（px）。默认 122.0：不调用 set_bottom_reserve 时行为与历史一致。
+var _bottom_reserve: float = BOTTOM_RESERVE
 
 
 func _ready() -> void:
@@ -55,11 +64,13 @@ func setup(craft: Aircraft) -> void:
 	_elapsed = 0.0
 	_success_at = -1.0
 	_finished = false
+	_bottom_reserve = BOTTOM_RESERVE
 	visible = craft != null
 
 
 func clear() -> void:
 	_craft = null
+	_bottom_reserve = BOTTOM_RESERVE
 	visible = false
 
 
@@ -70,7 +81,32 @@ func tick(delta: float) -> void:
 		return
 	visible = true
 	_elapsed += delta
+	_refresh_bottom_reserve()
 	queue_redraw()
+
+
+## 按当前视角决定底边距：座舱视角抬高让开玻璃 HUD 读数带，其余保持默认。
+## 视角判据复用现成符号，不新造视角状态：
+##   Aircraft.rider（scripts/vehicles/aircraft.gd:112）
+##   → Player.flight_camera（scripts/player/player.gd:149）
+##   → AircraftCamera.ViewMode（scripts/vehicles/aircraft_camera.gd:21）。
+func _refresh_bottom_reserve() -> void:
+	var px: float = BOTTOM_RESERVE
+	var rider: Player = _craft.rider
+	if rider != null and is_instance_valid(rider):
+		var cam: AircraftCamera = rider.flight_camera
+		if cam != null and is_instance_valid(cam) \
+				and cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON:
+			px = BOTTOM_RESERVE_COCKPIT
+	set_bottom_reserve(px)
+
+
+## 设置教练条底边距（px）。只改矩形，不碰物理；负值按 0 处理。
+func set_bottom_reserve(px: float) -> void:
+	var v: float = maxf(px, 0.0)
+	if not is_equal_approx(v, _bottom_reserve):
+		_bottom_reserve = v
+		queue_redraw()
 
 
 func _draw() -> void:
@@ -167,9 +203,12 @@ func _step_of(snap: Dictionary) -> Dictionary:
 ## 底部中央横条：主句 + 副句 + 可选进度条。
 func _draw_bar(step: Dictionary) -> void:
 	var size := get_size()
-	var w := 520.0
+	# 窄屏兜底：左右各留 254 px 给四角 HUD（角标签 230 宽 + 16 边距 + 8 余量），
+	# 保证横条永不压住左下/右下角读数。项目 viewport 最小 1280（aspect=expand
+	# 只会横向变宽），实际取到的仍是 520.0，此处只是防御。
+	var w := minf(520.0, size.x - 2.0 * 254.0)
 	var h := 58.0
-	var rect := Rect2(Vector2(size.x * 0.5 - w * 0.5, size.y - 122.0), Vector2(w, h))
+	var rect := Rect2(Vector2(size.x * 0.5 - w * 0.5, size.y - _bottom_reserve), Vector2(w, h))
 	var color: Color = step.get("color", TEXT_MAIN)
 	var flash := bool(step.get("flash", false))
 	# 需要动手的步骤用呼吸式闪烁抓住注意力（儿童向：低对比、不刺眼）。
