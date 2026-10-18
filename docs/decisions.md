@@ -1490,6 +1490,43 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 
 ---
 
+## D-047 座舱 2D 像素仪表：地平仪 + 高度计 + 航向仪（替换玻璃文字带）
+
+**背景**：用户给出座舱仪表设计需求——① 地平仪：分层（底层天地背景可滚动+旋转、上层固定十字+飞机标记不移动），俯仰→垂直偏移背景、横滚→旋转整个天地背景，俯仰限制 ±60°、超过截断不无限滚动；像素风（低分辨率、粗像素刻度、线条硬边、参考战雷老式战机仪表、黑底+白色像素刻度），玩家观感「飞机倾斜、天地跟着歪、中间小飞机永远正对玩家」。② 高度计：白色数字 `ALT 4500m`，加闪烁警告、过低数字变红。③ 航向仪：长条航向带（省像素资源），横向平铺纹理按航向水平位移滚动，中间竖线标记当前机头朝向，0~360 循环注意取模避免跳变。④ 渲染层级：仪表 UI 放最上层、叠加在驾驶舱像素背景之上，优先 2D 精灵、不用 3D。
+
+**结论**（全部在提示层，不动飞行物理与 `FlightInstruments` 契约）：
+1. **新控件 `scripts/flight/cockpit_instruments.gd`（`class_name CockpitInstruments`，纯 2D Control）**：四件子控件锚底居中一簇——航向带 620×60（上）+ 地平仪 152×152（中）+ ALT / SPD 数字框 154×120（左右）。像素风落地方式：黑底（`COL_BEZEL`）+ 白色刻度；**所有图形用 `draw_rect` / `draw_colored_polygon` 拼**——2D 画布默认不开 MSAA 即硬边；细线一律用沿线方向的细四边形而非 `draw_line`（避免抗锯齿）；天地色取低饱和蓝/棕；小字用默认字体（无字体资产）。它是屏幕 HUD 覆盖层的子节点（最上层 2D 层），直接叠在座舱 3D 视野上——不走 `CockpitPanel` 的 ViewportTexture 贴 3D 平面路线（用户 spec 原话「优先 2D 精灵，不用 3D」）。
+2. **地平仪数学**（探针锁死的不变量）：横滚右转为正 → 天地层视觉**逆时针**（层角 `a = -roll`；90° 右坡时天在左半屏、地在右半屏——与「右翼朝地、天朝左翼」的物理一致）；俯仰抬头为正 → 地平线**下沉**（`dy = +pitch·ppd`）；`ppd = 窗半高 / 60`，pitch 先钳 ±60° 再乘 ppd，偏移永不越出窗口（用户 spec 的「超过截断、不会无限滚动」）。天地 = 「整窗铺天 + 地平线半平面（Sutherland-Hodgman）裁剪出地」，无需 SubViewport 裁剪；地平线与俯仰阶梯用 Liang-Barsky 裁进窗口；阶梯数字（10/20/30）随层旋转（`draw_set_transform(anchor, a, Vector2.ONE)`——注意 Godot 4 的签名是 (position, rotation, scale)，传 Transform2D 会报「argument 1 should be Vector2」）。横滚刻度（0/±10/±20/±30/±45/±60）随天地转、顶部倒三角指针固定：右坡时右侧刻度转到指针下方，读数即右坡。
+3. **航向带取模**：每 5° 一刻度（10° 中、30° 长 + 标签 N/E/S/W 或三位数），位置 = `中心 + wrapf(deg − heading, ±180) × 5px`——359°→0° 天然连续（探针断言步长恒为 5px、0° 与 360° 同位置）；带下附当前三位航向数（floor 取整，与刻度带同步翻页）。
+4. **玻璃文字带退役**：`flight_instrument_hud.gd` 的 `_glass` 底部三行（速度 / 高度·离地 / 航向·坡度）整体删除，信息分流——高度→ALT 框（MSL，`alt_warn>0` 时红 + 600ms 闪烁，与警告横幅同周期）、航向→刻度带 + 三位数、坡度→地平仪；速度补 **SPD 读数框**（spec 未列空速表，但原玻璃带带此信息、不能丢；顶部飞行面板卡片也有空速行）。中心准星保留（瞄点参考）。`_apply_visibility` 仅第一人称显示 `_cockpit`，`tick` 里 `refresh(_instruments)`。
+
+**顺带**：`debug_state()` 快照方法供探针断言文案/警告灯——`enable_all_warnings=true` 下探针直接摸内部类私有成员会报 unsafe，快照把契约收在类内。
+
+**踩坑**：① GDScript 严格模式：无类型常量数组（`const LADDER := [...]`、字面量 `[-1.0, 1.0]`）for 迭代出的变量是 Variant，算术类型推断直接 Parse Error——循环里 `float(p)` / `float(sign)` 显式断链；② Godot 4 `draw_set_transform` 签名是 (position, rotation, scale) 而非 Transform2D；③ Vector2 是 float32，探针断言裁剪端点要用 1e-3 容差（100 量级坐标的除法/lerp 固有误差 ~1e-5）；④ 取证探针飞行脚本：`place()` **不复活**已解体机体（`_wrecked` 标志不清），飞机一旦撞地形解体，后续所有 `place()` 都是把残骸搬来搬去——取证段必须先确认 `not is_wrecked()`。
+
+**遗留（未派单）**：① 用户 spec 里「叠加在驾驶舱像素背景之上」的像素座舱背景本身尚未画——当前第一人称是座舱罩内看 3D 世界，仪表簇直接叠其上；后续可加 2D 像素座舱框/仪表板剪影层（位于仪表簇之下的独立层）；② 无头探针不断言几何（headless 视口尺寸不确定），几何与渲染由窗口探针覆盖；③ 移动端安全区同 D-046 遗留。
+
+**验证**：`tests/cockpit_instruments_probe.gd` 23 PASS / 0 FAIL（无头：俯仰钳制含「极端值不越窗」、航向取模连续 + 0/360 同位置 + 指北指东方向、横滚方向三级（0/90/180）、闪烁区间、线段×矩形与多边形×半平面裁剪不变量、ALT/SPD 文案与两级警告灯）；`tests/cockpit_instruments_shot.gd` 窗口取证（转弯带坡截图 + 低空俯冲 ALT 红闪截图 + 四件互不重叠/与卡片零重叠/不出屏几何断言）；`tests/coach_cockpit_shot.gd` ③ 断言从「玻璃读数带」改为「座舱仪表簇」真实节点矩形（GLASS_* 常量随文字带退役）；回归脚本扩为 27 无头 + 9 窗口。全量回归 0 FAIL，`user://` 逐字节还原。
+
+---
+
+## D-048 节点位姿补同步：修复飞机「会转弯不转身」（碰撞盒钉世界轴向）
+
+**背景**：D-047 取证时连续三次撞上同一怪事——探针持续压右副翼，飞行模型坡度已 45~65°，座舱地平仪/坡度读数却恒 0°。孤立探针（临时，已删）逐秒对照实锤：写 `controls.roll = 0.45` 一秒后**模型 bank = +45.0°、节点 bank = −0.0°**。根因：D-031 把气动与姿态积分收进纯逻辑层 `AircraftFlight` 后，节点 `Aircraft._physics_process` 只回同步了位置（`_state.position = global_position`），**basis 从未搬回节点**——`global_transform` 只在 `place()` 时写过一次。而相机（`AircraftCamera._target_transform`）、座舱仪表（`tick` 把 `_craft.global_transform.basis` 交给 `FlightInstruments.update`）、驾驶座（`seat_transform`）、轨迹录制（记 `global_transform.basis` 的四元数）、流式窗口方向（`world._update_stream_dir`）、下机落点（`exit_aircraft` 用 `basis.x`）全部读节点位姿。于是飞机跟着模型转弯，外观/相机/仪表/回放残影/加载窗口全部冻结在出生姿态——D-033 的座舱视角、D-034 的 12 项姿态仪表、D-035 的机头偏置流式，三个里程碑的核心机制其实一直没生效。
+
+**结论**：
+1. **补一行同步**（对齐 Boat 的 `rotation.y = physics.heading` 模式）：`_physics_process` 在 `integrate` 之后、`move_and_slide` 之前执行 `global_transform = Transform3D(_state.basis, global_position)`——只搬 basis，位置仍由 `move_and_slide` 说了算。
+2. **碰撞盒不跟转**（`_pin_collider`，每帧把 `CollisionShape3D` 钉回 `Transform3D(Basis.IDENTITY, global_position + COLLIDER_CENTER)`）：整机盒 15.6 × 6.6 × 4.8 m 若随机体姿态旋转，地面 12° 抬头（机轮限位内）就把机尾埋进地面约 1.5 m、低空 20° 坡度把翼尖埋约 1 m——`move_and_slide` 的分离速度超过解体阈值 Δv 7 m/s，每次起飞/降落都会变成坠毁。故旋转只作用于外观与读 `global_transform` 的下游，起降物理与修复前逐字节一致（`flight_probe` 140 项断言的前提不动）。残骸翻倒的 tween 故意不钉——那是演出，摔到哪算哪。
+3. **回归闸两处**：`flight_probe` D 段巡航后断言 `cruiser.global_transform.basis.is_equal_approx(cruiser._state.basis)`；`cockpit_instruments_shot` 转弯后同样断言。**写法教训**：不能拿「仪表读数 vs snapshot」同期比对——仪表 `tick` 走 `_process`（渲染帧），比物理帧慢，57°/s 的滚转里能差出 5°（实测仪表 22.1° vs 模型 16.9°）；要比就比节点 basis 与 `_state.basis` 这两个同为物理帧阶段的量。
+
+**顺带修好**（同一根因的受益方，未单独派单）：第一人称/追尾相机真正随机头转（座舱视角自此可用）；D-047 地平仪的「天地跟着歪」自此成立（取证前它一直在画水平线）；轨迹回放的机体与幽灵残影歪斜；流式窗口真正随机头偏置（D-035 机制自此生效）；下机落点真正落在机体左侧。
+
+**踩坑**：① 「局部正确推不出全局不变式」的又一例——七个里程碑的探针全断言模型层（`snapshot()`）或 UI 层，没有一个断言节点位姿，节点冻结从 D-031 活到 D-047；截图目检也从未对着姿态看（`coach_5_climb.png` 里升降率 +10.3 m/s 而姿态俯仰 −0°，正是冻结签名）。② 修复不能「让节点连碰撞盒一起转」——见结论 2 的埋地形算术；也不能只转视觉子节点再给每个消费者加访问器——回放系统直写 `global_transform`、残骸 tween 写 `rotation:z`，都会和视觉层打架。③ 相机阻尼（`RATE_ROT`）让第一人称在快速滚转中滞后约一刻：取证截图里 3D 世界还接近水平、而仪表已正确歪 27.8°——仪表是 2D 直读，不等相机。
+
+**验证**：孤立探针（临时，跑完即删）实测节点/模型逐秒对照；`cockpit_instruments_shot` 窗口 10 PASS / 0 FAIL（含新回归闸，截图 `cockpit_inst_bank.png` 地平仪右坡 27.8° + 俯仰阶梯可见、`cockpit_inst_lowalt.png` ALT 红闪）；`flight_probe` 新增巡航段断言（146 PASS）；全量回归 36 探针 0 FAIL（`flight_view_probe` 42 PASS），`user://` 逐字节还原。顺带把 `flight_view_probe` ④ 的「首帧位移 < 3.0 m」阈值修到 5.0 m：D-035 追尾距 9→13 m 后跳变全程变 ≈16.7 m，而步长 = 全程 ×(1−e^(−RATE_FAR·delta)) 随渲染帧率浮动（本机 ~20 fps 实测 3.04 m），原阈值必然击穿——该 FAIL 在修复前最后一次回归里已存在（同值 3.04 m），非本次引入。
+
+---
+
 ## 附：待定/开放问题
 
 | 编号 | 问题 | 现状 |

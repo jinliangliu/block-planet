@@ -7,19 +7,13 @@ extends Node
 ## 避让整条链路失去存在理由——本探针改验新布局的四件事：
 ##   ① 教练区（主句 / 副句 / 进度条）整块落在飞行面板卡片矩形内——真的合并了；
 ##   ② 追尾视角下卡片与左上角读数 _c_tl 零重叠；
-##   ③ 座舱视角下卡片与玻璃 HUD 底部读数带零重叠（旧冲突从此不该存在）；
+##   ③ 座舱视角下卡片与座舱仪表簇零重叠（D-047 起 CockpitInstruments 替换了
+##      玻璃 HUD 底部三行文字带，旧「玻璃读数带」冲突从此不该存在）；
 ##   ④ 登机后左上角状态块与顶部居中世界名都隐藏（D-046 用户要求「1区不显示」）。
 ## 需窗口运行（截图走 Vulkan），勿加 --headless。
 ## 运行：Godot_v4.6.3-stable_win64_console.exe --path . res://tests/coach_cockpit_shot.tscn
 
 const SHOT_DIR := "res://tmp"
-
-## 座舱玻璃 HUD 底部三行读数带（flight_instrument_hud._build_glass）：
-## 锚底，offset_top=-120 / offset_bottom=-60，横向 W/2±160。该 VBox 是 _glass
-## 的局部子节点、没存成员，这里按同源常量重算期望矩形。
-const GLASS_TOP := 120.0
-const GLASS_BOTTOM := 60.0
-const GLASS_HALF_W := 160.0
 
 var _fails := 0
 var _craft: Aircraft = null
@@ -151,15 +145,22 @@ func _run() -> void:
 		"已切到第一人称座舱")
 	await _wait_physics(2)
 
-	# ── ③ 座舱：卡片与玻璃 HUD 底部读数带零重叠 ──
+	# ── ③ 座舱：卡片与座舱仪表簇（D-047）零重叠 ──
+	# D-047 起玻璃 HUD 底部三行文字带被 CockpitInstruments 仪表簇（地平仪 +
+	# 高度计 + 航向仪 + SPD 框，锚底居中）替换；旧 GLASS_* 常量随文字带退役，
+	# 这里直接取真实节点矩形。
 	var vp := get_viewport().get_visible_rect().size
-	var glass := Rect2(Vector2(vp.x * 0.5 - GLASS_HALF_W, vp.y - GLASS_TOP),
-		Vector2(GLASS_HALF_W * 2.0, GLASS_TOP - GLASS_BOTTOM))
+	var cluster: CockpitInstruments = _hud._instrument_hud._cockpit
+	var gauge_r: Rect2 = (cluster.gauge as Control).get_global_rect()
+	var tape_r: Rect2 = (cluster.tape as Control).get_global_rect()
 	card = _hud._flight_panel.get_global_rect()
-	print("DBG  viewport=", vp, " card=", card, " glass band=", glass)
-	_check(not card.intersects(glass),
-		"座舱：卡片与玻璃 HUD 读数带零重叠（卡片底 %.0f < 读数带顶 %.0f，间隙 %.0f px）"
-			% [card.end.y, glass.position.y, glass.position.y - card.end.y])
+	print("DBG  viewport=", vp, " card=", card, " gauge=", gauge_r, " tape=", tape_r)
+	_check(cluster.is_visible_in_tree(), "座舱视角下仪表簇可见（D-047 替换玻璃文字带）")
+	_check(not card.intersects(gauge_r) and not card.intersects(tape_r),
+		"座舱：卡片与座舱仪表簇零重叠（卡片底 %.0f < 簇顶 %.0f，间隙 %.0f px）"
+			% [card.end.y, tape_r.position.y, tape_r.position.y - card.end.y])
+	_check(gauge_r.end.y <= vp.y and tape_r.position.y >= 0.0,
+		"座舱仪表簇整簇在屏内（不出画面）")
 	_check(_hud._coach_main.is_visible_in_tree(),
 		"座舱视角下教练区仍显示（不因切视角被清掉）")
 	await _snap("coach_cockpit_view.png")

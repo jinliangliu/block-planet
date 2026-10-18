@@ -3,7 +3,8 @@ extends Control
 ## 屏幕飞行仪表 HUD（D-034）：把 FlightInstruments 的加工读数呈现为屏幕覆盖层。
 ##
 ## 视角分发（按 AircraftCamera.current_mode）：
-##   第一人称座舱 → 座舱玻璃 HUD（准星 + 速度/高度/航向投影）
+##   第一人称座舱 → 中心准星 + 座舱仪表簇（地平仪/高度计/航向仪，D-047 的
+##      CockpitInstruments；D-034 的玻璃三行文字带被它替换）
 ##   第三人称追尾/后视/环顾 → 屏幕四角 HUD（速度/高度/油门 + 目标）+ 小地图
 ##   地图(M)/回放(R) → 由战术地图/回放覆盖层接管，本 HUD 隐藏
 ##
@@ -30,10 +31,8 @@ var _chase: Control
 var _panel: Control
 var _warn: Control
 var _minimap: _Minimap
-# 玻璃 HUD 文本
-var _glass_speed: Label
-var _glass_alt: Label
-var _glass_head: Label
+## 座舱仪表簇（D-047）：仅第一人称可见的地平仪/高度计/航向仪。
+var _cockpit: CockpitInstruments
 # 追尾四角
 var _c_tl: Label
 var _c_tr: Label
@@ -52,6 +51,9 @@ func _ready() -> void:
 	_build_chase()
 	_build_panel()
 	_build_warn()
+	# 座舱仪表簇（D-047）：第一人称才显形，数据在 tick 里喂。
+	_cockpit = CockpitInstruments.new()
+	add_child(_cockpit)
 	_minimap = _Minimap.new()
 	_minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_minimap.custom_minimum_size = Vector2(160.0, 160.0)
@@ -117,8 +119,9 @@ func tick(delta: float) -> void:
 	if _camera != null and _camera.has_method("current_mode"):
 		mode = _camera.current_mode()
 	_apply_visibility(mode)
-	_refresh_glass()
 	_refresh_chase()
+	if _cockpit.visible:
+		_cockpit.refresh(_instruments)
 	if _panel.visible:
 		_refresh_panel()
 	_refresh_minimap(mode)
@@ -135,6 +138,7 @@ func _apply_visibility(mode: int) -> void:
 	var map_like := mode in [AircraftCamera.ViewMode.MAP, AircraftCamera.ViewMode.REPLAY]
 	_glass.visible = fp
 	_chase.visible = chase
+	_cockpit.visible = fp
 	_minimap.visible = chase
 	var detail := FlightSettings.current().hud_detail
 	_panel.visible = detail and not map_like
@@ -154,15 +158,19 @@ func _hide_all() -> void:
 		_minimap.visible = false
 	if _warn != null:
 		_warn.visible = false
+	if _cockpit != null:
+		_cockpit.visible = false
 
 
-# ── 第一人称座舱玻璃 HUD ──
+# ── 第一人称座舱：中心准星（D-047 起文字读数交给座舱仪表簇）──
 func _build_glass() -> void:
 	_glass = Control.new()
 	_glass.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_glass)
-	# 中心准星（两道细条）。
+	# 中心准星（两道细条）。D-034 原有的底部三行文字读数（速度/高度/航向）
+	# 已由 D-047 的座舱仪表簇（地平仪 + 高度计 + 航向仪 + SPD 框）接管，
+	# 不再重复显示；准星是瞄点参考，保留。
 	var h := ColorRect.new()
 	h.color = Color(1.0, 1.0, 1.0, 0.6)
 	h.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -175,30 +183,6 @@ func _build_glass() -> void:
 	v.offset_left = -1.5; v.offset_right = 1.5
 	v.offset_top = -18.0; v.offset_bottom = 18.0
 	_glass.add_child(v)
-	# 底部居中三行读数。
-	var box := VBoxContainer.new()
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.anchor_left = 0.5; box.anchor_right = 0.5
-	box.anchor_top = 1.0; box.anchor_bottom = 1.0
-	box.offset_left = -160.0; box.offset_right = 160.0
-	box.offset_top = -120.0; box.offset_bottom = -60.0
-	_glass.add_child(box)
-	_glass_speed = _mk_label(box, 22, COL_NORMAL)
-	_glass_alt = _mk_label(box, 22, COL_NORMAL)
-	_glass_head = _mk_label(box, 22, COL_NORMAL)
-
-
-func _refresh_glass() -> void:
-	if not _glass.visible:
-		return
-	var warn := _instruments.overspeed or _instruments.stalled or _instruments.stall_warning
-	var col := COL_WARN if warn else COL_NORMAL
-	_glass_speed.text = "速度  %d km/h" % int(_instruments.airspeed_kmh)
-	_glass_speed.add_theme_color_override("font_color", col)
-	_glass_alt.text = "高度  %d m（离地 %d）" % [
-		int(_instruments.altitude_msl), int(_instruments.altitude_agl)]
-	_glass_head.text = "航向  %03d°   坡度 %+03d°" % [
-		int(_instruments.heading_deg), int(_instruments.roll_deg)]
 
 
 # ── 第三人称四角 HUD ──

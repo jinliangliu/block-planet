@@ -166,6 +166,11 @@ func _run() -> void:
 		"半油门平飞收敛钉死在巡航带（%.0f km/h，D-031 目标 127~137）" % cruise["kmh"])
 	_check(not cruise["stalled"], "巡航状态未失速")
 	_check(not cruiser.is_wrecked(), "巡航过程未解体")
+	# D-048：节点位姿必须跟随纯逻辑姿态——相机/座舱仪表/座位/录制全读
+	# global_transform，修复前节点 basis 只在 place() 写过一次，飞机「会转弯
+	# 但不转身」（模型坡度 45° 时仪表恒 0°）。此处把节点 basis == 模型 basis 钉死。
+	_check(cruiser.global_transform.basis.is_equal_approx(cruiser._state.basis),
+		"巡航中节点位姿跟随飞行模型（basis 逐列一致）")
 
 	# ── E 段：爬升 → 持续拉杆失速 → 推杆改出 ─────────────
 	var climb_start_y: float = cruiser.global_position.y

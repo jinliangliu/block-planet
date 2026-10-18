@@ -512,6 +512,14 @@ func _physics_process(delta: float) -> void:
 	if on_ground:
 		_apply_ground_forces(delta)
 
+	# 姿态搬进场景（D-048）：纯逻辑层每帧重算 _state.basis，而节点位姿历来只在
+	# place() 时写过一次——相机、座舱仪表、驾驶座、轨迹录制、流式窗口方向全读
+	# global_transform，于是飞机「会转弯但不转身」：模型坡度 45° 时仪表恒 0°、
+	# 第一人称视角永不随机头转、回放残影永不歪。这里把姿态补搬进节点；碰撞盒
+	# 不跟转（见 _pin_collider），起降物理与修复前逐字节一致。
+	global_transform = Transform3D(_state.basis, global_position)
+	_pin_collider()
+
 	# 撞击检测：比对 move_and_slide 前后的速度损失（硬着陆与撞墙同源）。
 	var before := _state.velocity
 	velocity = before
@@ -534,6 +542,19 @@ func _physics_process(delta: float) -> void:
 	_update_flight_tracking(delta, on_ground)
 	_check_failure(impact)
 	_emit_readings(delta)
+
+
+## 碰撞盒钉回世界轴向（D-048）：整机盒 15.6 × 6.6 × 4.8 m 若随机体姿态旋转，
+## 地面 12° 抬头（机轮限位内）就会把机尾埋进地面约 1.5 m、低空 20° 坡度把
+## 翼尖埋约 1 m——move_and_slide 的分离速度会超过解体阈值 Δv 7 m/s，每次起飞/
+## 降落都变成坠毁。故姿态旋转只作用于外观与读 global_transform 的下游（相机/
+## 仪表/座位/录制/回放/流式窗口），碰撞盒恒定世界水平：起降物理与「机体不转」
+## 的历史行为逐字节一致（flight_probe 起降/巡航段断言的前提）。残骸翻倒不钉——
+## 那是演出，摔到哪算哪。
+func _pin_collider() -> void:
+	if _collider != null:
+		_collider.global_transform = Transform3D(
+			Basis.IDENTITY, global_position + COLLIDER_CENTER)
 
 
 ## 涂装同步：设置里换了涂装就在下一帧改色（整数比对，命中才刷材质）。

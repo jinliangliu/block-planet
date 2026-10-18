@@ -113,7 +113,11 @@ func _run() -> void:
 	await _frames(1)
 	var cam_pos_b: Vector3 = cam.global_position
 	var step := cam_pos_a.distance_to(cam_pos_b)
-	_check(step < 3.0, "④ 视角切换平滑不瞬移（首帧位移 %.2f m < 3 m）" % step)
+	# 阈值取「跳变全程」（追尾 13 m → 座舱 ≈16.7 m）的 1/3：本机实测 3.04 m
+	# （渲染 ~20 fps 时步长最大；步长 = 全程 × (1−e^(−RATE_FAR·delta))，随渲染
+	# 帧率浮动）。历史上按 9 m 追尾距标定的 3.0 m，在 D-035 把追尾距加宽到
+	# 13 m 后必然击穿——「不瞬移」判的是数量级（17 m 级硬切才算瞬移）。
+	_check(step < 5.0, "④ 视角切换平滑不瞬移（首帧位移 %.2f m < 5 m）" % step)
 	await _frames(90)   # 阻尼收敛（RATE_FAR=4：90 帧 ≈ 1.5 s，残余 < 0.1 m）
 	var cockpit_expect: Vector3 = craft.global_transform * Vector3(0.0, 1.15, -3.4)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON, "④ C 切到第一人称座舱")
