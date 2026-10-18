@@ -112,10 +112,16 @@ func _run() -> void:
 	# ② 的追尾几何/截图改由一次 C 键切出覆盖（互切双向可用本身也是回归点）。
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
 		"默认视角为第一人称座舱（D-049）")
+	# D-050：座舱内视——第一人称隐藏 3D 外部机模（眼位在机身盒内部、机翼
+	# 正压视平线，修复前「第一人称」看到的是自己的机翼横贯全屏）。
+	_check(_craft.is_interior_view(),
+		"座舱视角隐藏 3D 外部机模（D-050，不再看见机翼）")
 	cam.toggle_first_third()   # → 追尾
 	await _wait(90)   # 视角阻尼收敛，与 flight_view_probe 同等待时长
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE,
 		"C 键切到追尾（② 追尾几何取证的起点）")
+	_check(not _craft.is_interior_view(),
+		"切追尾恢复 3D 机体外观（D-050，防幽灵飞机）")
 	_check(_craft.rider == _player,
 		"drive_remotely() 未抹掉 rider（aircraft.gd:347 的坑，已按真人状态补回）")
 

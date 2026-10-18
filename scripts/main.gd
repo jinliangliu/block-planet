@@ -216,6 +216,10 @@ func _on_flight_ride_changed(riding: bool) -> void:
 				_cockpit_panel = CockpitPanel.new()
 				craft.add_child(_cockpit_panel)
 				_cockpit_panel.setup(craft)
+				# D-050：面板是「相机激活后才挂上机体」的晚到者——内视规则
+				# （setup/reset_to_cockpit 时）应用时它还不存在，这里补一次，
+				# 座舱视角下隐藏 3D 面板（读数交给 2D 仪表簇）。
+				_flight_camera.apply_cockpit_interior()
 			if _flight_markers == null:
 				_flight_markers = FlightMarkers.new()
 				add_child(_flight_markers)

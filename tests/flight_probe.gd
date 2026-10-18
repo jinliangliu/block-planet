@@ -444,6 +444,10 @@ func _run() -> void:
 	# flight_panel_shot / coach_cockpit_shot 三条同级断言）。
 	_check(main_scene._flight_camera.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
 		"登机默认第一人称座舱（D-049：默认登机后进入第一人称视角）")
+	# D-050：座舱内视——第一人称下隐藏 3D 外部机模（眼位在机身盒内部，
+	# 机翼正压视平线，修复前「第一人称」看到的是自己的机翼横贯全屏）。
+	_check(tel_craft.is_interior_view(),
+		"座舱视角隐藏 3D 外部机模（D-050：不再看见机翼）")
 	# 状态块在驾驶中隐藏（D-046，用户要求「登机后1区不显示」）：容器 visible=false，
 	# 三个读数随容器一起不可见。显隐断言一律用 is_visible_in_tree()：子节点自己的
 	# visible 标记仍为 true，只有「自身 + 祖先链」全可见才算真显示，逐节点断言会假绿。

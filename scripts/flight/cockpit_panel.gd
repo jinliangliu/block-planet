@@ -18,14 +18,27 @@ const PANEL_H := 0.20
 var _dials := {}
 var _lcds := {}
 var _subviewport: SubViewport = null
+## 基础可见性（蓝图机契约 = false：无座舱罩几何，setup 早退不建任何节点）。
+## 座舱内视（D-050）在其之上再压一层：visible = _base_visible and not _interior。
+var _base_visible := true
+var _interior_view := false
 
 
 func setup(craft: Node) -> void:
 	# 蓝图机无座舱罩几何：按契约隐藏、不建任何节点。
 	if craft != null and "blueprint_built" in craft and bool(craft.get("blueprint_built")):
+		_base_visible = false
 		visible = false
 		return
 	_build_cluster()
+
+
+## 座舱内视开关（D-050）：第一人称下隐藏——读数已由 2D 座舱仪表簇接管
+## （CockpitInstruments），且机体外观一并隐藏后 3D 面板悬在半空只会突兀。
+## 蓝图机的 _base_visible=false 契约在此之上仍然成立（内视退出也不会显形）。
+func set_interior_view(active: bool) -> void:
+	_interior_view = active
+	visible = _base_visible and not active
 
 
 func _build_cluster() -> void:

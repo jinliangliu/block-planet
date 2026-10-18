@@ -113,6 +113,12 @@ var rider: Player = null
 
 var _state := AircraftFlight.State.new()
 var _model: AircraftModel
+## 蓝图零件外观容器（_build_part_visuals 建，整机机模路径为 null）。
+var _part_meshes: Node3D = null
+## 座舱内视开关（D-050）：true = 第一人称下隐藏整机外部外观（机模/蓝图
+## 零件组），座舱内饰由 2D 像素座舱框 + 仪表簇提供。只切 visible，不碰
+## 碰撞/气动/逻辑。
+var _interior_view := false
 ## 已套用的涂装索引（每帧与设置比对，变了才改色，避免无谓的材质刷新）。
 var _applied_livery := -1
 ## 蓝图装配来源：非 null 时 _ready 据其零件生成体素块外观（替代整机机模）。
@@ -205,6 +211,7 @@ func _build_part_visuals(bp: Blueprint) -> void:
 	var container := Node3D.new()
 	container.name = "PartMeshes"
 	add_child(container)
+	_part_meshes = container
 	var com := bp.center_of_gravity()
 	# 零件组最低点（相对重心）：绕 Y 旋转只对调宽/深，半高即 size.y 的一半。
 	var min_y := INF
@@ -247,6 +254,34 @@ func _build_part_visuals(bp: Blueprint) -> void:
 	# 出厂即套当前涂装（与整机机模一致）。
 	_applied_livery = -1
 	_sync_livery()
+
+
+## 座舱内视开关（D-050）：第一人称下隐藏整机外部外观。
+##
+## 根因（用户实测截图 cockpit_inst_bank.png：机翼横贯全屏）：座舱相机眼位
+## COCKPIT_OFFSET = (0, 1.15, -3.4) 落在机身盒内部，而机翼（y 1.335..1.785）
+## 正压在视平线上、翼底面正对相机——不隐藏的话「第一人称」看到的先是自
+## 己的机翼再是世界。座舱内饰改由 2D 像素座舱框 + 仪表簇提供
+## （cockpit_instruments.gd 的 _draw，D-047 spec 的「驾驶舱像素背景」）。
+## 蓝图零件组（PartMeshes 容器）同规则隐藏。
+## 只切 visible：碰撞盒、气动、录制、逻辑全部不受影响。
+func set_cockpit_interior(active: bool) -> void:
+	if active == _interior_view:
+		return
+	_interior_view = active
+	_apply_exterior_visibility()
+
+
+## 当前是否座舱内视（探针回归闸用，避免摸私有 _model）。
+func is_interior_view() -> bool:
+	return _interior_view
+
+
+func _apply_exterior_visibility() -> void:
+	if _model != null and is_instance_valid(_model):
+		_model.visible = not _interior_view
+	if _part_meshes != null and is_instance_valid(_part_meshes):
+		_part_meshes.visible = not _interior_view
 
 
 ## 零件类别 → 体素块配色（蓝本为儿童向、辨识度优先）。

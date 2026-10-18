@@ -27,6 +27,11 @@ extends Control
 ## D-049：登机默认第一人称 + 「界面突出座舱驾驶界面」——整套尺寸放大
 ## ~16%（152→176 等），座舱视角下左侧 12 行详细清单让位（见
 ## flight_instrument_hud._apply_visibility），本簇成为座舱唯一飞行读数。
+##
+## D-050：本控件同时画「驾驶舱像素背景」（D-047 spec 遗留项）——顶导轨 +
+## 左右座舱立柱 + 仪表 dash 底板，四件仪表坐在 dash 上。第一人称下 3D
+## 外部机模被隐藏（aircraft.set_cockpit_interior），座舱内装完全由这层
+## 2D 像素框提供，世界从框内开口看去。
 
 # ── 配色（黑底白刻度 + 低饱和天地色）────────────────────────────
 const COL_BEZEL := Color(0.05, 0.05, 0.06)
@@ -55,6 +60,18 @@ const ROLL_TICKS := [0.0, 10.0, 20.0, 30.0, 45.0, 60.0]  # 横滚刻度（正=�
 ## 读数框内边距屏幕中心的水平距（地平仪半宽 + 间隙）：与 GAUGE_SZ 联动，
 ## 改外径不用手改这里的魔数。
 const BOX_GAP := 20.0
+
+# ── 座舱像素内装（D-050）────────────────────────────────────────
+## D-047 spec 的「驾驶舱像素背景」：顶导轨 + 左右立柱 + 仪表 dash 底板。
+## 与簇同一套像素风：硬边矩形（2D 画布默认不开 MSAA）、黑底、内侧勾边。
+const FRAME_POST_W := 26.0   # 左右立柱宽
+const FRAME_RAIL_H := 14.0   # 顶导轨高
+const FRAME_EDGE := 2.0      # 框体内侧勾边宽
+const DASH_PAD := 16.0       # dash 底板四出簇外的 padding
+const DASH_LIP := 3.0        # dash 顶沿勾边厚
+const COL_FRAME := Color(0.04, 0.05, 0.07)       # 座舱框体
+const COL_FRAME_EDGE := Color(0.17, 0.19, 0.24)  # 框体内侧勾边
+const COL_DASH := Color(0.07, 0.08, 0.11)        # dash 底板
 
 ## 四件子控件（公开供探针取几何矩形）。
 var tape: _HeadingTape = null
@@ -95,6 +112,27 @@ func _place(node: Control, l: float, r: float, t: float, b: float) -> void:
     add_child(node)
 
 
+## 座舱像素内装绘制（D-050）：先画框体与 dash 底板，四件仪表作为子控件
+## 永远画在其后（Control 子节点晚于父节点 _draw）——视觉上仪表「坐在
+## dash 上、框在座舱里」。仅本控件可见（第一人称）时才会执行。
+func _draw() -> void:
+    var w := size.x
+    var h := size.y
+    var r := frame_rects(size)
+    # dash 底板（伸到屏底＝座舱地板）+ 顶沿勾边。
+    draw_rect(r["dash"], COL_DASH, true)
+    draw_rect(r["lip"], COL_FRAME_EDGE, true)
+    # 顶导轨 + 左右立柱 + 内侧勾边（立柱压在世界画面上的两道细亮边）。
+    draw_rect(r["rail"], COL_FRAME, true)
+    draw_rect(r["post_l"], COL_FRAME, true)
+    draw_rect(r["post_r"], COL_FRAME, true)
+    draw_rect(Rect2(0.0, FRAME_RAIL_H, w, FRAME_EDGE), COL_FRAME_EDGE, true)
+    draw_rect(Rect2(FRAME_POST_W, FRAME_RAIL_H, FRAME_EDGE, h - FRAME_RAIL_H),
+        COL_FRAME_EDGE, true)
+    draw_rect(Rect2(w - FRAME_POST_W - FRAME_EDGE, FRAME_RAIL_H, FRAME_EDGE,
+        h - FRAME_RAIL_H), COL_FRAME_EDGE, true)
+
+
 ## 每帧从 FlightInstruments 喂数（由 FlightInstrumentHUD.tick 调用，
 ## 仅第一人称可见时）。各子控件自行 queue_redraw。
 func refresh(fi: FlightInstruments) -> void:
@@ -127,6 +165,28 @@ func debug_state() -> Dictionary:
 ## 不会无限滚动（用户 spec 第 1 条）。
 static func pitch_offset_px(pitch_deg: float, px_per_deg: float) -> float:
     return clampf(pitch_deg, -PITCH_MAX, PITCH_MAX) * px_per_deg
+
+
+## 座舱框各矩形（D-050，纯函数：_draw 与探针共用同一几何，勿改语义）。
+## vp = 视口尺寸。dash 由簇常量派生——改簇尺寸不用手改这里的魔数。
+## dash 顶沿在簇上方 DASH_PAD、底沿即屏底（座舱地板），四件仪表坐在其上。
+static func frame_rects(vp: Vector2) -> Dictionary:
+    var w := vp.x
+    var h := vp.y
+    var rail := Rect2(0.0, 0.0, w, FRAME_RAIL_H)
+    var post_l := Rect2(0.0, FRAME_RAIL_H, FRAME_POST_W, h - FRAME_RAIL_H)
+    var post_r := Rect2(w - FRAME_POST_W, FRAME_RAIL_H, FRAME_POST_W, h - FRAME_RAIL_H)
+    var dash_w := TAPE_W + DASH_PAD * 2.0
+    var dash_top := h - (MARGIN_B + GAUGE_SZ + 8.0 + TAPE_H + DASH_PAD)
+    var dash := Rect2(w * 0.5 - dash_w * 0.5, dash_top, dash_w, h - dash_top)
+    var lip := Rect2(dash.position.x, dash.position.y, dash.size.x, DASH_LIP)
+    return {
+        "rail": rail,
+        "post_l": post_l,
+        "post_r": post_r,
+        "dash": dash,
+        "lip": lip,
+    }
 
 
 ## 航向带某刻度角的屏幕横坐标：deg 与 heading 都先归一到 0-360，

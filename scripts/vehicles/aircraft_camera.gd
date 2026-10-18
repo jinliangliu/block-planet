@@ -104,6 +104,32 @@ func setup(craft: Aircraft, player: Node3D) -> void:
 		var target := _target_transform(_mode)
 		global_position = target.origin
 		global_transform.basis = target.basis
+	apply_cockpit_interior()
+
+
+## 座舱内视联动（D-050）：第一人称（含以座舱为底层的自由观察）隐藏机体
+## 外观——相机眼位在机身盒内部，机翼正压视平线，不隐藏的话「第一人称」
+## 看到的先是自己的机翼再是世界（用户实测截图：机翼横贯全屏）。座舱内饰
+## 由 2D 像素座舱框 + 仪表簇提供（cockpit_instruments.gd 的 _draw）。
+## 所有模式切换都经 set_mode；装配/激活各同步一次，覆盖登机与下机旁路。
+## 公开：main 在「相机激活后才挂上机体的晚到者」（座舱 3D 面板）装载后
+## 补调一次，把晚到者纳入同一份规则。
+func apply_cockpit_interior() -> void:
+	var fp := _mode == ViewMode.FIRST_PERSON or (
+		_mode == ViewMode.FREE_LOOK and _base_mode == ViewMode.FIRST_PERSON)
+	_set_exterior_hidden(fp)
+
+
+## 按「是否座舱内视」同步机体外观与座舱 3D 面板可见性。只切 visible：
+## 碰撞、气动、录制、逻辑不受影响。3D 面板（D-034）经 set_interior_view
+## 切换——它自带蓝图机「无座舱罩」契约，直接写 visible 会把契约掀掉。
+func _set_exterior_hidden(hidden: bool) -> void:
+	if not is_instance_valid(_craft):
+		return
+	_craft.set_cockpit_interior(hidden)
+	for child: Node in _craft.get_children():
+		if child is CockpitPanel:
+			(child as CockpitPanel).set_interior_view(hidden)
 
 
 func set_active(active: bool) -> void:
@@ -117,6 +143,11 @@ func set_active(active: bool) -> void:
 		var target := _target_transform(_mode)
 		global_position = target.origin
 		global_transform.basis = target.basis
+	if active:
+		apply_cockpit_interior()
+	else:
+		# 下机：机体外观必须恢复——飞机仍停在场上，隐藏着会变「幽灵飞机」。
+		_set_exterior_hidden(false)
 
 
 func is_active() -> bool:
@@ -133,6 +164,7 @@ func set_mode(mode: ViewMode) -> void:
 		return
 	_mode = mode
 	view_mode_changed.emit(mode)
+	apply_cockpit_interior()
 
 
 ## 登机默认视角（D-049）：每次登机复位到第一人称座舱——「默认登机后进入

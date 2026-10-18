@@ -93,10 +93,16 @@ func _run() -> void:
 	# _base_mode == CHASE 为前提，直接接着测会把它们全变成座舱分支。
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
 		"② 登机默认第一人称座舱（D-049）")
+	# D-050：座舱内视——第一人称隐藏 3D 外部机模；切追尾必须恢复（下机
+	# 同理，飞机仍停在场上，隐藏会变「幽灵飞机」）。
+	_check(craft.is_interior_view(),
+		"② 登机即座舱内视：3D 外部机模隐藏（D-050）")
 	cam.toggle_first_third()   # → 追尾
 	await _frames(2)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE,
 		"② C 键从座舱切到追尾（互切双向可用）")
+	_check(not craft.is_interior_view(),
+		"② 切追尾恢复 3D 机体外观（D-050）")
 
 	# ── ③ 发动机：默认熄火；F 启动后油门门控放开；熄火后油门锁 0 ──
 	_check(not craft.engine_running, "③ 登机后发动机默认熄火")

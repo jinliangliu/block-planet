@@ -1543,6 +1543,21 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 
 ---
 
+## D-050 座舱内视：第一人称隐藏 3D 外部机模 + 2D 像素座舱框（修复「第一人称看见机翼」）
+
+**背景**：D-047/D-049 交付后用户看取证截图 `cockpit_inst_bank.png` 提问：「**为何图片显示中有机翼，第一人称视角应该是座舱各类仪表**」。根因不是仪表问题，是相机与机模的关系：座舱眼位 `COCKPIT_OFFSET = (0, 1.15, -3.4)` 落在机身盒内部（`AircraftModel` 机身上段 y −0.84..1.74 m），而机翼在 y 1.335..1.785 m——翼底面正对相机、正压视平线，于是「第一人称」看到的先是自己的机翼（横贯全屏）再是世界。该偏移自 1:1 机模年代遗留（`MODEL_SCALE=3` 引入时只缩了机模，没缩相机/3D 面板偏移）。
+
+**结论**：
+1. **第一人称隐藏 3D 外部机模**（`aircraft.gd` 新增 `set_cockpit_interior()/is_interior_view()/_apply_exterior_visibility()`）：整机机模 `_model` 与蓝图零件组 `PartMeshes` 容器在座舱内视下 `visible=false`；只切 visible，碰撞盒、气动、录制、逻辑不受影响。相机侧 `aircraft_camera.gd` 在 `set_mode / setup / set_active(激活)` 三处调 `_apply_cockpit_interior()`，`set_active(false)`（下机）强制恢复——飞机仍停在场上，隐藏着会变「幽灵飞机」。内视判据含「以座舱为底层的自由观察」（`FREE_LOOK and _base_mode==FIRST_PERSON`），否则座舱里一环顾机翼又回来。座舱 3D 仪表盘（`CockpitPanel`，D-034）同规则在座舱视角隐藏：读数已由 2D 仪表簇接管，且它悬在半空（其位置同样是 1:1 年代遗留）只会突兀；追尾/地图/回放恢复。
+2. **2D 像素座舱框**（`cockpit_instruments.gd` 新增 `_draw()` + 纯函数 `frame_rects(vp)`）：落实 D-047 spec 遗留的「驾驶舱像素背景」——顶导轨（14 px）+ 左右立柱（26 px，内侧 2 px 勾边）+ 仪表 dash 底板（宽 = 航向带 + 2×`DASH_PAD`，顶沿在簇上方 16 px，底沿即屏底＝座舱地板），四件仪表作为子控件天然画在 dash 之上（Control 子节点永远晚于父节点 `_draw`）。世界从框内开口看去。实测（1280×720）：导轨 y 0..14（不压顶部卡片 y 16）、立柱 x 0..26 / 1254..1280（不压航向带 x 284..996）、dash (268, 392, 744×328) 完整包住四件。设计取舍：dash 伸到屏底而非停在簇底（MARGIN_B=60）——后者会在簇与提示行之间留一道悬空豁口，前者才是「坐在座舱里」的整体感；提示行（y 668..700）落在 dash 上，白字深底可读。
+3. **探针回归闸 5 处**：`cockpit_instruments_probe` 新增 ⑦ `frame_rects` 无头断言 16 条（不出屏/dash 包住四件/立柱不压带/导轨不压卡片/dash 宽与簇联动/底沿=屏底）；`flight_probe` J 段、`flight_view_probe` ②、`flight_panel_shot` ③④、`coach_cockpit_shot` ②、`cockpit_instruments_shot` 几何段各加「座舱隐藏 3D 机模 / 切追尾恢复」门（`is_interior_view()`，不摸私有 `_model`）。
+
+**踩坑**：① `Rect2` 在 Godot 4 没有 `get_end()`（是 `end` 属性），探针里连写七处直接 Parse Error——单文件 `--check-only --script` 一秒定位，比跑场景快。② 别用「调高眼位进座舱罩」当替代方案：翼在眼上方时顶面正对相机，机翼只是从「压视平线」变成「占满下半视野」，且 1:1 年代遗留的 `COCKPIT_OFFSET`/3D 面板偏移还牵动 `flight_view_probe` ④ 的落位断言；隐藏外部机模 + 2D 座舱框才是可控解（像素风、无螺旋桨频闪、无盒状机头抢底部视野）。③ 座舱框只画在 `CockpitInstruments._draw`（父控件）——四件子是子节点，绘制次序天然「先框后表」，无需额外 z 管理；帧体静态不每帧重绘（ALT 闪烁只重绘数字框自己）。
+
+**验证**：`cockpit_instruments_probe` 无头 39 PASS（23 + 16 条 ⑦）；`cockpit_instruments_shot` 窗口新增内视门 + dash 包含四件 + 座舱框不压带/卡片，转弯带坡与低空 ALT 红闪两张取证（截图已无机翼，改为座舱框 + dash + 仪表簇）；`flight_probe` J 段无头内视门；`flight_view_probe`/`flight_panel_shot`/`coach_cockpit_shot` 各加「座舱隐藏 / 切追尾恢复」门；全量回归 36 探针 0 FAIL，`user://` 逐字节还原。
+
+---
+
 | 编号 | 问题 | 现状 |
 |------|------|------|
 | O-1 | 红石系统是否仍要做？规划文件里的 M8 已被工具/生长/狩猎/弓箭垂钓取代 | 顺延，未决定最终去向 |

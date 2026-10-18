@@ -2,7 +2,7 @@ extends Node
 ## 飞行仪表面板 / HUD 渲染取证探针（D-034，窗口模式：需 Vulkan 渲染截图）。
 ## 复用飞行视角探针的「登机 → 起飞」路径，让 main 自动装配座舱 3D 面板、
 ## 世界标注与屏幕 HUD，然后：
-##   · 第一人称座舱视角截图（座舱玻璃 HUD + 低头可见的 3D 仪表盘）
+##   · 第一人称座舱视角截图（2D 像素座舱框 + 座舱仪表簇，D-050 起 3D 机模隐藏）
 ##   · 第三人称追尾视角截图（屏幕四角 HUD + 小地图）
 ##   · 详细模式截图（左侧 12 仪表全清单）
 ## 仅作可视化取证，不考核断言数量；截图落到 tmp/ 供人工目检。
@@ -96,6 +96,12 @@ func _run() -> void:
 	# 座舱，无需按键；本断言是 D-049 的窗口侧回归闸。
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
 		"③ 登机默认第一人称座舱（D-049）")
+	# D-050：座舱内视——3D 外部机模与 3D 仪表盘都隐藏：座舱眼位在机身盒
+	# 内部，不隐藏的话机翼横贯全屏（用户实测）；读数由 2D 像素座舱框 +
+	# 仪表簇接管，3D 面板悬在半空只会突兀。
+	_check(craft.is_interior_view(), "③ 座舱内视：3D 外部机模隐藏（D-050）")
+	_check(main_scene._cockpit_panel != null and not main_scene._cockpit_panel.visible,
+		"③ 座舱 3D 仪表盘在座舱视角隐藏（读数交给 2D 仪表簇）")
 	await _frames(60)
 	await _shot("flight_panel_cockpit.png")
 
@@ -104,6 +110,8 @@ func _run() -> void:
 	await _frames(60)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE,
 		"④ 第三人称追尾视角（四角 HUD + 小地图）")
+	_check(not craft.is_interior_view() and main_scene._cockpit_panel.visible,
+		"④ 追尾视角恢复 3D 机体与座舱面板可见（D-050，防幽灵飞机）")
 	await _shot("flight_panel_chase.png")
 
 	# ── ⑤ 详细模式：左侧 12 仪表全清单 ──

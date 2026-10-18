@@ -177,6 +177,10 @@ func _run() -> void:
 	cam.toggle_first_third()   # → 追尾
 	await _hold_and_wait(90, CRUISE_ALT)   # 视角阻尼收敛（同 flight_view_probe）
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE, "C 切到追尾")
+	# D-050：切追尾必须恢复 3D 机体外观——下机同理（set_active(false) 同规则），
+	# 飞机仍停在场上，隐藏着会变「幽灵飞机」。
+	_check(not _craft.is_interior_view(),
+		"C 切追尾恢复 3D 机体外观（D-050，防幽灵飞机）")
 	cam.toggle_first_third()   # → 座舱
 	await _hold_and_wait(90, CRUISE_ALT)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON, "C 切回座舱")
@@ -205,6 +209,25 @@ func _run() -> void:
 	_check(tape_r.position.y >= 0.0 and gauge_r.end.y <= vp.y
 		and spd_r.position.x >= 0.0 and alt_r.end.x <= vp.x,
 		"整簇在屏内（不出画面）")
+
+	# ── D-050 座舱内视回归闸 ──
+	# 根因（用户实测 cockpit_inst_bank.png「为何图中有机翼」）：座舱眼位
+	# COCKPIT_OFFSET 落在机身盒内部，机翼（y 1.335..1.785）正压视平线、
+	# 翼底面正对相机——第一人称看到的先是自己的机翼再是世界。修复：FP 隐藏
+	# 3D 外部机模，座舱内装由 2D 像素座舱框（frame_rects）+ 仪表簇提供。
+	_check(_craft.is_interior_view(),
+		"座舱视角隐藏 3D 外部机模（D-050，不再横贯全屏的机翼）")
+	var frame := CockpitInstruments.frame_rects(vp)
+	var dash_r: Rect2 = frame["dash"]
+	var post_l: Rect2 = frame["post_l"]
+	var post_r: Rect2 = frame["post_r"]
+	var rail: Rect2 = frame["rail"]
+	_check(dash_r.encloses(tape_r) and dash_r.encloses(gauge_r)
+		and dash_r.encloses(alt_r) and dash_r.encloses(spd_r),
+		"dash 底板包住四件仪表（座舱内装分层：先画框、仪表坐上）")
+	_check(not post_l.intersects(tape_r) and not post_r.intersects(tape_r)
+		and not rail.intersects(card),
+		"座舱框不压航向带与顶部卡片")
 
 	# ── ① 转弯带坡度 ──
 	# 比例俯仰保持高度 + 半幅副翼：30 m/s 入场能量下约 2~3 s 建立 22° 坡度。

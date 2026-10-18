@@ -8,7 +8,9 @@ extends Node
 ##   ④ 闪烁：0.35..1.0、600ms 周期（高度计过低警告用）；
 ##   ⑤ 裁剪：线段×矩形（全在外返回空 / 跨边返回 2 点且都在窗内）；
 ##      多边形×半平面保留正确半侧；
-##   ⑥ 控件状态：refresh 后 ALT/SPD 文案与警告灯随 FlightInstruments 变。
+##   ⑥ 控件状态：refresh 后 ALT/SPD 文案与警告灯随 FlightInstruments 变；
+##   ⑦ 座舱像素内装几何（D-050）：框体/dash 不出屏、dash 包住四件（底板
+##      在仪表后）、立柱不侵占航向带、导轨不压顶部卡片。
 ## 运行：Godot_v4.6.3-stable_win64.exe --headless --path . res://tests/cockpit_instruments_probe.tscn
 
 var _failed := 0
@@ -26,6 +28,7 @@ func _run() -> void:
     _check_blink()
     _check_clip()
     _check_widget_state()
+    _check_frame()
     _finish()
 
 
@@ -154,6 +157,69 @@ func _check_widget_state() -> void:
     st = cluster.debug_state()
     _check(st["spd_warn"], "⑥ 超速 → SPD 框警告灯亮")
     cluster.queue_free()
+
+
+## ⑦ 座舱像素内装几何（D-050）：纯函数 frame_rects 的布局不变量。
+func _check_frame() -> void:
+    var vp := Vector2(1280.0, 720.0)
+    var f := CockpitInstruments.frame_rects(vp)
+    var rail: Rect2 = f["rail"]
+    var post_l: Rect2 = f["post_l"]
+    var post_r: Rect2 = f["post_r"]
+    var dash: Rect2 = f["dash"]
+    var lip: Rect2 = f["lip"]
+    _check_rect_in(rail, vp, "顶导轨")
+    _check_rect_in(post_l, vp, "左立柱")
+    _check_rect_in(post_r, vp, "右立柱")
+    _check_rect_in(dash, vp, "dash 底板")
+    _check_rect_in(lip, vp, "dash 顶沿")
+    # 簇四件矩形（与 CockpitInstruments._place 同式，从公开常量派生）。
+    var cx := vp.x * 0.5
+    var h := vp.y
+    var tape := Rect2(cx - CockpitInstruments.TAPE_W * 0.5,
+        h - (CockpitInstruments.MARGIN_B + CockpitInstruments.GAUGE_SZ
+            + 8.0 + CockpitInstruments.TAPE_H),
+        CockpitInstruments.TAPE_W, CockpitInstruments.TAPE_H)
+    var gauge := Rect2(cx - CockpitInstruments.GAUGE_SZ * 0.5,
+        h - (CockpitInstruments.MARGIN_B + CockpitInstruments.GAUGE_SZ),
+        CockpitInstruments.GAUGE_SZ, CockpitInstruments.GAUGE_SZ)
+    var mid := h - (CockpitInstruments.MARGIN_B + CockpitInstruments.GAUGE_SZ * 0.5)
+    var off := CockpitInstruments.GAUGE_SZ * 0.5 + CockpitInstruments.BOX_GAP
+    var alt := Rect2(cx + off, mid - CockpitInstruments.BOX_H * 0.5,
+        CockpitInstruments.BOX_W, CockpitInstruments.BOX_H)
+    var spd := Rect2(cx - off - CockpitInstruments.BOX_W,
+        mid - CockpitInstruments.BOX_H * 0.5,
+        CockpitInstruments.BOX_W, CockpitInstruments.BOX_H)
+    # dash 是四件的底板：每件必须整个落在 dash 内（先画 dash、仪表画其上）。
+    _check(dash.encloses(tape), "⑦ dash 包住航向带")
+    _check(dash.encloses(gauge), "⑦ dash 包住地平仪")
+    _check(dash.encloses(alt), "⑦ dash 包住 ALT 框")
+    _check(dash.encloses(spd), "⑦ dash 包住 SPD 框")
+    # 立柱不侵占航向带（窄屏下带宽是硬约束）。
+    _check(post_l.end.x <= tape.position.x + 1e-6,
+        "⑦ 左立柱不压航向带（%.0f ≤ %.0f）" % [post_l.end.x, tape.position.x])
+    _check(post_r.position.x >= tape.end.x - 1e-6,
+        "⑦ 右立柱不压航向带（%.0f ≥ %.0f）" % [post_r.position.x, tape.end.x])
+    # 导轨不压顶部飞行卡片（卡片 y 16 起）。
+    _check(rail.end.y <= 16.0 + 1e-6,
+        "⑦ 顶导轨不压飞行卡片（导轨底 %.0f ≤ 卡片顶 16）" % rail.end.y)
+    # dash 宽与簇联动（改 TAPE_W 不用手改魔数），且不侵入左右立柱。
+    _check(absf(dash.size.x
+        - (CockpitInstruments.TAPE_W + CockpitInstruments.DASH_PAD * 2.0)) < 1e-6,
+        "⑦ dash 宽 = 航向带 + 2×DASH_PAD（%.0f px）" % dash.size.x)
+    _check(dash.position.x >= post_l.end.x
+        and dash.end.x <= post_r.position.x, "⑦ dash 不侵入左右立柱")
+    # dash 底沿即屏底（座舱地板），lip 贴在 dash 顶沿。
+    _check(absf(dash.end.y - vp.y) < 1e-6, "⑦ dash 底沿 = 屏底（座舱地板）")
+    _check(absf(lip.position.y - dash.position.y) < 1e-6
+        and absf(lip.size.x - dash.size.x) < 1e-6, "⑦ dash 顶沿勾边与 dash 对齐")
+
+
+## 矩形完全落在视口内（容差 1e-6，float32 几何）。
+func _check_rect_in(rr: Rect2, vp: Vector2, tag: String) -> void:
+    _check(rr.position.x >= -1e-6 and rr.position.y >= -1e-6
+        and rr.end.x <= vp.x + 1e-6 and rr.end.y <= vp.y + 1e-6,
+        "⑦ %s不出屏（%s）" % [tag, str(rr)])
 
 
 func _finish() -> void:
