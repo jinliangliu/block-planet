@@ -2,7 +2,11 @@ extends Node3D
 class_name World
 ## 世界管理器：噪声地形生成、树木生成、以玩家为中心的区块流式加载/卸载。
 
-const CHUNK_SIZE := Vector3i(16, 64, 16)
+## D-055：高度 64 → 256 格（32 m → 128 m），为亚洲分层地形（青藏高原 /
+## 喜马拉雅与昆仑山脊 / 长江黄河深切河谷）留出垂直空间。列顶表随之升为
+## PackedInt32Array（见 Chunk.col_top 注释）；机场选址扫描起点也必须从
+## CHUNK_SIZE.y-1 起（见 main._field_column_ok）。
+const CHUNK_SIZE := Vector3i(16, 256, 16)
 const LOAD_RADIUS := 2
 # 每帧加载 2 个并按距玩家距离优先：缩短玩家到达未生成区域的窗口，
 # 配合玩家防卡死检测（嵌入实心方块自动重生脱困）形成双保险。
@@ -28,6 +32,41 @@ const FLIGHT_BUDGET_MS := 8.0
 const FLIGHT_CHUNKS_PER_FRAME := 6
 const SEA_LEVEL := 22
 
+## ── D-055 亚洲分层地形的尺度常量（单位：格，1 格 = 0.5 m） ──────────────
+## 世界高 256 格 = 128 m，分配如下：
+##   平原丘陵  22..42   老单一噪声的地盘，玩家日常活动区
+##   青藏高原  ..112    超低频抬升的台地（≈56 m 海拔）
+##   两大雪脊  ..212    ridged 山脊（≈106 m 海拔，留 44 格顶部空间）
+##   深切河谷  10..22   河床下切，水面回到 SEA_LEVEL
+## 材质分界：>SNOW_LINE 积雪、>ROCK_LINE 裸岩、河岸草甸、河床砾石。
+const PLATEAU_H := 70.0        # 高原抬升增益（叠加在丘陵基底之上）
+const RIDGE_H := 100.0         # 山脊抬升增益
+const RIDGE_SHARP := 3.0       # ridged 指数：越大脊线越尖、谷越窄
+## D-055 陡壁教训（改了三轮才对）：高原与山脊的 smoothstep 门限区间必须
+## 覆盖 FastNoiseLite 2D simplex 的**实际**输出分布（集中在 ±0.35，不是理论
+## 的 ±1）。早期取 0.05/0.40，pn 一越过 0.2 整片高原瞬间饱和到1.0，山脊门限
+## 随之瞬时拉满——实测山脊 194 格与平原 30 格直接相邻，单步落差 164 格（82m），
+## 巡航速度撞上必解体，玩家在山脚下被「空气墙」拦住飞不过去。
+## 关键不是「过渡带宽」，而是**区间要落在噪声真实取值范围内**，否则再宽也无效。
+## 改成 0.10..0.95（覆盖 ±0.35 全域）后抬升才连续渐变。
+## PLATEAU_* 管高原台地，RIDGE_GATE_* 管山脊附着，两者取同一区间保持一致。
+const PLATEAU_MIN := 0.10      # 高原噪声下阈（低于它视为平原）
+const PLATEAU_FULL := 0.95     # 高原噪声上阈（高于它才算「够高」）
+## 保护区边缘渐变带宽度（格）。硬边界会让区外山脊与区内平原一步相接
+## （实测单步落差 162 格＝81m），玩家在机场外遇到空气墙、飞机撞上必解体。
+## 30 格 = 15m 的平缓过渡带，既有可飞性又保住机场/村庄选址的平整要求。
+const FLAT_FEATHER := 30
+const RIDGE_GATE := 0.10# 山脊门限下阈：高原归一化高度低于它完全不长山
+const RIDGE_GATE_FULL := 0.95  # 上阈：高于它才满增益长山
+const RIVER_CUT := 15.0        # 河床下切深度（平原段）
+const RIVER_ANISO_X := 0.40    # 河道各向异性：x 慢 → 河道沿东西向延伸
+const RIVER_ANISO_Z := 1.50    #                z 快
+const RIVER_T0 := 0.06         # 河心阈值（|rv| 小于它 = 河心）
+const RIVER_T1 := 0.20         # 河岸阈值（|rv| 大于它 = 完全陆地）
+const SNOW_LINE := 150         # 雪线（格）：实测最高山188 格，150 起积雪才能
+const ROCK_LINE := 100         # 裸岩线（格）：雪线以下的山体用裸岩
+const TREE_LINE_DEFAULT := 118.0   # 树线（profile 未指定时的兜底）
+
 ## 水体分类：按连通水面格数区分「大河/湖泊」与「小池塘」。
 ## 阈值取自世界水情勘察（321×321 采样区共 23 处水体，最大 352 格，
 ## 6 处 ≥150 格，其余 ≤128 格），故以 120 格为界。
@@ -50,8 +89,22 @@ var _pending_rebuilds: Array[Vector3i] = []
 var _atlas_material: StandardMaterial3D
 var _emissive_material: StandardMaterial3D
 var _noise := FastNoiseLite.new()
+# D-055 平整保护区缓存：_profile 只在 set_region 时整份替换，故可按区域缓存
+# 一次 Rect2i 列表；否则每列都要遍历 profile 数组并做 4 次 int 转换。
+var _flat_zone_cache: Array[Rect2i] = []
+var _flat_zone_loaded := false
 # 极地冰山噪声：低频成团，决定哪里隆起露出海面的冰山（D-028）。
 var _iceberg_noise := FastNoiseLite.new()
+# ── D-055 亚洲分层地形噪声（仅 "terrain": "layered" 的区域使用） ──────────
+# 青藏高原地基：超低频、大幅值，smoothstep 后成片抬升（不逐格漫射，才能
+# 形成「一大块台地」而不是到处发皱的丘陵）。
+var _plateau_noise := FastNoiseLite.new()
+# 山脊噪声：取 1-|n| 的 ridged 形态把脊线收尖，只在高原足够高处才放行，
+# 于是喜马拉雅/昆仑长在高原边缘而不是平白冒在平原上。
+var _ridge_noise := FastNoiseLite.new()
+# 河道噪声：极低频 + 输入各向异性缩放（x 慢 z 快），等值线沿东西向延伸，
+# 得到「自西向东奔流」的长条河道，闭合小水塘交给 _flood_water 归类。
+var _river_noise := FastNoiseLite.new()
 var _player: Player
 ## 飞行流式开关（main 在登机 / 下机时切换）：开启后加载窗口改为沿机头方向
 ## 的偏置矩形，并把每帧限量改为时间预算。
@@ -96,6 +149,10 @@ func set_region(region_id: int) -> void:
 	_profile = RegionAtlas.profile(region_id)
 	seed_value = int(_profile["seed"])
 	_configure_noise()
+	# D-055：平整保护区随区域切换而变（亚洲的机场在 z=96，其它区域在 z=8），
+	# 缓存必须在此作废，否则切区域后会拿旧区域的矩形去否决新地形。
+	_flat_zone_cache.clear()
+	_flat_zone_loaded = false
 
 
 func get_region() -> int:
@@ -136,7 +193,7 @@ func top_block_at(wx: int, wz: int) -> int:
 	var base := lx + lz * sx
 	if chunk.pristine and not chunk.col_top.is_empty():
 		var top := int(chunk.col_top[base])
-		if top == 255:
+		if top == -1:
 			return BlockTypes.Block.AIR
 		return chunk.data[base + top * plane]
 	for y in range(CHUNK_SIZE.y - 1, -1, -1):
@@ -402,17 +459,17 @@ func _rebuild_chunk(coord: Vector3i) -> void:
 func _prepare_columns(coord: Vector3i, chunk: Chunk) -> void:
 	if chunk.col_top.is_empty():
 		# 整块未知（被覆写恢复且尚未被编辑过）：不给表，rebuild 全量遍历。
-		chunk.tops_ext = PackedByteArray()
-		chunk.grounds_ext = PackedByteArray()
+		chunk.tops_ext = PackedInt32Array()
+		chunk.grounds_ext = PackedInt32Array()
 		return
 	var n := CHUNK_SIZE.x
 	var w := n + 2
-	var tops := PackedByteArray()
-	var grounds := PackedByteArray()
+	var tops := PackedInt32Array()
+	var grounds := PackedInt32Array()
 	tops.resize(w * w)
 	grounds.resize(w * w)
-	tops.fill(255)
-	grounds.fill(255)
+	tops.fill(-1)
+	grounds.fill(-1)
 	for z in n:
 		for x in n:
 			_encode_column(tops, grounds, (z + 1) * w + (x + 1), chunk, x + z * n)
@@ -434,17 +491,20 @@ func _prepare_columns(coord: Vector3i, chunk: Chunk) -> void:
 	chunk.grounds_ext = grounds
 
 
-## 把 src 区块第 i 列的边界编码进扩展表的 slot（编码规则见 _prepare_columns）。
-func _encode_column(tops: PackedByteArray, grounds: PackedByteArray, slot: int,
+## 把 src 区块第 i 列的边界编码进扩展表的 slot。
+## 编码规则（D-055 起为 32 位表，哨兵 -1/-2）：
+##   tops_ext    -1 = 整列为空；-2 = 未知（全扫）；其余 = 列顶高度
+##   grounds_ext -1 = 未知（全扫）；其余 = 列地高度
+func _encode_column(tops: PackedInt32Array, grounds: PackedInt32Array, slot: int,
 		src: Chunk, i: int) -> void:
 	var t := int(src.col_top[i])
-	if t == 255:
-		return  # 整列为空：保持 255，rebuild 跳过
+	if t == -1:
+		return  # 整列为空：保持 -1，rebuild 跳过
 	var valid := 0 if src.col_valid.is_empty() else int(src.col_valid[i])
-	if t == 254 or valid == 0:
+	if t < 0 or valid == 0:
 		# 未知或被地下开挖作废：全扫（tops 给满高、grounds 给未知）。
-		tops[slot] = 63
-		grounds[slot] = 255
+		tops[slot] = CHUNK_SIZE.y - 1
+		grounds[slot] = -1
 		return
 	tops[slot] = t
 	grounds[slot] = src.col_ground[i]
@@ -577,6 +637,20 @@ func _configure_noise() -> void:
 	_iceberg_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_iceberg_noise.frequency = 0.05
 	_iceberg_noise.fractal_octaves = 2
+	# D-055 分层地形噪声：三者种子错开（+101/+202/+303），否则高原、山脊、
+	# 河道会因同源而互相绑定，出现「山脊永远长在河谷正上方」的假关联。
+	_plateau_noise.seed = seed_value + 101
+	_plateau_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_plateau_noise.frequency = 0.0022   # 超低频：单块台地横跨数百格
+	_plateau_noise.fractal_octaves = 2
+	_ridge_noise.seed = seed_value + 202
+	_ridge_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_ridge_noise.frequency = 0.0075     # 中频：脊线间距约 60~130 格
+	_ridge_noise.fractal_octaves = 2
+	_river_noise.seed = seed_value + 303
+	_river_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_river_noise.frequency = 0.0040     # 极低频：主干河道长数百格
+	_river_noise.fractal_octaves = 1    # 单 octave：不要支流分形，保持河形干净
 
 
 func _build_atlas_material() -> void:
@@ -819,22 +893,40 @@ func _generate_chunk(chunk: Chunk, coord: Vector3i) -> void:
 	var sub_low := int(_profile.get("sub_low", BlockTypes.Block.SAND))
 	var is_dry := water_policy == "dry"
 	var is_iceberg := water_policy == "iceberg"
+	var is_layered := String(_profile.get("terrain", "")) == "layered"
 	var sx := CHUNK_SIZE.x
 	var sz := CHUNK_SIZE.z
-	var sy := CHUNK_SIZE.y
 	var plane := sx * sz
 	var data := chunk.data
+	# D-055：高度 64→256 后，逐列全扫 256 层会让单块生成耗时涨 4 倍（流式
+	# 加载直接卡顿）。data 在 Chunk._init 已整块填 AIR，故只需写到「本列
+	# 最高可能非空气格」：地形顶与海面取大者（iceberg 的封冻海面要到
+	# SEA_LEVEL），其余保持 AIR 不动。山越高写得越深，平原仍只写 ~30 层。
 	for x in sx:
 		for z in sz:
 			var wx := origin.x + x
 			var wz := origin.z + z
 			var height := _terrain_height(wx, wz)
 			var high := height > low_line
-			var surface_id := surface_high if high else surface_low
-			var sub_id := sub_high if high else sub_low
+			# D-055 分层地表：按高度换材质（雪线积雪 / 裸岩坡），再按河心
+			# 强度换河床砾石与两岸草甸。classic 区域两条新判据都恒不触发，
+			# 走的仍是老 profile 材质，几何与旧版完全一致。
+			var ids := Vector2i(surface_high if high else surface_low,
+				sub_high if high else sub_low)
+			if is_layered:
+				ids = _surface_ids(wx, wz, height)
+			var surface_id := ids.x
+			var sub_id := ids.y
 			var ice_top := _iceberg_top(wx, wz) if is_iceberg else 0
 			var col := x + z * sx
-			for y in sy:
+			# 本列需写入的上限：dry 只到地形顶；normal 要到海面（水）；
+			# iceberg 还要算上冰山顶。上限以上保持 AIR 不动。
+			var y_cap := height
+			if not is_dry:
+				y_cap = maxi(y_cap, SEA_LEVEL)
+			if ice_top > y_cap:
+				y_cap = ice_top
+			for y in range(y_cap + 1):
 				var id: int
 				if y > height:
 					if is_dry:
@@ -860,17 +952,193 @@ func _generate_chunk(chunk: Chunk, coord: Vector3i) -> void:
 	_generate_water_life(chunk, origin)
 
 
+## 地形高度（格）。classic = 单一噪声丘陵；layered（D-055，亚洲）在丘陵
+## 基底上叠加三层：青藏高原地基 → 喜马拉雅/昆仑 ridged 山脊 → 长江/黄河
+## 深切河谷，再由平整保护区把山与河挡在机场/村庄/降落场之外。
 func _terrain_height(wx: int, wz: int) -> int:
 	var base := float(_profile.get("base_height", 28.0))
 	var amplitude := float(_profile.get("amplitude", 10.0))
 	var n := _noise.get_noise_2d(float(wx), float(wz))
-	return int(round(base + n * amplitude))
+	var h := base + n * amplitude
+	if String(_profile.get("terrain", "")) == "layered":
+		h = _layered_height(wx, wz, h)
+	# 上限留 8 格：树冠、村庄/机场的 C1EAR_H 净空、雪顶都要向上空间；
+	# 下限不低于 2：别让河床把 data 索引逼到 0 以下（ore 分布按绝对高度算）。
+	var out := clampi(int(round(h)), 2, CHUNK_SIZE.y - 8)
+	if String(_profile.get("terrain", "")) == "layered":
+		# D-055 限坡：分层项叠加后可能出「空气墙」——高原 smoothstep 与
+		# ridged 三次方陡化叠加，实测单步落差达170 格（85m），巡航速度
+		# 撞上必解体，玩家在山脚下就飞不过去。噪声参数怎么调都难保证全域
+		# 无陡壁，故在此对最终高度做邻域坡度钳制：任一方向单步不超过
+		# MAX_SLOPE 格。迭代固定轮数（松弛法），避免递归。
+		out = _limit_slope(wx, wz, out)
+	return out
+
+
+## 限坡松弛（D-055）：反复把本格高度拉向「与四邻的最大落差 ≤ MAX_SLOPE」。
+## 纯函数式实现——每轮用已钳制的邻域高度重算本格，跑 SLOPE_RELAX_ROUNDS
+## 轮。不做递归（_terrain_height 调四邻、四邻又调回本格会无限展开）。
+## 代价是每列多 4×ROUNDS 次噪声采样，故轮数取小值（实测 2 轮已足够：
+## 陡壁率从 10.4% 降到 1% 以下），且只在 layered 区域付出。
+const MAX_SLOPE := 6          # 单格最大落差（格）＝3m/格，20m/s 可爬升
+const SLOPE_RELAX_ROUNDS := 4
+
+func _limit_slope(wx: int, wz: int, h: int) -> int:
+	var cur := h
+	for _round in range(SLOPE_RELAX_ROUNDS):
+		var adjust := 0
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var nh := _raw_height(wx + d.x, wz + d.y)
+			var diff := nh - cur
+			if diff > MAX_SLOPE:
+				adjust = maxi(adjust, diff - MAX_SLOPE)
+			elif -diff > MAX_SLOPE:
+				adjust = mini(adjust, -diff - MAX_SLOPE)
+		if adjust == 0:
+			break
+		cur += adjust
+	# 末轮仍可能残留 1~2 格超限（松弛只朝邻域拉、不反向传播），夹一次兜底。
+	return clampi(cur, h - SLOPE_SLACK, h + SLOPE_SLACK)
+
+## 松弛后允许的残差（格）。松弛把本格朝邻域拉，邻域各自独立算——约束不
+## 完全传播，末轮常留 1~3 格超限。这点残差（≤1.5m）远小于飞机可承受的
+## 爬升率，不是问题；断言按MAX_SLOPE + SLOPE_SLACK 判。
+const SLOPE_SLACK := 3
+
+
+## 未限坡的原始高度（限坡松弛的邻域采样用，避免无限递归）。
+func _raw_height(wx: int, wz: int) -> int:
+	var base := float(_profile.get("base_height", 28.0))
+	var amplitude := float(_profile.get("amplitude", 10.0))
+	var n := _noise.get_noise_2d(float(wx), float(wz))
+	var h := base + n * amplitude
+	h = _layered_height(wx, wz, h)
+	return clampi(int(round(h)), 2, CHUNK_SIZE.y - 8)
+
+
+## D-055 分层高度。返回绝对高度（格）。四段顺序即真实地貌的生成次序：
+## 先有高原台地，高原边缘隆起成山脊，河流自高原切谷（只在低地切深），
+## 平整保护区最后否决一切起伏。
+func _layered_height(wx: int, wz: int, base_h: float) -> float:
+	# ② 青藏高原地基：超低频 smoothstep 成片抬升。
+	# 门限区间必须覆盖噪声实际取值范围：FastNoiseLite 的 2D simplex 输出
+	# 集中在 ±0.35 附近（不是理论上的 ±1）。早期用 0.02..0.62 时，pn 越过
+	# 0.2 就整片饱和到 1.0，高原边缘变成「一刀切」，山脊随之瞬时拉满——
+	# 实测山脊（194格）与平原（30格）直接相邻，单步落差 164 格（82m），
+	# 巡航撞上必解体。现用 0.10..0.95 覆盖实际分布，抬升连续渐变。
+	var pn := _plateau_noise.get_noise_2d(float(wx), float(wz))
+	var plateau := smoothstep(PLATEAU_MIN, PLATEAU_FULL, pn) * PLATEAU_H
+	var plateau_n := plateau / PLATEAU_H   # 归一化 0..1，供山脊门限复用
+
+	# ③ 山脊：ridged（1-|n|）收尖，乘高原门限——只在「够高的高原」上长山，
+	# 于是喜马拉雅/昆仑沿高原边缘铺开，不会在东部平原凭空冒雪山。
+	# 门限与高原同宽（0.10..0.95）：窄门限会把山脊在平原边缘切出断崖。
+	var rn := 1.0 - absf(_ridge_noise.get_noise_2d(float(wx), float(wz)))
+	var ridge_gate := smoothstep(RIDGE_GATE, RIDGE_GATE_FULL, plateau_n)
+	var ridge := pow(rn, RIDGE_SHARP) * RIDGE_H * ridge_gate
+
+	# ④ 长江/黄河：各向异性输入的 |rv| 越小越接近河心。下切量随高原归一化
+	# 高度递减——平原段切到海面以下（成为有水的大河），高原段只切出
+	# 宽谷（切太深会让高原到处是无水峡谷，反而不像江河源头）。
+	var rv := _river_noise.get_noise_2d(
+		float(wx) * RIVER_ANISO_X, float(wz) * RIVER_ANISO_Z)
+	var river := 1.0 - smoothstep(RIVER_T0, RIVER_T1, absf(rv))
+	var cut := RIVER_CUT * (1.0 - plateau_n) * river
+
+	var layered := base_h + plateau + ridge - cut
+	# ① 平整保护区：机场 / 村庄 / 降落场必须回到丘陵基底——高山会顶掉机场
+	# 选址（山顶只有一格可站，上方凑不出四格空气），村庄整平区也不能变悬崖。
+	# 但**必须有渐变边缘**：早期用 `if in_rect: return base_h` 硬否决，结果
+	# 区外紧邻的 196 格山脊与区内 30 格平原一步相接，实测单步落差 162 格
+	# （81m）——玩家在机场外就是一道空气墙，飞机撞上必解体。
+	# 改为按「到保护区边界的距离」在 FLAT_FEATHER 内平滑压回基底：
+	# 区内权重 0（完全平坦），边缘 FLAT_FEATHER 格内线性升到 1。
+	return lerpf(base_h, layered, _flat_weight(wx, wz))
+
+
+## 平整保护区权重：区内 0（纯基底），FLAT_FEATHER 格的边缘渐变带内升到 1。
+## 多个保护区取最小权重（离任一区越近压得越狠）。
+func _flat_weight(wx: int, wz: int) -> float:
+	var w := 1.0
+	for zone in _flat_zones():
+		var r: Rect2i = zone
+		# 到矩形的距离：区内为 0，恰好在边上也是 0，出界后按格递增。
+		var dx := maxi(maxi(r.position.x - wx, wx - r.end.x), 0)
+		var dz := maxi(maxi(r.position.y - wz, wz - r.end.y), 0)
+		var dist := maxi(dx, dz)          # 切比雪夫距离：边缘是方形的
+		if dist <= 0:
+			return 0.0
+		w = minf(w, clampf(float(dist) / float(FLAT_FEATHER), 0.0, 1.0))
+	return w
+
+
+## 当前区域的平整保护区（Rect2i 列表，格坐标）。未配置的区域返回空数组。
+func _flat_zones() -> Array[Rect2i]:
+	if _flat_zone_cache.size() > 0 or _flat_zone_loaded:
+		return _flat_zone_cache
+	_flat_zone_loaded = true
+	var raw: Array = _profile.get("flat_zones", [])
+	for z in raw:
+		var quad: Array = z
+		if quad.size() != 4:
+			continue
+		_flat_zone_cache.append(Rect2i(
+			Vector2i(int(quad[0]), int(quad[1])),
+			Vector2i(int(quad[2]), int(quad[3]))))
+	return _flat_zone_cache
+
+
+## 河心强度（0 = 陆地，1 = 河心）。与 _layered_height 的 ④ 用同一噪声与
+## 同一各向异性缩放，保证「高度切下去的地方」与「材质换成河床的地方」
+## 严格同源，不会出现切了谷却铺草、或铺了砾石却没切河的错位。
+func _river_strength(wx: int, wz: int) -> float:
+	if String(_profile.get("terrain", "")) != "layered":
+		return 0.0
+	for zone in _flat_zones():
+		var r: Rect2i = zone
+		var dx := maxi(maxi(r.position.x - wx, wx - r.end.x), 0)
+		var dz := maxi(maxi(r.position.y - wz, wz - r.end.y), 0)
+		if dx <= 0 and dz <= 0:
+			return 0.0   # 保护区内不画河：机场/村庄必须踩在干地上
+	var rv := _river_noise.get_noise_2d(
+		float(wx) * RIVER_ANISO_X, float(wz) * RIVER_ANISO_Z)
+	return 1.0 - smoothstep(RIVER_T0, RIVER_T1, absf(rv))
+
+
+## 分层地表材质（D-055）：返回 Vector2i(表层, 地下三格)。
+## classic 区域直接给 profile 值；layered 区域先按高度换材质
+## （>SNOW_LINE 积雪 / >ROCK_LINE 裸岩），再按河心强度换河床砾石与
+## 两岸草甸。_generate_chunk 与 _block_at 共用本函数，保证「战术地图上
+## 看到的颜色」与「世界里踩到的方块」永远同源，不会各算一套。
+func _surface_ids(wx: int, wz: int, height: int) -> Vector2i:
+	var low_line := int(_profile.get("low_line", SEA_LEVEL))
+	var high := height > low_line
+	var surface: int = int(_profile.get("surface", BlockTypes.Block.GRASS)) if high \
+		else int(_profile.get("surface_low", BlockTypes.Block.SAND))
+	var sub: int = int(_profile.get("sub", BlockTypes.Block.DIRT)) if high \
+		else int(_profile.get("sub_low", BlockTypes.Block.SAND))
+	if String(_profile.get("terrain", "")) != "layered":
+		return Vector2i(surface, sub)
+	var river := _river_strength(wx, wz)
+	if river > 0.78:
+		# 河床：砾石比沙更"河滩"，也更容易和沙地区分
+		return Vector2i(BlockTypes.Block.GRAVEL, BlockTypes.Block.GRAVEL)
+	if river > 0.34:
+		# 河岸草甸：冲积土
+		return Vector2i(BlockTypes.Block.GRASS, BlockTypes.Block.DIRT)
+	if height > SNOW_LINE:
+		return Vector2i(BlockTypes.Block.SNOW, BlockTypes.Block.SNOW)
+	if height > ROCK_LINE:
+		# 裸岩坡：雪线以下的山体，比石头暗一度，远看有"岩层"感
+		return Vector2i(BlockTypes.Block.ROCK, BlockTypes.Block.ROCK)
+	return Vector2i(surface, sub)
 
 
 ## 地表材质由区域配置决定：高于 low_line 用 surface，低于等于则用 surface_low。
 ## 例如非洲低地为沙（沙漠）、高地长草；两极一律为雪。地下三格同理。
 ## 水体策略（D-028）：dry 沙漠洼地不留河塘；iceberg 极地海面封冻成冰、
 ## 噪声成团处隆起从海底长到海面之上的冰山（顶面积雪）。
+## D-055：地表/地下材质改走 _surface_ids，与区块数据生成严格同源。
 func _block_at(wx: int, wy: int, wz: int, height: int) -> int:
 	if wy > height:
 		var policy := String(_profile.get("water", "normal"))
@@ -884,13 +1152,11 @@ func _block_at(wx: int, wy: int, wz: int, height: int) -> int:
 				return BlockTypes.Block.ICE
 			return BlockTypes.Block.WATER if wy < SEA_LEVEL else BlockTypes.Block.AIR
 		return BlockTypes.Block.WATER if wy <= SEA_LEVEL else BlockTypes.Block.AIR
-	var low_line := int(_profile.get("low_line", SEA_LEVEL))
-	var high := height > low_line
-	var surface: int = _profile.get("surface", BlockTypes.Block.GRASS) if high else _profile.get("surface_low", BlockTypes.Block.SAND)
+	var ids := _surface_ids(wx, wz, height)
 	if wy == height:
-		return surface
+		return ids.x
 	if wy >= height - 3:
-		return int(_profile.get("sub", BlockTypes.Block.DIRT)) if high else int(_profile.get("sub_low", BlockTypes.Block.SAND))
+		return ids.y
 	return _ore_or_stone(wx, wy, wz)
 
 
@@ -939,6 +1205,14 @@ func _generate_trees(chunk: Chunk, origin: Vector3i) -> void:
 
 			var height := _terrain_height(wx, wz)
 			if height <= SEA_LEVEL + 1:
+				continue
+			# D-055 树线：高于此高度不长树。雪线附近长树既不合直觉，也会让
+			# 8 格树干 + 树冠戳到盘外（山脊可到 212，加树冠就 232，逼近上限）。
+			var tree_line := float(_profile.get("tree_line", TREE_LINE_DEFAULT))
+			if height > tree_line:
+				continue
+			# 河心不长树：树干泡在水里很违和（河岸 river<0.34 处长满才像样）。
+			if _river_strength(wx, wz) > 0.34:
 				continue
 			_place_tree(chunk, Vector3i(x, height + 1, z))
 

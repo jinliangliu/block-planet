@@ -452,6 +452,8 @@ func _top_at(wx: int, wz: int, up: int, down: int) -> Vector2i:
 
 ## 噪声估算地表方块（未加载区块的格子用）：与 World._block_at 同源判据
 ## ——水面列按区域水体策略出水 / 冰，陆地按 low_line 分界取 surface/surface_low。
+## D-055：亚洲分层地形（雪线积雪 / 裸岩坡 / 河床砾石）也必须在这里体现，
+## 否则战术地图会把雪山画成草地，与玩家脚下踩到的方块不一致。
 func _estimate_block(wx: int, wz: int) -> int:
 	var profile := RegionAtlas.profile(_world.get_region())
 	if _world.is_water_column(wx, wz):
@@ -459,9 +461,41 @@ func _estimate_block(wx: int, wz: int) -> int:
 			return BlockTypes.Block.ICE
 		return BlockTypes.Block.WATER
 	var low_line := int(profile.get("low_line", World.SEA_LEVEL))
-	if _world.get_surface_height(wx, wz) > low_line:
+	var height := _world.get_surface_height(wx, wz) - 1
+	if String(profile.get("terrain", "")) == "layered":
+		# 与 World._surface_ids 同一组阈值（该函数不公开，这里复现其判据；
+		# 改阈值必须两处同步，否则地图与世界脱节）。
+		var river := 1.0 - smoothstep(World.RIVER_T0, World.RIVER_T1,
+			absf(world_river_noise(wx, wz)))
+		if river > 0.78:
+			return BlockTypes.Block.GRAVEL
+		if river > 0.34:
+			return BlockTypes.Block.GRASS
+		if height > World.SNOW_LINE:
+			return BlockTypes.Block.SNOW
+		if height > World.ROCK_LINE:
+			return BlockTypes.Block.ROCK
+	if height > low_line:
 		return int(profile.get("surface", BlockTypes.Block.GRASS))
 	return int(profile.get("surface_low", BlockTypes.Block.SAND))
+
+
+## 河道噪声（D-055）：与 World._river_noise 同参数同种子的独立实例。
+## 战术地图要估算未加载区块的地表，不能依赖 World 的实例状态（世界可能
+## 还没 configure 完），故自带一份确定性同源噪声——seed/频率/各向异性
+## 全部对齐 World._configure_noise，保证估算结果与真实区块逐值一致。
+var _river_noise: FastNoiseLite = null
+
+
+func world_river_noise(wx: int, wz: int) -> float:
+	if _river_noise == null:
+		_river_noise = FastNoiseLite.new()
+		_river_noise.seed = int(RegionAtlas.profile(_world.get_region()).get("seed", 12345)) + 303
+		_river_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+		_river_noise.frequency = 0.0040
+		_river_noise.fractal_octaves = 1
+	return _river_noise.get_noise_2d(
+		float(wx) * World.RIVER_ANISO_X, float(wz) * World.RIVER_ANISO_Z)
 
 
 ## 地形配色（儿童友好高对比）：水蓝、沙浅黄、草绿、石灰、雪白、冰浅蓝。
@@ -483,6 +517,11 @@ func _block_color(id: int) -> Color:
 			return Color(0.56, 0.58, 0.62)
 		BlockTypes.Block.COBBLESTONE:
 			return Color(0.40, 0.42, 0.46)
+		# D-055 裸岩/砾石：比石灰一档（裸岩是风化的深岩，砾石是冲积暖灰）。
+		BlockTypes.Block.ROCK:
+			return Color(0.34, 0.35, 0.39)
+		BlockTypes.Block.GRAVEL:
+			return Color(0.68, 0.64, 0.57)
 		BlockTypes.Block.DIRT:
 			return Color(0.56, 0.41, 0.27)
 		BlockTypes.Block.WOOD:

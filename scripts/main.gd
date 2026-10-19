@@ -473,11 +473,15 @@ func _find_field_site() -> Vector3i:
 	return Vector3i(8, 0, 8)
 
 
-## 场址列判定：自 SEA_LEVEL+8 向下找首个非空气块，须为可站实体（非水），
-## 其上四格空气（避开树冠与冰山侧壁）。
+## 场址列判定：自世界顶向下找首个非空气块，须为可站实体（非水），
+## 其上四格空气（避开树冠与山脊积雪）。
+## D-055：扫描起点原为 SEA_LEVEL+8——世界高 64 格时地形永不可能高过它。
+## 高度升到 256 格后雪山可达 200+，仍从 SEA_LEVEL+8 起扫会整列扫空、
+## 判定失败，导致大洋/极地区域的降落场选址永远找不到场址。改从
+## CHUNK_SIZE.y-1（世界顶）起扫，与高度解耦。
 func _field_column_ok(x: int, z: int) -> bool:
 	var top := -1
-	for y in range(World.SEA_LEVEL + 8, 0, -1):
+	for y in range(World.CHUNK_SIZE.y - 1, 0, -1):
 		if _world.get_block(Vector3i(x, y, z)) != BlockTypes.Block.AIR:
 			top = y
 			break

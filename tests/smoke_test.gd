@@ -2,6 +2,11 @@ extends Node
 ## 无头集成冒烟测试。
 ## 运行：Godot_console.exe --headless --path . res://tests/smoke_test.tscn
 ## 覆盖：世界生成、方块修改跨区块卸载留存（F-02）、模式切换与飞行信号接线、合成预检。
+##
+## D-010：本探针会实例化真实 main.tscn（ProgressManager autoload 随之启动），
+## 且F-02 往返会传送玩家。此前既无 SaveGuard 又写死传送高度 y=40——地形一改
+## 玩家就从高处坠落摔死，`died` 计数被写进真实存档（实测 1896→1897），
+## 断言全过却违反「探针不污染真实存档」。现已加 SaveGuard + 传送贴实际地表。
 
 const TELEPORT_FRAMES := 150
 const WAIT_FRAMES_INIT := 40
@@ -11,6 +16,7 @@ var _flying_signal_seen := false
 
 
 func _ready() -> void:
+	SaveGuard.snapshot()   # 必须在实例化 main.tscn 之前（暖机帧也可能触发 Events）
 	await _run()
 
 
@@ -46,9 +52,20 @@ func _run() -> void:
 
 	# 3) 传送远离触发卸载，再返回验证修改留存（F-02 往返）。返回点对齐目标列，
 	#    保证该区块在玩家回到出生区域时被重新加载、且修改仍在。
-	player.global_position = Vector3(200.5, 40.0, 200.5)
+	# D-055：两处传送的 y 必须贴**该列实际地表**，不能写死 40。世界高度
+	# 64→256 且分层地形起伏后，写死的 40 会让玩家悬空或埋土——从高处坠落
+	# 会摔死（Player.died → ProgressManager.notify("died")），探针断言全过
+	# 却污染真实存档（D-010：user:// 的 died 1896→1897）。用「地表 +2 格」
+	# 的安全传送高度，两处都不触发坠落伤害。
+	var far_x := 200
+	var far_z := 200
+	world.ensure_chunks_in_region(
+		Vector3i(far_x - 8, 0, far_z - 8), Vector3i(far_x + 8, World.CHUNK_SIZE.y - 1, far_z + 8))
+	var far_y := world.get_surface_height(far_x, far_z) + 2
+	player.global_position = Vector3(float(far_x) + 0.5, float(far_y), float(far_z) + 0.5)
 	await _wait_frames(TELEPORT_FRAMES)
-	player.global_position = Vector3(target.x + 0.5, 40.0, target.z + 0.5)
+	var back_y := world.get_surface_height(target.x, target.z) + 2
+	player.global_position = Vector3(float(target.x) + 0.5, float(back_y), float(target.z) + 0.5)
 	await _wait_frames(TELEPORT_FRAMES)
 	_check(world.get_block(target) == BlockTypes.Block.STONE, "区块卸载重载后修改仍在")
 
@@ -73,6 +90,9 @@ func _run() -> void:
 		inv.slots[i]["count"] = BlockTypes.STACK_SIZE
 	_check(not inv.can_craft(recipe), "背包已满时合成被空位预检拦截")
 
+	# D-010：两条退出路径都要还原，且必须在 quit 之前——否则 ProgressManager
+	# 的 _exit_tree 会 _save() 把内存态写盘，覆盖还原（flight_probe 实测教训）。
+	SaveGuard.restore()
 	if _failed == 0:
 		print("SMOKE_TEST_OK")
 		get_tree().quit(0)

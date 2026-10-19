@@ -2,7 +2,10 @@ extends Node3D
 class_name Chunk
 ## 单个竖直区块：存储方块数据，并动态构建渲染网格与碰撞体。
 
-const SIZE := Vector3i(16, 64, 16)
+## D-055：高度 64 → 256 格（32 m → 128 m）。为喜马拉雅式雪山、深切河谷与
+## 青藏高平台地留出垂直空间。列顶表已同步升为 32 位（见 col_top 注释），
+## 否则列顶 255 会撞上旧编码的空列哨兵。
+const SIZE := Vector3i(16, 256, 16)
 
 const FACE_DIRS := [
 	Vector3i(1, 0, 0),
@@ -14,15 +17,18 @@ const FACE_DIRS := [
 ]
 
 var data := PackedByteArray()
-## 每列最高非空气格（0..63；整列为空记 255）。pristine 区块据此把面遍历的
+## 每列最高非空气格（0..SIZE.y-1；整列为空记 -1）。pristine 区块据此把面遍历的
 ## y 范围收窄到「地表 + 树冠 + 水面」这一薄层：地形是无洞穴的高度图，
 ## 地表以下的格子六面皆实心不透明，既不产生渲染面也不产生碰撞面——平坦
-## 地形下每列只需扫 2 层而不是 64 层。
-var col_top := PackedByteArray()
-## 每列最高的「不透明实心格」（水/冰等透明块不计，空列记 255）。列扫描的
+## 地形下每列只需扫 2 层而不是 SIZE.y 层。
+## D-055：表从 PackedByteArray 升为 PackedInt32Array——世界高度 64→256 后，
+## 合法列顶可达 255，与旧编码「255 = 空列 / 254 = 未知」的哨兵值冲突。
+## 新哨兵：-1 = 整列为空，-2 = 未知（须全扫）。
+var col_top: PackedInt32Array = PackedInt32Array()
+## 每列最高的「不透明实心格」（水/冰等透明块不计，空列记 -1）。列扫描的
 ## 下界由它决定：只有相邻列在该高度以上才有可能是空气或透明块、让本列侧向
 ## 暴露；再往下本格与四邻皆不透明实心，六面皆被遮住。
-var col_ground := PackedByteArray()
+var col_ground: PackedInt32Array = PackedInt32Array()
 ## 每列「自底向上连续实心」的已验证高度（-1 = 未验证）。快路径的正确性
 ## 前提是 [0, col_ground] 全为不透明实心——生成时高度图地形满足（记
 ## verified = col_ground）；编辑后只有「在已验证段顶上逐块堆」或「在段内
@@ -33,7 +39,7 @@ var col_ground := PackedByteArray()
 var col_verified: PackedInt32Array = PackedInt32Array()
 ## 每列边界是否可信（1 = 可用 [lo, hi] 收窄扫描，0 = 该列必须全扫）。
 ## 空数组 = 尚未计算（被覆写恢复的区块），等价全部为 0。
-var col_valid := PackedByteArray()
+var col_valid := PackedInt32Array()
 ## 未被玩家或结构改动过。一旦 set_block_local 写入（挖掘、建筑、村庄/机场
 ## 铺设），列结构不再整体由高度图决定——但失效按列记录（col_valid），
 ## 只有被地下开挖的列及其四邻列退回全量遍历，其余列边界依然可信。
@@ -44,11 +50,14 @@ var pristine := true
 ## （内部统一重算），此前 col_top/col_valid 是陈旧的，绝不能 rebuild。
 var _bulk := false
 var _bulk_dirty := false
-## 重建用的列顶扩展表（含四邻贴边那一列，255 = 未知）。由 World 在每次
+## 重建用的列顶扩展表（含四邻贴边那一列，-1 = 未知）。由 World 在每次
 ## rebuild 前刷新；为空即走全量遍历。挂在区块上而非走参数，是为了让
 ## 「取表 + 重建」成为一个整体，调用方不必关心。
-var tops_ext := PackedByteArray()
-var grounds_ext := PackedByteArray()
+## D-055：同 col_top，升为 PackedInt32Array 以容纳 256 格世界的列顶值。
+## 编码：tops_ext -1 = 整列为空（跳过）；grounds_ext -1 = 该列或邻列未知
+## （全扫）；其余为真实边界值。
+var tops_ext := PackedInt32Array()
+var grounds_ext := PackedInt32Array()
 
 var _mesh_instance: MeshInstance3D
 var _emissive_mesh_instance: MeshInstance3D
@@ -184,14 +193,14 @@ func rebuild(
 			var hi := sy - 1
 			if fast:
 				var t := int(tops_ext[(z + 1) * ext_w + (x + 1)])
-				if t == 255:
+				if t == -1:
 					continue  # 整列为空：既无渲染面也无碰撞面
 				var g := int(grounds_ext[(z + 1) * ext_w + (x + 1)])
 				var g1 := int(grounds_ext[(z + 1) * ext_w + x])
 				var g2 := int(grounds_ext[(z + 1) * ext_w + (x + 2)])
 				var g3 := int(grounds_ext[z * ext_w + (x + 1)])
 				var g4 := int(grounds_ext[(z + 2) * ext_w + (x + 1)])
-				if g == 255 or g1 == 255 or g2 == 255 or g3 == 255 or g4 == 255:
+				if g == -1 or g1 == -1 or g2 == -1 or g3 == -1 or g4 == -1:
 					lo = 0  # 邻列未知（邻块未加载或被改动）：保守全扫该列
 				else:
 					# 下界：本列与四邻列的最高不透明格。该高度以下，本格与四
@@ -305,13 +314,13 @@ func end_bulk() -> void:
 
 
 ## 重算单列的 col_top / col_ground 并判定边界可信度。列内自上而下扫一遍
-## （≤64 次读，约 10 μs）：首个非空气格为列顶，首个不透明实心格为列地。
+## （≤SIZE.y 次读）：首个非空气格为列顶，首个不透明实心格为列地。
 ## 可信度由 col_verified（自底向上连续实心段高度）推理，不直接比较编辑点：
 ## 放置不透明块只有落在 verified+1 才把实心段接长（悬浮放置落榜）；破坏若
 ## 落在 verified 及以下，段被截断到 edited_y-1（替换为非透明同理）；其余
-## 情况段不变。结论 valid = (top == 255 或 ground <= verified + 1)——村庄
+## 情况段不变。结论 valid = (top < 0 或 ground <= verified + 1)——村庄
 ## 整平的悬浮层（列地很高但下方是空气）在 compute_col_top 就已落榜。
-## col_top 数组尚不存在时（被覆写恢复的区块首次被改）先建表填 254（未知），
+## col_top 数组尚不存在时（被覆写恢复的区块首次被改）先建表填 -2（未知），
 ## 只填这一列的真实值，其余列保持未知 → _prepare_columns 会对它们全扫。
 func _refresh_column(lx: int, lz: int, edited_y: int, edited_id: int) -> void:
 	_ensure_tables()
@@ -320,9 +329,9 @@ func _refresh_column(lx: int, lz: int, edited_y: int, edited_id: int) -> void:
 	var plane := sx * sz
 	if col_top.is_empty():
 		col_top.resize(sx * sz)
-		col_top.fill(254)  # 未知（区别于 255 = 整列为空）
+		col_top.fill(-2)  # 未知（区别于 -1 = 整列为空）
 		col_ground.resize(sx * sz)
-		col_ground.fill(254)
+		col_ground.fill(-2)
 		col_verified.resize(sx * sz)
 		col_verified.fill(-1)
 		col_valid.resize(sx * sz)
@@ -335,13 +344,13 @@ func _refresh_column(lx: int, lz: int, edited_y: int, edited_id: int) -> void:
 			verified = edited_y
 	elif edited_y <= verified:
 		verified = edited_y - 1
-	var top := 255
-	var ground := 255
+	var top := -1
+	var ground := -1
 	for y in range(SIZE.y - 1, -1, -1):
 		var id := data[base + y * plane]
 		if id == BlockTypes.Block.AIR:
 			continue
-		if top == 255:
+		if top == -1:
 			top = y
 		if _solid_tab[id] == 1 and _transp_tab[id] == 0:
 			ground = y
@@ -350,7 +359,7 @@ func _refresh_column(lx: int, lz: int, edited_y: int, edited_id: int) -> void:
 	col_ground[col] = ground
 	col_verified[col] = verified
 	# 整列为空没有可扫内容；否则要求列地落在已验证实心段内或紧贴其上一格。
-	col_valid[col] = 1 if (top == 255 or ground <= verified + 1) else 0
+	col_valid[col] = 1 if (top == -1 or ground <= verified + 1) else 0
 
 
 ## 重算每列的 col_top / col_ground（数据整块生成或覆写后调用）。自上而下扫描：
@@ -371,13 +380,13 @@ func compute_col_top() -> void:
 	for z in sz:
 		for x in sx:
 			var idx := x + z * sx
-			var top := 255
-			var ground := 255
+			var top := -1
+			var ground := -1
 			for y in range(SIZE.y - 1, -1, -1):
 				var id := data[idx + y * plane]
 				if id == BlockTypes.Block.AIR:
 					continue
-				if top == 255:
+				if top == -1:
 					top = y
 				if _solid_tab[id] == 1 and _transp_tab[id] == 0:
 					ground = y
@@ -385,7 +394,7 @@ func compute_col_top() -> void:
 			# 段内不可能有高于列地的不透明格（列地就是最高的不透明格），
 			# 故自底向上最多扫到列地即可；遇第一个非不透明实心即停。
 			var verified := -1
-			if ground != 255:
+			if ground >= 0:
 				for y in range(ground + 1):
 					var id := data[idx + y * plane]
 					if _solid_tab[id] == 1 and _transp_tab[id] == 0:
@@ -395,7 +404,7 @@ func compute_col_top() -> void:
 			col_top[idx] = top
 			col_ground[idx] = ground
 			col_verified[idx] = verified
-			if top != 255 and ground > verified + 1:
+			if top >= 0 and ground > verified + 1:
 				col_valid[idx] = 0
 
 

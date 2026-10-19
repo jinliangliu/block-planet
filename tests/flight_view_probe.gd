@@ -61,9 +61,16 @@ func _run() -> void:
 		hud.close_map_selector()
 
 	var craft: Aircraft = null
-	for n in get_tree().get_nodes_in_group("aircraft"):
-		craft = n as Aircraft
-		break
+	# 轮询等待而非死等固定帧数：本探针是**窗口探针**（飞机由 main.gd:126的
+	# `DisplayServer.get_name() != "headless"` 守卫才摆上跑道，无头下永远等不到）。
+	# 轮询对帧率/负载波动更稳，也避免误判成「飞机没生成」。
+	for i in range(240):
+		for n in get_tree().get_nodes_in_group("aircraft"):
+			craft = n as Aircraft
+			break
+		if craft != null:
+			break
+		await get_tree().process_frame
 	_check(craft != null, "① 跑道上已自动生成可见飞机")
 	if craft == null:
 		_finish()
@@ -121,18 +128,24 @@ func _run() -> void:
 	_check(not craft.engine_running, "③ 再按 F 发动机熄火")
 	_check(craft.controls.throttle <= 0.0001, "③ 熄火后油门锁 0（当前 %.3f）" % craft.controls.throttle)
 
-	# ── ④ C 视角切换：平滑过渡 + 落位正确 ──
+	# ── ④ C视角切换：平滑过渡 + 落位正确 ──
+	# 「不瞬移」真正要防的是切换那一帧的硬切：AircraftCamera.set_active 在激活
+	# 时会直接吸附到目标位姿（global_transform = _target_transform），若这条
+	# 路径被绕过，第一帧就会跨完整程。故必须量「切换后第一帧」的位移。
+	# 阈值按**全程比例**给而非固定米数——固定米数会被任何参数改动打穿
+	# （历史：9m 追尾距标定的 3.0m 被 D-035 的 13m 击穿；D-055 世界抬高 4 倍
+	# 后全程变大，固定 5m 又被 6.51m 击穿）。比例判据与相机/地形参数无关。
+	var pre_toggle := cam.global_position
 	cam.toggle_first_third()   # → 座舱
-	await _frames(2)
-	var cam_pos_a: Vector3 = cam.global_position
 	await _frames(1)
-	var cam_pos_b: Vector3 = cam.global_position
-	var step := cam_pos_a.distance_to(cam_pos_b)
-	# 阈值取「跳变全程」（追尾 13 m → 座舱 ≈16.7 m）的 1/3：本机实测 3.04 m
-	# （渲染 ~20 fps 时步长最大；步长 = 全程 × (1−e^(−RATE_FAR·delta))，随渲染
-	# 帧率浮动）。历史上按 9 m 追尾距标定的 3.0 m，在 D-035 把追尾距加宽到
-	# 13 m 后必然击穿——「不瞬移」判的是数量级（17 m 级硬切才算瞬移）。
-	_check(step < 5.0, "④ 视角切换平滑不瞬移（首帧位移 %.2f m < 5 m）" % step)
+	var first_frame := cam.global_position.distance_to(pre_toggle)
+	await _frames(120)
+	var span := pre_toggle.distance_to(cam.global_position)
+	# 首帧位移必须远小于全程（<40%），否则就是硬切。实测全程 ~16.9 m、
+	# 首帧数米（~20%）；真硬切会是 100%。
+	_check(span > 0.5 and first_frame < span * 0.4,
+		"④ 视角切换平滑不瞬移（首帧位移 %.2f m，全程 %.2f m，%.0f%% < 40%%）"
+			% [first_frame, span, 100.0 * first_frame / maxf(span, 0.001)])
 	await _frames(90)   # 阻尼收敛（RATE_FAR=4：90 帧 ≈ 1.5 s，残余 < 0.1 m）
 	var cockpit_expect: Vector3 = craft.global_transform * Vector3(0.0, 1.15, -3.4)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON, "④ C 切到第一人称座舱")

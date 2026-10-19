@@ -38,6 +38,10 @@ enum Block {
 	NAV_RED = 32,
 	NAV_YELLOW = 33,
 	NAV_WHITE = 34,
+	# D-055 亚洲分层地形专用：裸岩（山脊雪线以下的基岩坡）与砾石
+	# （河床与山麓冲积滩）。放在导航灯之后，瓦片 35/36（图集 8×8 空位）。
+	ROCK = 35,
+	GRAVEL = 36,
 }
 
 const NAMES := {
@@ -76,6 +80,8 @@ const NAMES := {
 	Block.NAV_RED: "红色导航灯",
 	Block.NAV_YELLOW: "黄色导航灯",
 	Block.NAV_WHITE: "白色导航灯",
+	Block.ROCK: "裸岩",
+	Block.GRAVEL: "砾石",
 }
 
 const SOLID := {
@@ -114,6 +120,8 @@ const SOLID := {
 	Block.NAV_RED: true,
 	Block.NAV_YELLOW: true,
 	Block.NAV_WHITE: true,
+	Block.ROCK: true,
+	Block.GRAVEL: true,
 }
 
 const TRANSPARENT := {
@@ -152,6 +160,8 @@ const TRANSPARENT := {
 	Block.NAV_RED: false,
 	Block.NAV_YELLOW: false,
 	Block.NAV_WHITE: false,
+	Block.ROCK: false,
+	Block.GRAVEL: false,
 }
 
 # 每个方块的纹理瓦片：[顶面, 底面, 侧面]
@@ -192,6 +202,9 @@ const TILES := {
 	Block.NAV_RED: Vector3i(0, 0, 0),
 	Block.NAV_YELLOW: Vector3i(0, 0, 0),
 	Block.NAV_WHITE: Vector3i(0, 0, 0),
+	# D-055：瓦片 35/36（图集 8×8 的空位，见 TextureAtlas._tile_color）。
+	Block.ROCK: Vector3i(35, 35, 35),
+	Block.GRAVEL: Vector3i(36, 36, 36),
 }
 
 # 水生植物：生长在水中/水面的非固体装饰方块，徒手可采，可再放置。
@@ -266,6 +279,8 @@ const SHORT_NAMES := {
 	Block.NAV_RED: "红灯",
 	Block.NAV_YELLOW: "黄灯",
 	Block.NAV_WHITE: "白灯",
+	Block.ROCK: "岩",
+	Block.GRAVEL: "砾",
 }
 
 # 可堆叠物品（方块/材料/食物）的每格上限。
@@ -306,6 +321,11 @@ const HARDNESS := {
 	Block.NAV_RED: 0.5,
 	Block.NAV_YELLOW: 0.5,
 	Block.NAV_WHITE: 0.5,
+	# D-055 裸岩/砾石：比同级的石头软一点（儿童向，别让山挖得让人绝望），
+	# 但比石头硬会逼出「用镐」的正反馈。未进 HARDNESS 表的方块玩家挖不动
+	# （player.gd:1063 的 has 判定），所以这里必须显式配齐。
+	Block.ROCK: 3.5,
+	Block.GRAVEL: 0.6,
 }
 
 # 有效工具类型；空字符串表示徒手/任意工具即可。
@@ -344,6 +364,9 @@ const EFFECTIVE_TOOL := {
 	Block.NAV_RED: "",
 	Block.NAV_YELLOW: "",
 	Block.NAV_WHITE: "",
+	# D-055：裸岩要镐、砾石要铲（与石头/沙同工具，儿童向零学习成本）。
+	Block.ROCK: "pickaxe",
+	Block.GRAVEL: "shovel",
 }
 
 # 采集该方块所需的最低工具等级（1 木 / 2 石 / 3 青铜 / 4 铁）。
@@ -407,6 +430,13 @@ static func drop_for(id: int, tool_type: String) -> int:
 		# 小麦作物收获物品小麦（可合成面包）。
 		Block.WHEAT_CROP:
 			return ItemTypes.WHEAT
+		# D-055 地形专用方块：不把自身当物品掉落，而是映射到已有材料——
+		# ROCK/GRAVEL 不进 HOTBAR_BLOCKS，若掉自身会得到放不回快捷栏的鬼物品。
+		# 裸岩→圆石（要镐，与石头同）、砾石→沙（要铲）。
+		Block.ROCK:
+			return Block.COBBLESTONE if tool_type == "pickaxe" else Block.AIR
+		Block.GRAVEL:
+			return Block.SAND if tool_type == "shovel" else Block.AIR
 		_:
 			return id
 

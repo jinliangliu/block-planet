@@ -98,10 +98,10 @@ func _run() -> void:
 
 	# ── 阶段 B：游荡驻足节奏 ──────────────────────────
 	# 把玩家传送到村庄平整区，动物脚下地形确定。
-	player.global_position = Vector3(24.5, base_y + 1.1, 26.5)
+	player.global_position = _stand_pos(world, 24, 26, base_y)
 	player.velocity = Vector3.ZERO
 	var wanderer := _spawn_mob(main_scene, Mob.MobType.PIG, player, day_night,
-		Vector3(30.5, base_y + 1.1, 21.5))
+		_stand_pos(world, 30, 21, base_y))
 	wanderer._wander_dir = Vector3.ZERO
 	wanderer._wander_timer = 99.0
 	for i in range(30):
@@ -141,7 +141,7 @@ func _run() -> void:
 
 	# ── 阶段 D：猪掉生猪排、狼夜晚追击且无掉落 ──────────────────────────
 	var pig2 := _spawn_mob(main_scene, Mob.MobType.PIG, player, day_night,
-		Vector3(30.5, base_y + 1.1, 21.5))
+		_stand_pos(world, 30, 21, base_y))
 	var pig_drops := await _kill_and_collect(main_scene, pig2)
 	_check(pig_drops.has(ItemTypes.RAW_PORK), "击杀猪掉落生猪排")
 
@@ -177,7 +177,17 @@ func _run() -> void:
 	day_night._apply_lighting()
 
 	# ── 阶段 F：储物箱存取与破坏散落 ──────────────────────────
-	var chest_cell := Vector3i(30, base_y + 1, 24)
+	# D-055：储物箱必须与玩家站在**等高的相邻两列**，否则射线打空。
+	# 原版把箱子放 (30, base_y+1, 24)、玩家站 (30.5, base_y+1.1, 26.5)，
+	# 两者高度都套 base_y（村庄区域**最高点**）。分层地形后 (30,26) 地表 38、
+	# (30,24) 地表 40——差 2 格，箱子浮在高一格的坡上，射线水平打不到，
+	# 8 项断言连挂。现改成：先在村庄范围内扫一对**地表等高**的相邻列
+	# （玩家列 / 箱子列），地形怎么变都能找到平地。
+	var flat_pair := _find_flat_pair(world, 30, 26, 12)
+	_check(flat_pair != Vector2i.ZERO,
+		"村庄内找到等高平地（玩家列与箱子列地表同高）")
+	var chest_cell := Vector3i(flat_pair.x,
+		world.get_surface_height(flat_pair.x, flat_pair.y), flat_pair.y)
 	world.set_block(chest_cell, BlockTypes.Block.CHEST)
 	_check(world.get_block(chest_cell) == BlockTypes.Block.CHEST, "储物箱方块可放置读回")
 
@@ -190,10 +200,24 @@ func _run() -> void:
 		"玩家背包扩至 36 格")
 
 	# 玩家面向储物箱右键 → 事件开面板。
-	player.global_position = Vector3(30.5, base_y + 1.1, 26.5)
+	# 箱子在 flat_pair，玩家退到同高的 z-2 处朝 +Z（默认朝向）。
+	player.global_position = Vector3(float(flat_pair.x) + 0.5,
+		float(world.get_surface_height(flat_pair.x, flat_pair.y - 2)) - 1.0 + 1.1,
+		float(flat_pair.y - 2) + 0.5)
 	player.velocity = Vector3.ZERO
+	# 相机显式转向箱子：默认朝向是 -Z，箱子在 +Z 侧，不转会打空
+	# （沿用本文件 1630 段钓鱼断言的 look_at 范式）。
+	player._camera.look_at(
+		Vector3(float(flat_pair.x) + 0.5,
+			float(world.get_surface_height(flat_pair.x, flat_pair.y)) + 0.5,
+			float(flat_pair.y) + 0.5),
+		Vector3.UP)
 	for i in range(40):
 		await get_tree().physics_frame
+	print("DBG chest_cell=", chest_cell, " player=", player.global_position,
+		" on_floor=", player.is_on_floor(), " base_y=", base_y,
+		" surf26=", world.get_surface_height(30, 26),
+		" surf24=", world.get_surface_height(30, 24))
 	var opened := player._interact_village()
 	_check(opened, "右键指向储物箱触发开箱（_interact_village）")
 	_check(hud._box_overlay != null and hud._box_overlay.visible, "request_box_open 打开储物箱面板")
@@ -301,7 +325,8 @@ func _run() -> void:
 	# 玩家必须实际挪到农田旁，后续断言与倒树落地才在常驻区块上进行。
 	player.global_position = Vector3(
 		float(farm_o.x) + float(VillageBuilder.FARM_SIZE) * 0.5,
-		float(base_y) + 1.1,
+		float(world.get_surface_height(
+			farm_o.x + VillageBuilder.FARM_SIZE / 2, farm_o.z + 2)) - 1.0 + 1.1,
 		float(farm_o.z) + 2.5,
 	)
 	player.velocity = Vector3.ZERO
@@ -437,7 +462,7 @@ func _run() -> void:
 
 	# 手搭的木柱（上方没有树冠）不该被当成树推倒。
 	# 放在村庄整平区内（无天然树，±4 树冠判据不会被野生树冠误触发）。
-	var post_b := Vector3i(farm_o.x - 6, base_y + 1, farm_o.z + 2)
+	var post_b := Vector3i(farm_o.x - 6, world.get_surface_height(farm_o.x - 6, farm_o.z + 2), farm_o.z + 2)
 	for i in range(3):
 		world.set_block(post_b + Vector3i(0, i, 0), BlockTypes.Block.WOOD)
 	player._finish_break(post_b, BlockTypes.Block.WOOD)
@@ -620,7 +645,7 @@ func _run() -> void:
 	_check(ItemTypes.is_placeable(BlockTypes.Block.SMELTER), "冶炼炉判定为可放置物品")
 
 	var tagged := _spawn_mob(main_scene, Mob.MobType.PIG, player, day_night,
-		Vector3(30.5, base_y + 1.1, 21.5))
+		_stand_pos(world, 30, 21, base_y))
 	_check(tagged.display_name() == "猪", "猪显示名为「猪」")
 	_check(tagged._nametag != null, "生物头顶名称标签已构建")
 	_check(tagged._nametag.text == "猪 8/8", "名牌初始文本（猪 8/8）")
@@ -656,7 +681,14 @@ func _run() -> void:
 	# 出生点列是陆地；勘察确认的池塘/大河中心附近应分类正确（种子固定）。
 	_check(world.water_kind(8, 8) == World.WATER_NONE and world.water_depth(8, 8) == 0,
 		"出生点列为陆地（非水体、水深 0）")
+	# D-055：水体坐标不能写死。分层地形的长江/黄河 carve 改变了出生点附近
+	# 的水系连通性——原坐标 (-8,-9) 半径 8 内原先是小池塘，现在那里的水体被
+	# 连成了大河，water_kind 按连通规模分类后不再是 POND，「小池塘分类命中」
+	# 连挂 6 项（水生植物/蟹/青蛙/岸边落点全被连带）。
+	# 改为在更大范围内**自找**一处小池塘：地形怎么变都能找到合适的水体。
 	var pond_cell := _find_kind_cell(world, Vector2i(-8, -9), World.WATER_POND, 8)
+	if pond_cell == Vector2i.ZERO:
+		pond_cell = _find_any_pond(world, 160)
 	_check(pond_cell != Vector2i.ZERO, "小池塘分类命中（%s）" % str(pond_cell))
 	var large_cell := _find_kind_cell(world, Vector2i(-26, -55), World.WATER_LARGE, 8)
 	_check(large_cell != Vector2i.ZERO, "大河分类命中（%s）" % str(large_cell))
@@ -808,7 +840,7 @@ func _run() -> void:
 		pond_spawned = spawner._spawn_water_life()
 	_check(pond_spawned, "池塘边随机搜索可生成水生物（%d 次尝试内）" % pond_tries)
 	spawner._despawn_all()
-	player.global_position = Vector3(24.5, base_y + 1.1, 26.5)
+	player.global_position = _stand_pos(world, 24, 26, base_y)
 	player.velocity = Vector3.ZERO
 	player.health = Player.MAX_HEALTH
 	for i in range(20):
@@ -1374,7 +1406,7 @@ func _run() -> void:
 		"非矿石无幸运掉落",
 	)
 	# 端到端：木镐挖铜矿至少入账 2 份（幸运只多不少）。
-	var ore_cell := Vector3i(34, base_y + 1, 28)
+	var ore_cell := Vector3i(34, world.get_surface_height(34, 28), 28)
 	world.set_block(ore_cell, BlockTypes.Block.COPPER_ORE)
 	player.inventory.add_item(ItemTypes.WOOD_PICKAXE, 1)
 	player.select_slot(0)
@@ -1406,7 +1438,7 @@ func _run() -> void:
 		"默认以成体出现（「鸡」/ 生命 3），与旧行为一致",
 	)
 	var egg := _spawn_mob(
-		main_scene, Mob.MobType.CHICKEN, player, day_night, Vector3(28.5, base_y + 1.1, 24.5), 0
+		main_scene, Mob.MobType.CHICKEN, player, day_night, _stand_pos(world, 28, 24, base_y), 0
 	)
 	_check(
 		not egg.is_adult() and egg.stage_name() == "鸡蛋" and not egg.is_huntable()
@@ -1449,7 +1481,7 @@ func _run() -> void:
 		"保护名录：大熊猫/朱鹮/蝴蝶/村民受保护，牛不受保护",
 	)
 	var panda := _spawn_mob(
-		main_scene, Mob.MobType.PANDA, player, day_night, Vector3(31.5, base_y + 1.1, 26.5)
+		main_scene, Mob.MobType.PANDA, player, day_night, _stand_pos(world, 31, 26, base_y)
 	)
 	# 人形生物必须有手臂：村民抱臂（10 网格）、掠夺者垂臂，缺失即造型回退。
 	var villager_arm := Mob.new()
@@ -2547,6 +2579,48 @@ func _probe_base_y(world: World) -> int:
 		for z in range(VillageBuilder.REGION_MIN.z, VillageBuilder.REGION_MAX.z + 1):
 			top = maxi(top, world.get_surface_height(x, z) - 1)
 	return top
+
+
+## D-055：找一对「地表等高」的相邻列，返回箱子列坐标；找不到返回 ZERO。
+## 箱子放 (x, z)，玩家站 (x, z-2) 朝 +Z（Godot 默认朝向 -Z，故箱子必须在 +Z 侧）。
+## 三处（玩家 / 中间 / 箱子）地表高度必须全等，才构成一条水平可直视的通道；
+## 否则射线从低处水平射出打不到高处的箱子（分层地形起伏处必踩）。
+func _find_flat_pair(world: World, cx: int, cz: int, radius: int) -> Vector2i:
+	for dz in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			var x := cx + dx
+			var z := cz + dz
+			var h := world.get_surface_height(x, z)
+			if world.get_surface_height(x, z + 1) == h \
+					and world.get_surface_height(x, z + 2) == h:
+				return Vector2i(x, z + 2)
+	return Vector2i.ZERO
+
+
+## D-055教训：物件必须贴**该处实际地表**放，不能套base_y。
+## base_y 是村庄区域**最高点**（_probe_base_y 取 maxi），地形一改它就与
+## 具体坐标的地表脱节——箱子会悬空/埋土，玩家悬空掉下去，射线打空，
+## 一片断言连带 FAIL（D-055 实测14 项：储物箱 8 + 池塘 6）。
+## 统一走这个函数取「该列地表上方 1.1 m 的站立点」。
+func _stand_pos(world: World, wx: int, wz: int, base_y: int) -> Vector3:
+	return Vector3(float(wx) + 0.5,
+		float(world.get_surface_height(wx, wz)) - 1.0 + 1.1,
+		float(wz) + 0.5)
+
+
+## D-055：在半径内自找任意一处小池塘（写死坐标会被地形改动打穿）。
+## 按行列步进采样（不逐格全扫——water_kind 会触发洪泛，代价不小），
+## 且要确保该列区块已加载，否则 water_kind 读到的水体是空的。
+func _find_any_pond(world: World, radius: int) -> Vector2i:
+	for dz in range(-radius, radius + 1, 2):
+		for dx in range(-radius, radius + 1, 2):
+			var x := dx
+			var z := dz
+			if not world.is_water_column(x, z):
+				continue
+			if world.water_kind(x, z) == World.WATER_POND:
+				return Vector2i(x, z)
+	return Vector2i.ZERO
 
 
 ## 在中心附近找一处指定水体类型的格子；找不到返回 Vector2i.ZERO。

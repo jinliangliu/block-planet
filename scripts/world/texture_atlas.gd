@@ -59,6 +59,46 @@ static func _paint_tile(image: Image, tile: int) -> void:
 				image.set_pixel(ox + x, oy + y, c)
 		return
 
+	# 裸岩（瓦片 35，D-055）：深灰基岩 + 两道斜向节理缝 + 零星亮点，
+	# 与石头（瓦片 3）的均匀噪点区分开——山脊上一眼读出「这是硬岩」。
+	if tile == 35:
+		for y in range(TILE_SIZE):
+			for x in range(TILE_SIZE):
+				var c := color
+				var h := _hash2(x, y)
+				if h % 7 == 0:
+					c = c.darkened(0.18)
+				elif h % 11 == 0:
+					c = c.lightened(0.12)
+				# 斜向节理：两条平行裂缝，缝缘压暗。
+				if x - y == 2 or x - y == 3:
+					c = c.darkened(0.30)
+				if x + y == 12 or x + y == 13:
+					c = c.lightened(0.18)
+				image.set_pixel(ox + x, oy + y, c)
+		return
+
+	# 砾石（瓦片 36，D-055）：暖灰底 + 一颗颗圆石子（3~5 像素一簇），
+	# 比沙（瓦片 4）颗粒感强得多，用于河床与山麓冲积滩。
+	if tile == 36:
+		for y in range(TILE_SIZE):
+			for x in range(TILE_SIZE):
+				var c := color
+				var h := _hash2(x, y)
+				if h % 5 == 0:
+					c = c.darkened(0.16)
+				elif h % 9 == 0:
+					c = c.lightened(0.14)
+				# 圆石子：以 4×4 为周期取簇心，簇内提亮、簇缘压暗。
+				var cx := x % 4
+				var cy := y % 4
+				if cx == 1 and cy == 1:
+					c = c.lightened(0.20)
+				elif (cx == 0 or cy == 0) and _hash2(x, y) % 3 == 0:
+					c = c.darkened(0.10)
+				image.set_pixel(ox + x, oy + y, c)
+		return
+
 	for y in range(TILE_SIZE):
 		for x in range(TILE_SIZE):
 			var c := color
@@ -141,6 +181,12 @@ static func _tile_color(tile: int) -> Color:
 		31:
 			# 冰：清透的冰蓝。
 			return Color(0.62, 0.80, 0.94)
+		35:
+			# D-055 裸岩：深灰基岩（比石头瓦片 3 的 0.50 灰更暗更冷）。
+			return Color(0.38, 0.39, 0.43)
+		36:
+			# D-055 砾石：暖灰，介于沙（0.84,0.77,0.51）与石（0.50）之间。
+			return Color(0.66, 0.62, 0.55)
 		_:
 			return Color(1.0, 0.0, 1.0)
 

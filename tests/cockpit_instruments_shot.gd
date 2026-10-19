@@ -55,6 +55,34 @@ func _hold_and_wait(n: int, alt: float) -> void:
 			return
 
 
+## 沿取证航线实测地形峰值，定出巡航 AGL（D-055）。
+##
+## 为什么必须实测而不是写死：探针的取证段要真飞（起飞爬升 → 巡航 → 转弯
+## → 低空），而分层地形把亚洲山脊抬到 212 格（106m）。写死的高度只要低于
+## 航线上的山，就会撞坡解体；就算高于山，爬升率控制（pitch 上限 0.5）也可能
+## 在等待段把飞机顶到世界天花板——天花板有碰撞面，撞上去同样解体。
+##
+## 故按三步定：① 沿机头方向采样实际地表高度取峰值；② 峰值 + 净空余量；
+## ③ 再夹到「世界天花板之下留 15m 爬升余量」，两头都不撞。地形再变也不用
+## 回来改这个数。
+func _survey_cruise_alt(ground_y: int) -> float:
+	var world: World = _player.get_parent().get_node("World")
+	var ox := int(_player.global_position.x)
+	var oz := int(_player.global_position.z)
+	# 沿 +Z（探针的 PI 机头方向）向前采样，覆盖转弯漂移段。
+	var peak := 0.0
+	for d in range(0, 150, 3):
+		# get_surface_height 内部直接走 _terrain_height，不依赖区块是否加载。
+		var h := float(world.get_surface_height(ox, oz + d)) * 0.5
+		peak = maxf(peak, h)
+	peak = maxf(peak, float(ground_y))
+	var alt := peak + 25.0   # 净空余量：越过航线上的最高山脊
+	# 天花板余量：世界高 128m，留 15m 给爬升过程，别顶穿区块顶碰撞面。
+	alt = minf(alt, float(World.CHUNK_SIZE.y) * 0.5 - 15.0)
+	print("DBG  cruise_survey peak=%.1fm -> cruise_alt=%.1fm" % [peak, alt])
+	return alt
+
+
 func _snap(file_name: String) -> void:
 	await _wait(2)
 	await RenderingServer.frame_post_draw
@@ -136,11 +164,15 @@ func _run() -> void:
 	await _wait_physics(6)
 
 	# ── 起飞到巡航（复用 flight_hud_shot 验证过的模式：抬升 + launch 给速 ──
-	# 从地面贴地爬升会在跑道尽头撞山解体（实测 impact≈25 m/s）；且出生点北侧
-	# 就是 50m+ 山丘，35m 巡航转弯漂移直接撞坡解体（本探针实测：z≈145 地形
-	# 升到 53m，40 m/s 撞山）——故巡航抬到 65m，山丘全高 53m 以下净空 ≥50m。
+	# D-055 教训（探针曾因此 4 项FAIL）：巡航高度不能拍脑袋写死。老地形下
+	# 「出生点北侧 50m 山丘」够用，写死 65m；分层地形把亚洲山脊抬到 212 格
+	# （106m）后，65m 巡航 + pitch 上限 0.5 的爬升率控制会把飞机一路推到
+	# 126m——顶穿世界天花板（128m）撞上区块顶碰撞体，impact 超阈值直接解体，
+	# 后面「坡度 / 低空警告 / 警告态」三段全被连带打挂。
+	# 改为沿真实航线实测地形峰值再定巡航高度，并夹在世界天花板之下留出
+	# 爬升余量：地形再变也不用回来改这个数。
 	# 注意 place() 不复活已解体机体（_wrecked 不清），取证段必须先保住不坠毁。
-	const CRUISE_ALT := 65.0
+	var cruise_alt := _survey_cruise_alt(ground_y)
 	_craft.set_engine(true)   # 熄火状态油门锁 0，必须先点火
 	_craft.global_position.y += 50.0
 	_craft.launch(30.0, 2.0)
@@ -152,17 +184,17 @@ func _run() -> void:
 		if _craft.is_wrecked():
 			break
 		var agl := float(_craft.snapshot()["altitude_agl"])
-		if not _craft.is_on_floor() and absf(agl - CRUISE_ALT) < 6.0 \
+		if not _craft.is_on_floor() and absf(agl - cruise_alt) < 6.0 \
 				and float(_craft.snapshot()["airspeed"]) > 20.0:
 			settled = true
 			break
-		_craft.controls.pitch = clampf((CRUISE_ALT - agl) * 0.08, -0.35, 0.5)
+		_craft.controls.pitch = clampf((cruise_alt - agl) * 0.08, -0.35, 0.5)
 	_check(settled and not _craft.is_wrecked(),
-		"进入 %.0fm 巡航（空速健康，供转弯取证）" % CRUISE_ALT)
+		"进入 %.0fm 巡航（空速健康，供转弯取证）" % cruise_alt)
 	# 比例俯仰稳住两秒再切视角，读数节流需要时间跟上。
 	for i in range(120):
 		var agl := float(_craft.snapshot()["altitude_agl"])
-		_craft.controls.pitch = clampf((CRUISE_ALT - agl) * 0.08, -0.35, 0.5)
+		_craft.controls.pitch = clampf((cruise_alt - agl) * 0.08, -0.35, 0.5)
 		await get_tree().physics_frame
 		if i % 30 == 0:
 			_dbg_state("hold")
@@ -175,14 +207,14 @@ func _run() -> void:
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
 		"登机默认第一人称座舱（D-049，起飞段全程座舱视角）")
 	cam.toggle_first_third()   # → 追尾
-	await _hold_and_wait(90, CRUISE_ALT)   # 视角阻尼收敛（同 flight_view_probe）
+	await _hold_and_wait(90, cruise_alt)   # 视角阻尼收敛（同 flight_view_probe）
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE, "C 切到追尾")
 	# D-050：切追尾必须恢复 3D 机体外观——下机同理（set_active(false) 同规则），
 	# 飞机仍停在场上，隐藏着会变「幽灵飞机」。
 	_check(not _craft.is_interior_view(),
 		"C 切追尾恢复 3D 机体外观（D-050，防幽灵飞机）")
 	cam.toggle_first_third()   # → 座舱
-	await _hold_and_wait(90, CRUISE_ALT)
+	await _hold_and_wait(90, cruise_alt)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON, "C 切回座舱")
 
 	# ── ③ 几何断言（先于截图，布局已稳定）──
@@ -246,7 +278,7 @@ func _run() -> void:
 			_dbg_state("bank_wrecked")
 			break
 		var agl := float(_craft.snapshot()["altitude_agl"])
-		_craft.controls.pitch = clampf((CRUISE_ALT - agl) * 0.08, -0.35, 0.5)
+		_craft.controls.pitch = clampf((cruise_alt - agl) * 0.08, -0.35, 0.5)
 		if absf(_hud.instrument_hud().instruments_ref().roll_deg) > 22.0:
 			banked = true
 			break
