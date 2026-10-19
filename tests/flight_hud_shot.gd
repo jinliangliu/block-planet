@@ -116,7 +116,8 @@ func _run() -> void:
 		"登机后右上角小地图（指南针）隐藏（截图取证）")
 	_check(not _hud._mode_label.is_visible_in_tree(),
 		"登机后右上角模式徽章隐藏（截图取证）")
-	_check(_hud._time_label.is_visible_in_tree(), "驾驶中时钟/天气行保留（截图取证）")
+	_check(not _hud._time_label.is_visible_in_tree(),
+		"登机后时钟/天气行也隐藏（D-053 用户要求取消，截图取证）")
 
 	# ── ① 地面满油门滑跑 ────────────────────────────────
 	# 注意：pitch 锁 0 时飞机永不抬头离地，满油门约 4~5 s 就会冲出 64 格跑道尽头

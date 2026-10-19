@@ -463,8 +463,8 @@ func _run() -> void:
 	_check(not hud._minimap.is_visible_in_tree(),
 		"登机后右上角小地图（指南针）隐藏（方位交给战术地图与仪表小地图）")
 	_check(not hud._mode_label.is_visible_in_tree(), "登机后右上角模式徽章隐藏")
-	_check(hud._time_label.is_visible_in_tree(),
-		"驾驶中右上角天数/时钟/天气行保留（飞行仍要看得见昼夜与天气）")
+	_check(not hud._time_label.is_visible_in_tree(),
+		"登机后右上角天数/时钟/天气行也隐藏（D-053：用户要求取消该内容）")
 	_check(not hud._minimap.is_processing(),
 		"驾驶中停掉小地图 _process（不再每 0.6 s 扫一遍地形圆域）")
 	var mm_riding: float = panel._mm.elapsed()

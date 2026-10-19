@@ -1041,12 +1041,11 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 			_toast_label.offset_bottom = 96.0
 		_toast_label.offset_left = -320.0
 		_toast_label.offset_right = 320.0
-	# 右上角竖列：驾驶时隐藏圆形小地图（黄铜指南针框）与模式徽章（生存/创造/
-	# 探索），保留下方天数·时钟·天气行——飞行中仍要看得见昼夜与天气。
+	# 右上角竖列：驾驶时隐藏圆形小地图（黄铜指南针框）、模式徽章（生存/创造/
+	# 探索）**与天数·时钟·天气行**（D-053：用户圈出「第 1 天 白…」要求取消）。
+	# 飞行中右上角只留天空——那行字压在天幕上既挡视野又读不出完整信息。
 	# 方位信息不会丢：M 键战术地图（北上东右）与飞行仪表 HUD 自带的右下角
 	# 160×160 小地图（仅追尾视角）都在，主小地图只是徒步视角的地形俯瞰。
-	# 时钟行按固定 offset 挂在原处，其上方留白是刻意保留——飞行时右上角
-	# 只剩一行信息，比再挪一次位置更不容易误读。
 	# _refresh_mode_badge 只改文字与颜色、_refresh_time 只改文本，都不动
 	# 显隐：模式切换、昼夜更替都不会把驾驶中的它们放出来。
 	if _minimap != null:
@@ -1060,6 +1059,10 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 			_minimap.request_resample()
 	if _mode_label != null:
 		_mode_label.visible = not _riding
+	# 时间行（第 N 天 · 昼夜 · 时钟 · 天气）：登机后一并收起（D-053）。
+	# 徒步仍要显示——那是作息的唯一依据（天黑要回家、睡觉跳夜）。
+	if _time_label != null:
+		_time_label.visible = not _riding
 	# P1-3：触屏设备上，驾驶时隐藏步行触控、显示飞行触控层。
 	if DisplayServer.is_touchscreen_available() and _flight_touch != null:
 		if _riding:

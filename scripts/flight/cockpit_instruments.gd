@@ -90,6 +90,13 @@ const TAPE_PPX := 5.0      # 航向带像素/度（600px ≈ ±60° 视野）
 const DASH_PAD := 18.0     # dash 底板左右出簇外的 padding
 const DASH_LIP := 4.0      # dash 顶沿受光条厚
 const BAR_W := 32.0        # 油门/燃油竖条宽
+## 盘排竖向压缩比（D-053）：用户圈出「盘排区」要求高度缩小 1/3。
+## 只压盘排本身（表盘直径、盘间距、簇底留白、竖条宽）——航向带与 dash 宽
+## 都不动：宽度由 TAPE_W 决定，用户没有要求收窄，收窄反而让航向带溢出底板。
+## 表盘内部的像素细节（压环厚、字号、指针长、阶梯线）不在这里乘，而是各自
+## 按「盘径 / 设计稿尺寸」取尺（见各 _draw() 的 `var s := sz / ...`），
+## 否则会出现「小盘配 25px 大字」糊出盘外。
+const GAUGE_K := 2.0 / 3.0
 const PITCH_MAX := 60.0    # 俯仰钳制（用户 spec：超过截断、不无限滚动）
 const BLINK_MS := 600.0    # 闪烁周期（与警告横幅一致）
 const LADDER := [10.0, 20.0, 30.0]            # 俯仰阶梯标注角（度）
@@ -245,6 +252,19 @@ func _draw() -> void:
     _right_console(cr, s)
     # ⑦ dash 上的硬件：铭牌、螺钉、警示灯排。
     _dash_hardware(dash, s)
+    # ⑦b 封板（D-053）：盘排压缩 1/3 后，竖条与侧盘之间各空出约 100×93 的
+    #     平铁皮。战雷老座舱在这种位置就是「未装仪表的封板」——一块略暗的
+    #     凹陷钢板 + 四颗螺钉 + 一道压印槽，比留一片光板更像实物，也不抢
+    #     仪表读数（低对比度、无文字）。
+    var thr_r: Rect2 = m["thr"]
+    var spd_r: Rect2 = m["spd"]
+    var alt_r: Rect2 = m["alt"]
+    var fuel_r: Rect2 = m["fuel"]
+    var inset := 10.0 * s
+    _blank_plate(Rect2(thr_r.end.x + inset, thr_r.position.y,
+        spd_r.position.x - inset - (thr_r.end.x + inset), thr_r.size.y), s)
+    _blank_plate(Rect2(alt_r.end.x + inset, alt_r.position.y,
+        fuel_r.position.x - inset - (alt_r.end.x + inset), alt_r.size.y), s)
     # ⑧ 磨损：确定性噪点 + 风挡斜边划痕。只落在框体结构上——世界开口与
     #    dash 上的仪表区不铺（仪表是子节点，画在噪点上）。
     _wear_area(Rect2(0.0, 0.0, w, rail.size.y), 7.0 * s)
@@ -274,6 +294,24 @@ func _dash_hardware(dash: Rect2, s: float) -> void:
     while rx < dash.end.x - 60.0 * s:
         draw_rect(Rect2(rx, dash.position.y + 6.0 * s, rv, rv), COL_RIVET, true)
         rx += 120.0 * s
+
+
+## 封板（D-053）：未装仪表的方孔盖板。**只比板面暗一档**（首版取 0.112
+## 比 COL_DASH 0.145 暗 23%，实拍像两块挖空的洞）——凹陷感靠一道内黑缝 +
+## 上沿受光 + 四颗角螺钉给，不靠压深底色。
+func _blank_plate(r: Rect2, s: float) -> void:
+    if r.size.x < 16.0 * s or r.size.y < 16.0 * s:
+        return
+    draw_rect(r, Color(0.133, 0.137, 0.148), true)
+    draw_rect(r, Color(0.0, 0.0, 0.0, 0.30), false, maxf(1.0, s))
+    draw_rect(Rect2(r.position.x + 1.0 * s, r.position.y + 1.0 * s,
+        r.size.x - 2.0 * s, 1.0 * s), Color(1.0, 1.0, 1.0, 0.05), true)
+    draw_rect(Rect2(r.position.x + 1.0 * s, r.end.y - 2.0 * s,
+        r.size.x - 2.0 * s, 1.0 * s), Color(0.0, 0.0, 0.0, 0.22), true)
+    var rv := 2.2 * s
+    for px in [r.position.x + 6.0 * s, r.end.x - 6.0 * s]:
+        for py in [r.position.y + 6.0 * s, r.end.y - 6.0 * s]:
+            draw_rect(Rect2(px - rv * 0.5, py - rv * 0.5, rv, rv), COL_RIVET, true)
 
 
 ## 硬边粗线段：沿线方向的细四边形（不用 draw_line，避免抗锯齿）——
@@ -448,10 +486,10 @@ static func metrics(vp: Vector2) -> Dictionary:
     var w := v.x
     var h := v.y
     var cx := w * 0.5
-    var margin_b := MARGIN_B * s
-    var gsz := GAUGE_SZ * s
-    var ssz := SIDE_SZ * s
-    var gap := GAUGE_GAP * s
+    var margin_b := MARGIN_B * GAUGE_K * s
+    var gsz := GAUGE_SZ * GAUGE_K * s
+    var ssz := SIDE_SZ * GAUGE_K * s
+    var gap := GAUGE_GAP * GAUGE_K * s
     var tape_w := TAPE_W * s
     var tape_h := TAPE_H * s
     # 盘排（自屏底向上）：主表居中，两侧盘与之垂直居中。
@@ -469,7 +507,7 @@ static func metrics(vp: Vector2) -> Dictionary:
     var dash := Rect2(cx - dash_w * 0.5, h - dash_h, dash_w, dash_h)
     var lip := Rect2(dash.position.x, dash.position.y, dash.size.x, DASH_LIP * s)
     # 油门 / 燃油竖条贴 dash 内沿（填掉盘排两侧的空洞）。
-    var bw := BAR_W * s
+    var bw := BAR_W * GAUGE_K * s
     var thr := Rect2(dash.position.x + 16.0 * s, h - (side_t + ssz), bw, ssz)
     var fuel := Rect2(dash.end.x - 16.0 * s - bw, h - (side_t + ssz), bw, ssz)
     # 座舱框体。
@@ -724,6 +762,12 @@ class _AttitudeGauge extends Control:
     var _roll := 0.0
     var _s := 1.0
 
+    ## D-053 起盘内细节按「盘径 / 设计稿」取尺，size 本身参与绘制——尺寸变化
+    ## 必须重绘（不能只靠 set_scale_hint：宽高比变化时 ui_scale 可能不变而
+    ## 盘径变了）。
+    func _ready() -> void:
+        resized.connect(queue_redraw)
+
     func set_scale_hint(s: float) -> void:
         if not is_equal_approx(_s, s):
             _s = s
@@ -735,8 +779,10 @@ class _AttitudeGauge extends Control:
         queue_redraw()
 
     func _draw() -> void:
-        var s := _s
         var sz := size.x
+        # D-053：盘内像素细节的尺子 = 盘径 / 设计稿 152。盘排压缩后压环、字号、
+        # 指针、阶梯线跟着等比缩，不会出现「小盘配大字」糊出盘外。
+        var s := sz / CockpitInstruments.GAUGE_SZ
         var c := size * 0.5
         var R := sz * 0.5
         var bez := BEZEL * s
@@ -853,6 +899,9 @@ class _RoundGauge extends Control:
     func set_range(mx: float) -> void:
         _max = maxf(mx, 1e-6)
 
+    func _ready() -> void:
+        resized.connect(queue_redraw)
+
     func set_scale_hint(s: float) -> void:
         if not is_equal_approx(_s, s):
             _s = s
@@ -865,8 +914,9 @@ class _RoundGauge extends Control:
         queue_redraw()
 
     func _draw() -> void:
-        var s := _s
         var sz := size.x
+        # D-053：同 _AttitudeGauge，按盘径 / 设计稿 140 取尺。
+        var s := sz / CockpitInstruments.SIDE_SZ
         var c := size * 0.5
         var R := sz * 0.5
         var bez := BEZEL * s
@@ -909,8 +959,10 @@ class _RoundGauge extends Control:
         draw_circle(c, 1.8 * s, COL_RING_D)
         # 数字窗：盘下方（270° 弧的开口处，不与刻度抢位）。数字大、单位小，
         # 同一行——单位放到盘外（首版做法）会飘到 dash 板上像无主文字。
-        var win_w := sz * 0.68
-        var win_h := sz * 0.30
+        # D-053：宽度收到 0.62、高 0.28——0.68/0.30 时矩形下两角会切出盘缘
+        #（盘排缩到 2/3 后在放大截图里能看出四角「出圈」）。
+        var win_w := sz * 0.62
+        var win_h := sz * 0.28
         var win := Rect2(c.x - win_w * 0.5, c.y + rw * 0.14, win_w, win_h)
         draw_rect(win, Color(0.03, 0.035, 0.045), true)
         draw_rect(win, COL_SEAM, false, maxf(1.0, s))
@@ -945,6 +997,9 @@ class _VBar extends Control:
     var _s := 1.0
     var _label := ""
 
+    func _ready() -> void:
+        resized.connect(queue_redraw)
+
     func set_scale_hint(s: float) -> void:
         if not is_equal_approx(_s, s):
             _s = s
@@ -957,9 +1012,10 @@ class _VBar extends Control:
         queue_redraw()
 
     func _draw() -> void:
-        var s := _s
         var w := size.x
         var h := size.y
+        # D-053：竖条高 = ssz（已被盘排压缩带走），内部细节按 高 / 设计稿 140。
+        var s := h / CockpitInstruments.SIDE_SZ
         draw_rect(Rect2(0.0, 0.0, w, h), COL_RING_D, true)
         draw_rect(Rect2(0.0, 0.0, w, 1.0 * s), COL_RING, true)
         # 条顶标签（THR / FUEL）：画在条自己头上，不侵占航向带。

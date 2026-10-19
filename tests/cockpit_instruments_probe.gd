@@ -252,12 +252,12 @@ func _check_frame_at(vp: Vector2) -> void:
     _check(absf(dash.size.x - (tape.size.x
         + CockpitInstruments.DASH_PAD * 2.0 * s)) < 1e-3,
         "⑦ %s dash 宽 = 航向带 + 2×DASH_PAD（%.1f px）" % [tag, dash.size.x])
-    # 仪表板占屏高的比例落在战雷式区间（0.28..0.40），不压掉视野。
-    # D-051 交付值为 30%（用户已要求「缩小」过一次），D-052 圆盘化后 32.8%
-    # —— 判定区间以此为准，上调即视为回归。
+    # 仪表板占屏高的比例落在座舱区间（0.22..0.30），不压掉视野。
+    # 轨迹：D-051 交付 30% → D-052 圆盘化 32.8% → D-053 用户要求「盘排高度
+    # 缩小 1/3」后 25.2%。区间按 D-053 收紧，上调即视为「仪表又长大了」回归。
     var ratio := dash.size.y / vp.y
-    _check(ratio > 0.28 and ratio < 0.40,
-        "⑦ %s 仪表板占屏高 %.1f%%（D-051 量级 28~40%%）" % [tag, ratio * 100.0])
+    _check(ratio > 0.22 and ratio < 0.30,
+        "⑦ %s 仪表板占屏高 %.1f%%（D-053 量级 22~30%%）" % [tag, ratio * 100.0])
 
 
 ## ⑧ 宽高比自适应（D-052）：项目用 stretch=canvas_items + aspect=expand，逻辑
@@ -295,8 +295,9 @@ func _check_scaling() -> void:
     _check(hi - lo < 0.005,
         "⑧ 主表占屏高比例跨宽高比恒定（%.3f..%.3f，离散 %.4f < 0.005）"
             % [lo, hi, hi - lo])
-    _check(lo > 0.19 and hi < 0.23,
-        "⑧ 主表占屏高 ≈ 21%%（D-051 缩小后的量级，实测 %.1f%%）" % (lo * 100.0))
+    _check(lo > 0.125 and hi < 0.160,
+        "⑧ 主表占屏高 ≈ 14%%（D-053 盘排压缩 1/3 后的量级，实测 %.1f%%）"
+            % (lo * 100.0))
 
 
 ## ⑨ 读数拆字：数字窗分「数字 + 单位」两行排（探针契约保留完整字符串）。
