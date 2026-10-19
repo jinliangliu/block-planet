@@ -13,6 +13,12 @@ extends Control
 ##
 ## 警告：六类警告按优先级取最高级，闪烁横幅 + 蜂鸣/语音呼号（AlertBeeper）。
 ## 注册的 3D 视图（座舱 3D 面板 / 世界标注）每帧也收到同一份 FlightInstruments。
+##
+## 飞行指引十字（D-054）：第一人称另有一枚 `FlightDirector` 覆盖层——中心白
+## 准星是「机头现在指哪」，指引十字是「机头该指哪」，玩家把准星套进十字即
+## 沿正确航径飞（起飞爬升角 / 进近 3° 下滑道 / 巡航航向）。它复用 HSI/CDI
+## 的导航目标，与 3D 引导（箭头 + 下滑道双轨）互补：3D 引导只在追尾看得见，
+## 十字段补的是座舱里缺失的那一层「当前偏了多少」。
 
 const COL_NORMAL := Color(1.0, 1.0, 1.0, 0.95)
 const COL_WARN := Color(1.0, 0.42, 0.36)
@@ -33,6 +39,8 @@ var _warn: Control
 var _minimap: _Minimap
 ## 座舱仪表簇（D-047）：仅第一人称可见的地平仪/高度计/航向仪。
 var _cockpit: CockpitInstruments
+## 飞行指引十字（D-054）：仅第一人称可见的航径指令标记（准星该往哪挪）。
+var _fd: FlightDirector
 # 追尾四角
 var _c_tl: Label
 var _c_tr: Label
@@ -54,6 +62,11 @@ func _ready() -> void:
 	# 座舱仪表簇（D-047）：第一人称才显形，数据在 tick 里喂。
 	_cockpit = CockpitInstruments.new()
 	add_child(_cockpit)
+	# 飞行指引十字（D-054）：后加入 → 画在仪表簇之上（两者不重叠，但十字
+	# 是「往哪飞」的即时指令，层级上应当最靠前）。
+	_fd = FlightDirector.new()
+	add_child(_fd)
+	_fd.visible = false
 	_minimap = _Minimap.new()
 	_minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_minimap.custom_minimum_size = Vector2(160.0, 160.0)
@@ -96,10 +109,16 @@ func instruments_ref() -> FlightInstruments:
 
 func set_navigation(target: Vector3, name: String = "") -> void:
 	_instruments.set_navigation(target, name)
+	# 飞行指引十字吃同一份导航目标（D-054）：不另开注入口，HSI/CDI/3D 标注
+	# 与本十字永远指向同一个点，不会出现「仪表指 A、指引指 B」。
+	if _fd != null:
+		_fd.set_guide(target)
 
 
 func clear_navigation() -> void:
 	_instruments.clear_navigation()
+	if _fd != null:
+		_fd.clear_guide()
 
 
 ## 每帧驱动：读快照 → 加工 → 蜂鸣 → 按视角分发 → 刷视图 → 刷 3D 视图。
@@ -122,6 +141,12 @@ func tick(delta: float) -> void:
 	_refresh_chase()
 	if _cockpit.visible:
 		_cockpit.refresh(_instruments)
+	# 飞行指引十字（D-054）：与座舱同视角。必须先 refresh 再判可见——mode
+	# 由 refresh 依空速/离地高度/距离算出，无目标或停机时它是 OFF。
+	if _fd != null:
+		if _cockpit.visible and _craft != null:
+			_fd.refresh(_craft.global_position, _instruments)
+		_fd.visible = _cockpit.visible and _fd.current_mode() != FlightDirector.Mode.OFF
 	if _panel.visible:
 		_refresh_panel()
 	_refresh_minimap(mode)
@@ -169,6 +194,8 @@ func _hide_all() -> void:
 		_warn.visible = false
 	if _cockpit != null:
 		_cockpit.visible = false
+	if _fd != null:
+		_fd.visible = false
 
 
 # ── 第一人称座舱：中心准星（D-047 起文字读数交给座舱仪表簇）──
