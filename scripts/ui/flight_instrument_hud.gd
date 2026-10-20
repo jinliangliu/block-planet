@@ -88,6 +88,7 @@ func setup(craft: Aircraft, camera: AircraftCamera) -> void:
 	_craft = craft
 	_camera = camera
 	_instruments.reset_voice_cues()
+	_instruments.reset_altitude_callouts()
 
 
 func set_beeper(beeper: AlertBeeper) -> void:
@@ -141,6 +142,13 @@ func tick(delta: float) -> void:
 	if FlightSettings.current().beeper_enabled and _beeper != null:
 		for cue in cues:
 			_beeper.play_cue(cue["beep"])
+	# 进近高度呼号（U-10）：独立通道，不被警告的「只播最高级」合并。
+	var callouts := _instruments.take_altitude_callouts()
+	if not callouts.is_empty() and FlightSettings.current().beeper_enabled and _beeper != null:
+		for _h in callouts:
+			_beeper.play_cue(FlightInstruments.BEEP_CODES["alt_call"])
+	for h in callouts:
+		Events.notice.emit("📢 %d 米" % int(h))
 	var mode := AircraftCamera.ViewMode.CHASE
 	if _camera != null and _camera.has_method("current_mode"):
 		mode = _camera.current_mode()

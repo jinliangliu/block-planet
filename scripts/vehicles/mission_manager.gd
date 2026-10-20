@@ -33,6 +33,9 @@ var _next_waypoint := 0
 var _was_airborne := false
 var _touchdown_vs := 0.0
 var _landed := false
+## 降落结算快照（U-7）：停稳瞬间的水平速度与位置，供 LandingQuality 连续评分。
+var _stop_speed_kmh := 0.0
+var _stop_pos := Vector3.ZERO
 var _min_dist_per_wp: Array[float] = []
 ## 本进程内已发放过奖励的任务 id 集合（P2-9 防刷；仅运行时，不持久化）。
 var _rewarded_ids := {}
@@ -46,6 +49,8 @@ func start(m: MissionData) -> void:
 	_was_airborne = false
 	_touchdown_vs = 0.0
 	_landed = false
+	_stop_speed_kmh = 0.0
+	_stop_pos = Vector3.ZERO
 	_min_dist_per_wp = []
 	for _i in m.waypoints.size():
 		_min_dist_per_wp.append(INF)
@@ -127,6 +132,8 @@ func _step_landing(speed: float, pos: Vector3, on_ground: bool, vs: float,
 				return
 		# 已着陆：滑跑停稳后才判成功/出区失败
 		if speed <= mission.max_roll_speed():
+			_stop_speed_kmh = speed
+			_stop_pos = pos
 			var in_zone := Vector2(pos.x - mission.zone_center.x,
 				pos.z - mission.zone_center.z).length() <= mission.zone_radius()
 			if not in_zone:
@@ -162,9 +169,21 @@ func _finish(success: bool, reason: String) -> void:
 		"repeat": repeat,
 		"type": mission.type,
 		"touchdown_vs": _touchdown_vs,
+		"landing_quality": _landing_quality(),
 		"min_dist_per_wp": _min_dist_per_wp.duplicate(),
 	}
 	mission_result.emit(success, result)
+
+
+## 降落质量连续评分（U-7）：三项（触地垂直速度 / 落点偏差 / 停稳滑跑速度）
+## 从「过/不过」改为连续打分。仅成功结算时有意义；失败路径 score 仍为 0
+## （_score 的失败分支），本字典照发但 total 可能非零——调用方以 success 为准。
+func _landing_quality() -> Dictionary:
+	if mission == null or mission.type != MissionData.Type.LANDING:
+		return {}
+	var offset := Vector2(_stop_pos.x - mission.zone_center.x,
+		_stop_pos.z - mission.zone_center.z).length()
+	return LandingQuality.score(_touchdown_vs, offset, _stop_speed_kmh)
 
 
 func _score(success: bool) -> int:
@@ -179,5 +198,8 @@ func _score(success: bool) -> int:
 				precision += maxf(0.0, mission.radius() - d)
 			return int(clampf(120.0 - _elapsed * 1.0 + precision, 0, 200))
 		MissionData.Type.LANDING:
-			return int(clampf(120.0 - absf(_touchdown_vs) * 10.0 - _elapsed * 1.0, 0, 200))
+			# U-7：评分改为三项连续打分（0~100，与自由飞落地评价同一口径），
+			# 取代原「120 - |vs|*10 - elapsed」的 0~200 公式。成功路径必经过
+			# _step_landing 停稳分支，_stop_pos/_stop_speed_kmh 已赋值。
+			return int(_landing_quality().get("total", 0))
 	return 0

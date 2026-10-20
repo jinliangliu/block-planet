@@ -45,6 +45,9 @@ const BEEP_CODES := {
 	"altitude_low": {"freq": 700.0, "dur": 0.1, "gap": 0.15, "count": 2, "replay": 1.0},
 	# 高度过低（警告）：同音型，每 0.5 s 一组（更急）。
 	"altitude_critical": {"freq": 700.0, "dur": 0.1, "gap": 0.15, "count": 2, "replay": 0.5},
+	# 进近高度呼号（U-10）：中频两声，各层共用同一音色（层级信息由 Toast
+	# 文字给，不靠音高编码——儿童不解析音高序列）。
+	"alt_call": {"freq": 780.0, "dur": 0.09, "gap": 0.12, "count": 2, "replay": 0.0},
 }
 
 ## 警告优先级（Phase A §5）：失速 = 超速 = 耗尽 > 过低 > 低油。
@@ -81,6 +84,15 @@ const VSI_TAU := 0.3
 const RPM_DISPLAY_MAX := 2700.0
 ## 侧滑球满偏对应的侧滑角（度）：±10° 打满。
 const SLIP_BALL_FULL_DEG := 10.0
+
+## ── 进近高度呼号（U-10） ─────────────────────────────────────
+## 下沉穿越这些 AGL 层（米）时呼号。借鉴 Infinite Flight 的 50/40/30/20 英尺
+## 档，按本世界尺度折算：跑道 56 m、进近段通常几百米内，英尺档太疏——取
+## 30/20/10/5 米四档，落地前最后一呼距地 5 m。
+const ALTO_CALLOUTS := [30.0, 20.0, 10.0, 5.0]
+## 呼号只在明确下沉时触发（m/s）：爬升/平飞穿越同层不呼，防「每过一层
+## 响一次」的骚扰；阈值比 VSI 噪声大一个量级。
+const CALL_DESCENT_VS := -0.5
 
 # ── 仪表读数（update 后有效）────────────────────────────────
 var airspeed_kmh := 0.0
@@ -144,6 +156,11 @@ var _fuel_low_latched := false
 var _cue_ids := {}
 var _cue_timers := {}
 var _nav_target := Vector3.ZERO
+## 进近高度呼号（U-10）：上帧 AGL（穿越边沿检测）、本次飞行已呼过的层
+## （一次性，防同层重复）、待取走的层（take_altitude_callouts 消费）。
+var _prev_agl := 0.0
+var _callouts_done := {}
+var _callouts_pending: Array[float] = []
 
 
 ## 设置直飞导航目标（任务航点 / 机场）。传空即清除。
@@ -223,7 +240,23 @@ func update(reading: Dictionary, craft_basis: Basis, delta: float) -> void:
 		nav_dev_deg = wrapf(nav_bearing_deg - heading_deg, -180.0, 180.0)
 		nav_dots = clampf(nav_dev_deg / CDI_DEG_PER_DOT, -1.0, 1.0)
 		nav_to_flag = true  # MVP 直飞导航恒为 TO
+	_update_altitude_callouts()
 	_refresh_alerts()
+
+
+## 进近高度呼号边沿检测（U-10）：已离地且明确下沉时，AGL 从上往下穿过
+## ALTO_CALLOUTS 某一层即登记一次（同层本次飞行只呼一次）。着地即清空
+## 「已呼」集合——下次起飞重新可呼。爬升/平飞穿越不检测。
+func _update_altitude_callouts() -> void:
+	if is_airborne():
+		if vertical_speed < CALL_DESCENT_VS:
+			for h in ALTO_CALLOUTS:
+				if _prev_agl >= h and altitude_agl < h and not _callouts_done.has(h):
+					_callouts_done[h] = true
+					_callouts_pending.append(h)
+	else:
+		_callouts_done.clear()
+	_prev_agl = altitude_agl
 
 
 ## 机体世界坐标：snapshot 不带位置（姿态在 basis 里），由调用方经 reading
@@ -323,6 +356,22 @@ func take_voice_cues(delta: float) -> Array[Dictionary]:
 func reset_voice_cues() -> void:
 	_cue_ids = {}
 	_cue_timers = {}
+
+
+## 取「本次该呼」的高度层（米）：与 take_voice_cues 平行的独立通道，取一次
+## 即消费。刻意不并进 alerts() 的「同刻只播最高级」合并——降落末段若被
+## 失速/超速警告挤掉，呼号就失去存在意义（警告防的是事故，呼号教的是节奏）。
+func take_altitude_callouts() -> Array[float]:
+	var out := _callouts_pending.duplicate()
+	_callouts_pending.clear()
+	return out
+
+
+## 清空呼号状态（下机/重进座舱时与 reset_voice_cues 同步调用）。
+func reset_altitude_callouts() -> void:
+	_callouts_done.clear()
+	_callouts_pending.clear()
+	_prev_agl = 0.0
 
 
 static func _alert(id: String, level: int, text: String) -> Dictionary:

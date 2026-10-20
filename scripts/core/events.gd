@@ -33,6 +33,11 @@ signal aircraft_altitude(altitude: float)
 ## 飞行器累计飞行距离每满 100 m 广播一次（参数为该段里程）。
 signal aircraft_distance(meters: float)
 
+## 飞行器一次落地滑跑停稳后广播（U-7 接地质量评分）：result 为 LandingQuality.score()
+## 的输出（total/grade/emoji + roll_distance 滑跑距离），HUD 据此 Toast 落地评价。
+## 残骸摔倒、任务外坠机解体不广播（那不是「降落」）。
+signal aircraft_landed(result: Dictionary)
+
 ## 右键命中村民或酿灶台时发出，HUD 监听后打开交易面板。
 signal request_trade
 

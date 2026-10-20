@@ -93,6 +93,13 @@ const RPM_TAU := 0.4
 ## 自动改平持续时间（秒）：双击左键后以增强辅助增益摆平（D-034 鼠标操控）。
 const LEVEL_ASSIST_TIME := 2.0
 
+# ── 接地质量评分（U-7） ──────────────────────────────────────
+## 停稳判据（m/s）：水平速度降到此值以下算「停稳」，结算落地评分。
+const LANDING_STOP_MPS := 1.5
+## 滑跑结算超时（秒）：一直停不下来（冲出场/缓撞未毁）也按当前速度强制结算，
+## 避免 pending 挂到下次起飞、把两次落地混成一笔。
+const LANDING_ROLL_TIMEOUT := 15.0
+
 @export var use_player_input := true
 
 var controls := AircraftFlight.Controls.new()
@@ -164,6 +171,16 @@ var _rpm_value := 0.0
 var _level_timer := 0.0
 ## 襟翼档位（0/1/2）是否在本次驾驶中变动过（HUD 指示灯用）。
 var _flaps_moved := false
+## 落地评分（U-7）：触地边沿记 vs，on_ground 期间累计滑跑，停稳/超时结算
+## 并广播 Events.aircraft_landed（LandingQuality 口径，与任务评分同一份）。
+var _landing_pending := false
+var _landing_vs := 0.0
+var _landing_timer := 0.0
+var _landing_roll_dist := 0.0
+## 触地帧真实垂直速度：move_and_slide 后「机轮支撑」会把向下速度抹零
+## （568 行区块），而触地边沿要到下一帧的 _update_flight_tracking 才报到——
+## 不在这里先存，评分读到的 vs 恒为 0（软硬着陆不分）。
+var _last_touchdown_vs := 0.0
 
 
 ## 在世界里落下一架飞行器：机轮贴地、机头朝 heading。
@@ -198,6 +215,11 @@ func place(at: Vector3, heading: float = 0.0) -> void:
 	global_transform = Transform3D(_state.basis, _state.position)
 	velocity = Vector3.ZERO
 	_refuel_full()
+	# 重落位作废未结算的落地评分（D-039 归位 / 试飞搬机都走这里）。
+	_landing_pending = false
+	_landing_vs = 0.0
+	_landing_timer = 0.0
+	_landing_roll_dist = 0.0
 
 
 ## 按蓝图零件生成体素块外观。纯视觉、无碰撞，不改变飞行。
@@ -564,6 +586,10 @@ func _physics_process(delta: float) -> void:
 	_state.velocity = velocity
 	_state.position = global_position
 	if is_on_floor():
+		# 触地帧真实垂直速度先存（下面抹零）：U-7 落地评分要的是「砸下来
+		# 那一下」的速度，抹零后读恒 0，软硬着陆将无法区分。
+		if _state.velocity.y < 0.0:
+			_last_touchdown_vs = _state.velocity.y
 		# 机轮支撑：抹掉向下的速度分量（气动照常结算，故先攒升力再离地）。
 		if _state.velocity.y < 0.0:
 			_state.velocity.y = 0.0
@@ -654,10 +680,19 @@ func _update_flight_tracking(delta: float, on_ground: bool) -> void:
 		Events.aircraft_took_off.emit()
 		_alt_milestone = 0.0
 		_dist_milestone = 0.0
+	# 触地边沿（U-7）：上帧空中、本帧着地——记下砸下来那一下的速度（帧首
+	# 已捕获的抹零前真值），开始等停稳结算。wreck 路径不进来（残骸分支提前
+	# return），摔烂不算「降落」。
+	if on_ground and not _was_on_floor and not _landing_pending:
+		_landing_pending = true
+		_landing_vs = _last_touchdown_vs
+		_landing_timer = 0.0
+		_landing_roll_dist = 0.0
 	_was_on_floor = on_ground
 
 	if on_ground:
 		_altitude_agl = 0.0
+		_update_landing_score(delta)
 		return
 
 	# 累计空中里程：每满 100 m 广播一段。
@@ -675,6 +710,26 @@ func _update_flight_tracking(delta: float, on_ground: bool) -> void:
 	while _altitude_agl >= _alt_milestone + ALT_MILESTONE_STEP:
 		_alt_milestone += ALT_MILESTONE_STEP
 		Events.aircraft_altitude.emit(_alt_milestone)
+
+
+## 落地评分结算（U-7）：滑跑期间累计水平距离，停稳（≤LANDING_STOP_MPS）或
+## 超时（LANDING_ROLL_TIMEOUT）时按 LandingQuality 三项连续打分并广播。
+## 落点评分传 −1（无参照区）：自由飞没有「标准落点」，中性分不奖不罚；
+## 有降落区参照的任务场景由 MissionManager 用自己的 zone_center 结算。
+func _update_landing_score(delta: float) -> void:
+	if not _landing_pending:
+		return
+	_landing_timer += delta
+	var horiz := Vector2(_state.velocity.x, _state.velocity.z).length()
+	_landing_roll_dist += horiz * delta
+	if horiz > LANDING_STOP_MPS and _landing_timer < LANDING_ROLL_TIMEOUT:
+		return
+	var result := LandingQuality.score(
+		_landing_vs, -1.0, horiz * AircraftFlight.MPS_TO_KMH)
+	result["roll_distance"] = _landing_roll_dist
+	Events.aircraft_landed.emit(result)
+	Events.notice.emit(LandingQuality.summary(result))
+	_landing_pending = false
 
 
 ## 离地高度：自机身原点向下打一道射线，命中地形面即距地高度
