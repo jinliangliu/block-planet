@@ -47,23 +47,42 @@ const ASSIST_NAMES := {
 }
 
 
-var difficulty: int = Difficulty.NORMAL
-var assist_level: int = Assist.PARTIAL
+## 8 键字段只声明不赋初值；默认值唯一定义在 reset_to_defaults()，由 _init
+## 落地——「恢复默认」按钮（D-058）与探针都以它为准，杜绝两处漂移。
+var difficulty: int
+var assist_level: int
 ## 涂装索引（AircraftLivery.LIVERIES 的下标，默认经典红白）。
-var livery_index := 0
+var livery_index: int
 ## 儿童友好镜头开关（D-033）：抖动默认开（微量），松手自动回正默认开——
 ## 两者都可在飞行设置面板里关掉（防晕动症）。
-var camera_shake := true
-var auto_recenter := true
+var camera_shake: bool
+var auto_recenter: bool
 ## HUD 详细模式（D-034）：默认简单（儿童优先，信息少 = 不晕），H 键或飞行
 ## 设置面板切换，随 settings.json 落盘（与涂装/抖动同机制）。
-var hud_detail := false
+var hud_detail: bool
 ## 自动改平开关（D-034）：默认开，双击左键或飞行设置面板可切。
-var auto_level := true
+var auto_level: bool
 ## 警告蜂鸣码开关（D-034）：默认开（听到也能玩）；飞行设置面板可关。
-var beeper_enabled := true
+var beeper_enabled: bool
 
 static var _current: FlightSettings = null
+
+
+func _init() -> void:
+	reset_to_defaults()
+
+
+## 恢复 8 键默认值（D-058「恢复默认」按钮入口；默认值唯一定义处，
+## 面板探针 D 段逐键钉住，防漂移）。
+func reset_to_defaults() -> void:
+	difficulty = Difficulty.NORMAL
+	assist_level = Assist.PARTIAL
+	livery_index = 0
+	camera_shake = true
+	auto_recenter = true
+	hud_detail = false
+	auto_level = true
+	beeper_enabled = true
 
 
 ## 全局生效实例：首次访问时从 SAVE_PATH 读档（无则默认）。

@@ -10,7 +10,8 @@ extends Control
 ##   - 镜头抖动 / 松手回正 / HUD 模式（简单|详细）/ 双击改平 / 警告蜂鸣
 ## 改动即时生效（飞机每帧读 FlightSettings.current().gains()）并落盘
 ## user://settings.json；面板本身只做展示与改写，不直接碰飞行动力学。
-## 8 键全部有面板入口；触屏设备仍缺「打开面板」的入口（见差距记录）。
+## 8 键全部有面板入口（D-057）；标题行带「恢复默认」一键回 8 键初值（D-058）；
+## 触屏设备经 HUD 动作按钮簇的「设置」按钮打开本面板（D-058，hud.gd）。
 
 signal closed
 ## changed 为变更键名（camera_shake/auto_recenter/hud_detail/auto_level/
@@ -32,6 +33,8 @@ var _recenter_buttons: Array[Button] = []
 var _hud_buttons: Array[Button] = []
 var _level_buttons: Array[Button] = []
 var _beeper_buttons: Array[Button] = []
+## 「恢复默认」按钮（D-058，标题行；探针经此点它）。
+var _reset_button: Button
 var _status_label: Label
 
 
@@ -78,6 +81,17 @@ func _ready() -> void:
 	title.add_theme_color_override("font_color", TITLE_COLOR)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
+	# 「恢复默认」（D-058）：放在标题行常驻可见——小屏面板内容可滚动，
+	# 放底部会被滚出视野；误点代价仅是重选三行 + 五个开关，不做二次确认。
+	var reset_btn := Button.new()
+	reset_btn.text = "恢复默认"
+	reset_btn.custom_minimum_size = Vector2(96, 36)
+	reset_btn.focus_mode = Control.FOCUS_NONE
+	reset_btn.add_theme_font_size_override("font_size", 16)
+	reset_btn.add_theme_color_override("font_color", TITLE_COLOR)
+	reset_btn.pressed.connect(_on_reset)
+	header.add_child(reset_btn)
+	_reset_button = reset_btn
 	var close_btn := UiKit.make_close()
 	close_btn.pressed.connect(close)
 	header.add_child(close_btn)
@@ -240,6 +254,14 @@ func _on_toggle(key: String, index: int) -> void:
 		"beeper_enabled":
 			_settings.beeper_enabled = (index == 0)
 	_after_change(key)
+
+
+## 「恢复默认」（D-058）：8 键一次性回到默认值（默认值唯一定义在
+## FlightSettings.reset_to_defaults），随后走统一落盘 + Toast 通道
+## （changed="reset"，HUD 文案「已恢复默认设置」）。
+func _on_reset() -> void:
+	_settings.reset_to_defaults()
+	_after_change("reset")
 
 
 func _after_change(changed: String = "") -> void:

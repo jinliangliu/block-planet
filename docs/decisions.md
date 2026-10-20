@@ -1835,3 +1835,43 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 
 - **ScrollContainer 无 `horizontal_enabled`/`scroll_horizontal_enabled` 属性**（Godot 4.6.3 实际是 `horizontal_scroll_mode` 枚举）：写错属性名触发 SCRIPT ERROR → 探针协程猝死 → 进程挂起 7 分钟（`get_tree().quit()` 没执行到）。修法：不禁用横向滚动（涂装行 658 > 面板 560，窄屏本来就需要横滚），改宽 min width 到 680。
 - **探针协程猝死 = 还原不执行**：`settings_panel_probe` 的还原逻辑原在 `_ready` 末尾，SCRIPT ERROR 直接杀死协程。已加双保险：`_exit_tree` 还原安全网（幂等 `_restored` 标记）+ 90 秒看门狗定时器强制 `quit()`。这是 D-010 教训在「无 SaveGuard 探针」上的同类应用。
+
+## D-058 设置面板「恢复默认」按钮 + 触屏打开入口（修订 D-057「不加恢复默认」表态）
+
+D-057 曾断言「面板不加恢复默认，留待通用设置框架」；用户评审 `feature_settings_panel.md` 后明确要求实施建议 1，本条落地并修订该表态：恢复默认不引入新的持久化语义（只是 `reset_to_defaults()` + 既有落盘通道），与通用设置框架不冲突，没有理由留待。
+
+### 改动范围（2 代码文件 + 1 探针）
+
+- `scripts/core/flight_settings.gd`：8 键字段改为**只声明不赋初值**，默认值唯一定义在新增 `reset_to_defaults()`，由 `_init` 落地——「恢复默认」按钮、`default_settings()`、探针 D 段共用同一来源，杜绝两处漂移（原方案字段初值 + 按钮逻辑各写一遍）。
+- `scripts/ui/settings_panel.gd`：标题行（常驻可见，小屏面板内容可滚动、放底部会被滚出视野）新增「恢复默认」按钮，`_on_reset` → `reset_to_defaults()` → `_after_change("reset")`，复用既有落盘 + Toast 通道；不做二次确认（误点代价仅是重选三行 + 五个开关）。
+- `scripts/ui/hud.gd`：`_on_settings_changed` 加 `"reset"` 分支（Toast「已恢复默认设置」）；新增 `_toggle_settings_panel()`（与 O 键同语义的开关）；触屏入口两处——步行动作按钮簇「设置」键（图鉴右侧，面板行延续）与飞行触控层右上角「设置」键（地图右侧）。飞行触控层也必须放：飞行时步行触控层整体隐藏（P1-3），只放一个等于飞行中（最需要调飞行设置时）仍无入口；与 D-052 地图按钮同一缺口、同一补法。
+- `tests/settings_panel_probe.gd`：49 → **58 PASS**（+9）。D 段：恢复默认按钮存在性、8 键改乱后一键回初值（与 `default_settings().to_dict()` 逐键比对）、信号键名 `reset`、三项/开关选中态同步、落盘读回；触屏入口验 `_toggle_settings_panel` 开→关行为本体（无头环境 `is_touchscreen_available()=false` 不建触控层，按钮接线由代码评审保证）。
+
+### 已知边界
+
+- 触屏按钮接线（`pressed.connect(_toggle_settings_panel)`）无头环境不可验，需真机或窗口模式人工确认；toggle 函数本体已由探针覆盖。
+
+## D-059 修复脱困死亡环路（用户实测「坠机后一直闪屏」）
+
+用户反馈：坠机弹射生还后界面「一直闪屏」。存档 `progress.json` 的 `died` 计数器在一次会话内 +46——死亡被高频重复触发。根因两层叠加：
+
+1. **`_safe_respawn_position` 搜索截断**：原实现只从出生点列向上搜 64 格，搜满即回退 `spawn_position` **原值**。玩家/坠机把出生点列堵到 64 格以上时（跑道被自己拿方块堆住、弹射落点恰在柱内），回退值仍嵌入 → `_check_stuck` 每 3 物理帧重入 `_force_unstuck` → `died.emit()` → HUD `_on_player_died` **kill 旧 tween 重启 2.3s 淡入淡出** → RIP 覆盖层高频闪烁（视觉根因），同时每次给死亡计数 +1。
+2. **`_force_unstuck` 不走 `_damage`**（设计使然：防图腾救活后原地死循环），因此 `_dead` 从不置位、死亡停顿的门控形同虚设，环路没有自愈手段。
+
+实证：`stuck_rescue_probe` A 段在出生点列盖 100 格实心柱，改造前 150 帧内 **52 次脱困 / 50 次 died**，落点永远是柱底 (y=37)；B/C 段（普通死亡、撞山弹射链）不循环——环路只在「落点仍嵌入」时成立。
+
+### 修法（3 处）
+
+- `player.gd` `_safe_respawn_position` 改**阶梯式保证落点非嵌入**：① 出生点列向上搜到世界顶（256，不再 64 格截断）；② 当前列搜到世界顶；③ `get_surface_height` 噪声地表 + 8（**不依赖区块加载**——流式世界里远方列 `get_block` 逐步失败、①② 必然搜空）；④ ③ 即终点的 `push_warning` 变体。抽 `_search_clear_upward` 复用「4 格空气 + 实海底」判定；`_force_unstuck` 加 `_dead` 守卫（防御未来其他调用方）。
+- `hud.gd` `_on_player_died` 加 **1 秒限频**：重复 `died` 不重启 RIP 动画——首次已完整播放、后续静默，不损失信息。这是针对「任何高频 died 路径」的视觉防御层，与落点修复互为保险。
+- `teleport_to`（D-039 飞行重置）**不改**：其「搜索失败回退 pos 原值」语义有文档化理由（远方坠机时跑道区块可能未加载，绝不对玩家使用搜索后的位置）；万一跑道被玩家堵住，`_force_unstuck` 的新阶梯会兜底（一次 died + 一次 RIP 闪现，不循环）。
+
+### 验证
+
+- `stuck_rescue_probe`（新增回归探针，14 断言全 PASS）：A 段 100 格柱 → died=1、落点柱顶 y=137.1、生命回满、150 帧不再重入；B 段普通死亡仍只 1 次 died、不触发脱困；C 段真实坠机链（D-056 自动归位）died=0、回初始出生点。
+- 探针自身修了两个坑：① GDScript **lambda 按值捕获**——`connect(func(): n += 1)` 的 n 恒为 0，上一版诊断探针因此假阴性（实测 `LAMBDA_RESULT x=0`），死亡计数必须用成员变量 + 方法连接或 Dictionary；② A1 断言时序——修复后脱困在「盖柱后前几帧」即发生，嵌入前提必须在 0 帧时验，计数窗口前移到盖柱前。
+
+### 清理
+
+- 删除诊断探针 `tests/stuck_exit_probe.gd/.tscn`（B 段有协程猝死缺陷；其 A 段结论「正常下机落点在碰撞盒外」已实证，坠机场景由本探针 C 段 + `crash_recover_probe` 覆盖）。
+- `tmp/run_regression.sh` 无头列表加入 `stuck_rescue_probe`（41 → 42 探针）。

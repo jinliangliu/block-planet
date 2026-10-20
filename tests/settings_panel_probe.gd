@@ -3,7 +3,10 @@ extends Node
 ## 无头验证 SettingsPanel 与 FlightSettings 的 UI 闭环（不依赖世界）：
 ## 三行分段按钮（难度/辅助/涂装）+ 五行开关（镜头抖动/松手回正/HUD 模式/
 ## 双击改平/警告蜂鸣，D-057），难度→辅助预设重置、辅助单独覆盖、点击即落盘、
-## 选中态同步、模态开/关与 closed 信号、开关与三项互不污染。
+## 选中态同步、模态开/关与 closed 信号、开关与三项互不污染；
+## D 段（D-058）：「恢复默认」按钮（8 键回初值 + 信号键名 + 落盘）+ HUD
+## _toggle_settings_panel 开关语义（触屏入口函数本体；无头不建触控层，
+## 按钮接线由代码评审保证）。
 ## 注意按钮点击用 pressed.emit() 触发（与真实点击同路）。
 
 var _pass := 0
@@ -153,6 +156,63 @@ func _ready() -> void:
 	_check(not FlightSettings.current().camera_shake
 		and FlightSettings.current().hud_detail,
 		"难度变更不重置开关值")
+
+	# ── D 段（D-058）：「恢复默认」按钮 + 触屏开关入口 ──
+	# 先把 8 键全改成非默认值，再点「恢复默认」，逐一验回初值 + 落盘。
+	var defaults := FlightSettings.default_settings().to_dict()
+	_check(panel._reset_button != null and panel._reset_button.text == "恢复默认",
+		"标题行有「恢复默认」按钮")
+	panel._shake_buttons[1].pressed.emit()      # camera_shake = false
+	panel._recenter_buttons[1].pressed.emit()   # auto_recenter = false
+	panel._hud_buttons[1].pressed.emit()        # hud_detail = true
+	panel._level_buttons[1].pressed.emit()      # auto_level = false
+	panel._beeper_buttons[1].pressed.emit()     # beeper_enabled = false
+	panel._livery_buttons[3].pressed.emit()     # livery_index = 3
+	var dirty := FlightSettings.current().to_dict()
+	var any_dirty := false
+	for k in defaults:
+		if dirty[k] != defaults[k]:
+			any_dirty = true
+	_check(any_dirty, "改乱后 8 键至少一项偏离默认（前提）")
+	var reset_keys := {"n": 0, "last": ""}
+	panel.settings_changed.connect(func(_d: int, _a: int, _l: int, k: String) -> void:
+		reset_keys["n"] += 1
+		reset_keys["last"] = k)
+	panel._reset_button.pressed.emit()
+	var after := FlightSettings.current().to_dict()
+	var all_default := true
+	for k in defaults:
+		if after[k] != defaults[k]:
+			all_default = false
+			print("  恢复默认偏差: %s = %s（期望 %s）" % [k, str(after[k]), str(defaults[k])])
+	_check(all_default, "恢复默认后 8 键全部回到默认值")
+	_check(reset_keys["n"] == 1 and reset_keys["last"] == "reset",
+		"恢复默认发一次信号且键名=reset（实际 n=%d last=%s）"
+			% [reset_keys["n"], reset_keys["last"]])
+	_check(panel._difficulty_buttons[1].button_pressed and panel._assist_buttons[1].button_pressed
+		and panel._livery_buttons[0].button_pressed,
+		"恢复默认后三项选中态同步回默认")
+	_check(panel._shake_buttons[0].button_pressed and panel._hud_buttons[0].button_pressed
+		and panel._beeper_buttons[0].button_pressed,
+		"恢复默认后开关选中态同步回默认")
+	var read4 := FlightSettings.load_or_new()
+	_check(read4.to_dict() == defaults, "恢复默认已落盘，读回一致")
+
+	# 触屏开关入口（D-058）：无头环境不建触控层（is_touchscreen_available()
+	# =false），按钮接线由代码评审保证；这里验 toggle 函数本体——与 O 键
+	# 同语义：开 → 关 → 开。
+	var host := Control.new()
+	add_child(host)
+	var hud := HUD.new()
+	add_child(hud)
+	hud._build_settings_panel(host)
+	await get_tree().process_frame
+	hud._toggle_settings_panel()
+	_check(hud._settings_panel.is_open(), "触屏入口：首次调用打开面板")
+	hud._toggle_settings_panel()
+	_check(not hud._settings_panel.is_open(), "触屏入口：再次调用关闭面板")
+	hud.queue_free()
+	host.queue_free()
 
 	# 关闭：隐藏 + closed 信号。
 	var closed := {"n": 0}

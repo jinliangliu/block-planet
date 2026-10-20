@@ -592,7 +592,11 @@ func _check_stuck() -> void:
 
 
 ## 防卡死脱困：瞬间清空生命走死亡表现，再从出生点安全重生。
+## _dead 守卫：死亡停顿期 _check_stuck 已被 _physics_process 门控跳过，
+## 这里再兜一层，防未来其他调用方在死亡流程中重复触发死亡表现。
 func _force_unstuck() -> void:
+	if _dead:
+		return
 	damage_taken.emit(health, REASON_STUCK, 0)
 	health = 0
 	died.emit()
@@ -601,21 +605,51 @@ func _force_unstuck() -> void:
 		global_position = _safe_respawn_position()
 
 
-## 出生点被堵时沿 Y 向上搜索"四格空气 + 实心底"的安全落点，
-## 防止重生后立即再次卡死形成循环。（玩家 3.6 格高，需 4 格净空）
+## 安全落点：阶梯式保证返回值绝不嵌入方块（D-059）。
+## 原实现只从出生点列向上搜 64 格，搜满即回退 spawn_position 原值——玩家把
+## 出生点用方块堆过 64 格高时（或初始跑道被自己堵住），回退值仍嵌入 →
+## _check_stuck 每 3 物理帧重入 _force_unstuck → died 风暴 → HUD 的 RIP
+## 覆盖层被反复 kill+重启淡入淡出（用户实测「一直闪屏」，存档死亡计数
+## 短时间 +46）。阶梯（前级落空才走下一级）：
+##   ① 出生点列向上搜到世界顶（256，不再 64 格截断）；
+##   ② 当前列（玩家卡住的位置）向上搜到世界顶；
+##   ③ get_surface_height 噪声地表 + 8——不依赖区块加载：流式世界里远方列
+##      可能未生成，get_block 对未加载列逐步失败、①② 必然搜空；
+##      噪声地表忽略玩家放置的方块，+8 留足净空余量。
+## 已知残差：当前列与出生点列都被玩家实心堆到世界顶、且噪声落点又落在自制
+## 高塔里——需 500+ 放置方块，现实中不成立；万一发生，HUD 侧 died 限频
+## （hud.gd _on_player_died）保证不闪屏，只是计数继续涨。
 func _safe_respawn_position() -> Vector3:
-	var cell := Vector3i(spawn_position.floor())
-	for _i in range(64):
+	var top := _world.CHUNK_SIZE.y
+	var found := _search_clear_upward(Vector3i(spawn_position.floor()), top)
+	if found.y >= 0.0:
+		return found
+	found = _search_clear_upward(Vector3i(global_position.floor()), top)
+	if found.y >= 0.0:
+		return found
+	var wx := int(floorf(global_position.x))
+	var wz := int(floorf(global_position.z))
+	var surface := _world.get_surface_height(wx, wz)
+	push_warning("Player: 脱困列搜索失败，回退噪声地表 col=(%d,%d) surface=%d"
+		% [wx, wz, surface])
+	return Vector3(wx + 0.5, float(surface + 8), wz + 0.5)
+
+
+## 从 cell 所在列向上找第一个「4 格空气 + 实海底」的可站立格（玩家 3.6 格高，
+## 需 4 格净空）。返回脚底 +0.1 的落点；y < 0 表示搜到世界顶也没找到
+## （调用方据此走下一级阶梯）。
+func _search_clear_upward(cell: Vector3i, top: int) -> Vector3:
+	var c := cell
+	while c.y < top:
 		var clear := true
 		for h in range(4):
-			if BlockTypes.is_solid(_world.get_block(cell + Vector3i(0, h, 0))):
+			if BlockTypes.is_solid(_world.get_block(c + Vector3i(0, h, 0))):
 				clear = false
 				break
-		var grounded := BlockTypes.is_solid(_world.get_block(cell + Vector3i(0, -1, 0)))
-		if clear and grounded:
-			return Vector3(cell) + Vector3(0.5, 0.1, 0.5)
-		cell.y += 1
-	return spawn_position
+		if clear and BlockTypes.is_solid(_world.get_block(c + Vector3i(0, -1, 0))):
+			return Vector3(c) + Vector3(0.5, 0.1, 0.5)
+		c.y += 1
+	return Vector3(0.0, -1.0, 0.0)
 
 
 func setup_world(world: World) -> void:

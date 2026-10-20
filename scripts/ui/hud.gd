@@ -59,6 +59,9 @@ var _toast_label: Label
 var _toast_tween: Tween
 var _death_overlay: Control
 var _death_tween: Tween
+## RIP 覆盖层上次播放时刻（ms，Time.get_ticks_msec；D-059 限频用，初值取
+## 足够负使首次死亡必然播放）。
+var _last_death_overlay_ms := -1000000
 var _day_night: DayNightCycle
 var _craft_overlay: Control
 var _craft_result_grid: GridContainer
@@ -601,6 +604,15 @@ func _build_action_buttons(root: Control) -> void:
 	bestiary_button.pressed.connect(func(): open_bestiary())
 	_anchor_bottom_right(root, bestiary_button, 486.0, 138.0)
 
+	# 设置（D-058）：移动端没有 O 键，此前触屏完全打不开飞行设置面板
+	# （8 个设置键只能靠改 JSON）。排在图鉴右侧，同属「面板行」。
+	var settings_button := Button.new()
+	settings_button.text = "设置"
+	settings_button.custom_minimum_size = Vector2(76, 76)
+	settings_button.focus_mode = Control.FOCUS_NONE
+	settings_button.pressed.connect(_toggle_settings_panel)
+	_anchor_bottom_right(root, settings_button, 572.0, 138.0)
+
 
 func _build_hotbar(root: Control) -> void:
 	# 快捷栏按「创造模式清单」建满（建材 + 工具）；生存模式只显示前 9 格。
@@ -919,6 +931,14 @@ func _build_flight_touch(root: Control) -> void:
 	map_btn.focus_mode = Control.FOCUS_NONE
 	map_btn.pressed.connect(_toggle_tactical_map)
 	row.add_child(map_btn)
+	# 设置（D-058）：与地图按钮同一缺口——移动端没有 O 键。面板打开时
+	# input_locked 门控飞行输入（同 K/O 面板，P2-2），不会误触当前杆量。
+	var ft_settings_btn := Button.new()
+	ft_settings_btn.text = "设置"
+	ft_settings_btn.custom_minimum_size = Vector2(72, 56)
+	ft_settings_btn.focus_mode = Control.FOCUS_NONE
+	ft_settings_btn.pressed.connect(_toggle_settings_panel)
+	row.add_child(ft_settings_btn)
 	var engine_btn := Button.new()
 	engine_btn.text = "发动机"
 	engine_btn.custom_minimum_size = Vector2(88, 56)
@@ -2876,6 +2896,16 @@ func _on_settings_panel_closed() -> void:
 	_on_manual_closed()
 
 
+## 触屏「设置」按钮（D-058）：与 O 键同语义的开关——面板开着则关。
+## 步行触控层与飞行触控层各放一个：飞行时步行层整体隐藏（P1-3），
+## 只放一个等于飞行中（最需要调飞行设置的时候）仍然没有入口。
+func _toggle_settings_panel() -> void:
+	if _settings_panel != null and _settings_panel.is_open():
+		close_settings_panel()
+	else:
+		open_settings_panel()
+
+
 ## 设置改动即时生效（飞机每帧读 FlightSettings.current()）；此处只 Toast 确认。
 ## changed 为变更键名；难度/辅助/涂装变更时为空串，走汇总文案（D-057）。
 func _on_settings_changed(_difficulty: int, _assist_level: int, _livery_index: int,
@@ -2888,6 +2918,8 @@ func _on_settings_changed(_difficulty: int, _assist_level: int, _livery_index: i
 	var on_off := func(on: bool) -> String: return "开" if on else "关"
 	var msg := ""
 	match changed:
+		"reset":
+			msg = "已恢复默认设置"
 		"camera_shake":
 			msg = "镜头抖动：%s" % on_off.call(s.camera_shake)
 		"auto_recenter":
@@ -3227,9 +3259,16 @@ func _build_death_overlay(root: Control) -> void:
 
 
 ## 玩家死亡：浮现 RIP 覆盖层，停顿结束（约 2.2 秒）后淡出，与复活同步。
+## D-059 限频：1 秒内重复 died（脱困环路等高频路径）不重启淡入淡出——
+## tween kill + 重启会让覆盖层高频闪烁（用户实测「一直闪屏」的视觉根因）；
+## 首次已完整播放，后续静默即可，不损失任何信息。
 func _on_player_died() -> void:
 	if _death_overlay == null:
 		return
+	var now := Time.get_ticks_msec()
+	if now - _last_death_overlay_ms < 1000:
+		return
+	_last_death_overlay_ms = now
 	if _death_tween != null:
 		_death_tween.kill()
 	_death_overlay.modulate.a = 0.0
