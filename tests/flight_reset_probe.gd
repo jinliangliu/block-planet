@@ -1,8 +1,9 @@
 extends Node
 ## 飞行重置探针（D-039）：坠机 / 卡住时按 Y 一键归位回本地图初始跑道。
 ## 场景：实例化 main.tscn（默认区域 ASIA，带机场），SaveGuard 隔离存档。
-##   A 段 坠机重置：wreck() 弹出乘员 → reset → 玩家回初始出生点、残骸清除、
-##        停机位出现一架满油完好的飞机、玩家朝北正对飞机、已下机。
+##   A 段 坠机重置：wreck() 弹出乘员 → **D-056 起生还即自动重置**（无需按 Y）
+##        → 玩家回初始出生点、残骸清除、停机位出现一架满油完好的飞机、玩家
+##        朝北正对飞机、已下机。
 ##   B 段 卡住重置（完好飞机归位）：把在场飞机 place() 到远处模拟「卡住」，
 ##        reset → 同一实例（instance_id 不变，蓝图装配不丢）被搬回停机位。
 ##        （玩家在远方时初始跑道区块已流式卸载——真实坠机场景，teleport_to
@@ -81,14 +82,14 @@ func _run() -> void:
 		await get_tree().physics_frame
 	_check(player.is_riding(), "A0 玩家已登机")
 	craft.wreck("探针触发坠机")
-	for i in range(10):
-		await get_tree().physics_frame
-	_check(not player.is_riding(), "A1 坠机弹出乘员")
+	# wreck 同步置解体：必须在残骸被自动清除前读（清除后对象已释放）。
 	_check(craft.is_wrecked(), "A2 飞机已解体")
-
-	main_scene.reset_flight_experience()
+	# D-056：坠机弹射生还后 Main 自动走一遍重置（Events.aircraft_crash_survived
+	# → reset_flight_experience），这里等它跑完即可，不再手动调用。
 	for i in range(30):
 		await get_tree().process_frame
+	_check(not player.is_riding(), "A1 坠机弹出乘员")
+	_check(not is_instance_valid(craft), "A1b 残骸已被自动清除（未等 4 秒消散）")
 	var after_a := _crafts_under(main_scene)
 	_check(after_a.size() == 1, "A3 残骸已清除且场上恰好一架飞机（实际 %d）" % after_a.size())
 	var new_craft: Aircraft = after_a[0] if after_a.size() == 1 else null

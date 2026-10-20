@@ -112,6 +112,8 @@ func _ready() -> void:
 	_player.flight_camera = _flight_camera
 	_hud.setup_flight(_flight_camera, _recorder, _replay)
 	Events.aircraft_ride_changed.connect(_on_flight_ride_changed)
+	# 坠机生还自动归位（D-056）：弹射后无需玩家按 Y，自动回到初始停机坪。
+	Events.aircraft_crash_survived.connect(_on_crash_survived)
 	# 飞行任务航路 / 降落区锚定机场或降落场（两者皆无才锚定出生点）：
 	# 形成「跑道起飞 → 单向绕场 → 落回跑道面」闭环。
 	if mission_anchor == Vector3.ZERO:
@@ -257,7 +259,10 @@ func _on_flight_ride_changed(riding: bool) -> void:
 ##      停机位——用 place 而非销毁重造：蓝图装配机的零件聚合会随销毁丢失；
 ##   3. 场上没有完好飞机时（坠毁且背包已空）补一架默认机，保证重置后一定能飞；
 ##   4. 玩家传送回初始出生点、朝北正对飞机（与开局摆机同一姿态）。
-func reset_flight_experience() -> void:
+## D-056 起坠机弹射生还也会自动走一遍本重置（Events.aircraft_crash_survived
+## → _on_crash_survived），无需玩家按 Y；卡住 / 手动重开仍走 Y 键入口。
+## notice 为收尾提示文案；坠机自动归位（D-056）会带上坠机原因，空串用默认文案。
+func reset_flight_experience(notice: String = "") -> void:
 	if _flight_spawn == Vector3.ZERO:
 		return
 	# 回放中让位（同 player 的 replaying 守卫）：运镜时搬世界会打断演出。
@@ -297,7 +302,26 @@ func reset_flight_experience() -> void:
 		if parked != null:
 			parked.place(parked.global_position, PI)
 	_player.teleport_to(_flight_spawn, PI)
-	Events.notice.emit("✈️ 已重置：回到跑道起点，满油待发。")
+	Events.notice.emit(notice if not notice.is_empty()
+		else "✈️ 已重置：回到跑道起点，满油待发。")
+
+
+## 坠机生还救援（D-056）：弹射后自动走一遍飞行重置——退出驾驶舱界面、
+## 玩家与飞机回到本地图初始停机坪，满油待发。语义同 Y 手动重置（D-039），
+## 坠机时免去玩家自己按一键救援（用户实测：「坠机了但人物没挂，界面停留
+## 在驾驶舱画面」——期望自动退出座舱、回到初始停机坪）。
+## 延迟一帧执行：事件是从 wreck() 的物理回调栈里发出来的（弹射→事件→
+## 这里），当场清除残骸会与 wreck 收尾的翻倒 tween / 消散计时器抢同一个
+## 节点，且 ensure_chunks_in_region 是重活，同步塞进物理帧会突然拉长帧。
+func _on_crash_survived(reason: String) -> void:
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return
+	# 带上坠机原因的收尾提示；原因为空（异常路径）时回落 reset 的默认文案。
+	var notice := ""
+	if not reason.is_empty():
+		notice = "💥 %s——已回到停机坪，满油待发。" % reason
+	reset_flight_experience(notice)
 
 
 ## Y（D-039）：飞行重置入口。守卫与 player 的飞行键一致：死亡停顿 / 回放 /

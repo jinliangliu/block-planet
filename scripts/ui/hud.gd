@@ -963,10 +963,10 @@ var _last_crash_reason := ""
 ## 把原因合并进去（见 _on_damage_taken 的 REASON_CRASH 分支）。
 func _on_aircraft_crashed(reason: String) -> void:
 	_last_crash_reason = reason
-	# 附重置提示（D-039）：坠机后玩家第一诉求是「再飞一次」，Toast 是覆盖式的，
-	# 两条各自弹出会互相顶掉，故并进同一条。_last_crash_reason 保持纯原因文本
-	# （掉血播报合并逻辑见 _on_damage_taken 的 REASON_CRASH 分支）。
-	_show_toast("💥 %s（按 Y 重置回跑道）" % reason)
+	# D-056：弹射生还后 Main 会自动归位并另发一条带原因的收尾提示，这里不再
+	# 附「按 Y 重置回跑道」——坠机已自动回停机坪，Y 留给卡住/手动重开；
+	# 致死弹射不走自动归位，紧随的掉血/死亡播报会接上。
+	_show_toast("💥 %s" % reason)
 
 
 func _on_ft_exit() -> void:
@@ -995,6 +995,18 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 	_ridden_craft = _player.aircraft() if _riding and _player != null else null
 	if _ridden_craft != null:
 		_ridden_craft.crashed.connect(_on_aircraft_crashed)
+	# 飞行屏幕仪表 HUD（D-056）：下机即整层收起。tick 只在驾驶中驱动，不显式
+	# 隐藏的话座舱仪表簇（第一人称滞留项：_glass + _cockpit，可能还有 _warn /
+	# _fd）会冻结在屏上——用户实测「坠机后人物没挂，界面停留在驾驶舱画面」。
+	# 登机后由 tick 的 _apply_visibility 按视角恢复，无需在此处放行。
+	if not _riding and _instrument_hud != null:
+		_instrument_hud.hide_all()
+	# 战术地图（M）：飞行中打开时改了鼠标为 VISIBLE 且不锁输入。坠机弹射 /
+	# 下机后它不会自己关，而 M 键在「不在驾驶中」的语义已变成打开地图选择器
+	# （hud.gd:365-367 vs 381-383），玩家再也关不掉它、鼠标还露在外面。
+	# 下机即代关：close_map 会把鼠标模式还原成打开前的值。
+	if not _riding and _tactical_map != null and _tactical_map.is_open():
+		_tactical_map.close_map()
 	# P1-2：下机且任务仍在进行 → 主动放弃当前任务，避免永久卡 RUNNING。
 	if not _riding and _mission_panel != null and _mission_panel.is_running():
 		_mission_panel.abandon_mission()

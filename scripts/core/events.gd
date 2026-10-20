@@ -15,6 +15,12 @@ signal player_mode_changed(flying: bool)
 ## 玩家登机 / 下机后广播，HUD 据此显隐飞行仪表。
 signal aircraft_ride_changed(riding: bool)
 
+## 坠机弹射且玩家生还后广播（D-056，reason 为坠机原因）：Main 监听后自动
+## 执行飞行重置——退出驾驶舱界面，玩家与飞机回到本地图初始停机坪。
+## 死亡不广播：_begin_death 已接管飞机交还，复活流程会把玩家送回出生点，
+## 坠机救援不抢死亡流程的戏（否则墓碑处看不到残骸、复活点被抢先改写）。
+signal aircraft_crash_survived(reason: String)
+
 ## 玩家登船 / 下船后广播（D-042 航海玩法），HUD 据此显隐航海界面。
 signal boat_ride_changed(riding: bool)
 

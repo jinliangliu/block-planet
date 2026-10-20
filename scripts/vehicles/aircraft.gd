@@ -810,7 +810,8 @@ func wreck(reason: String) -> void:
 	crashed.emit(reason)
 	if rider != null:
 		var ejected := rider
-		ejected.exit_aircraft(CRASH_DAMAGE)
+		# 带上坠机原因（D-056）：生还时 Main 的自动归位提示要说清「为什么坠」
+		ejected.exit_aircraft(CRASH_DAMAGE, reason)
 	# 残骸：向一侧翻倒即完成演出（P2-10：坠落交给 _physics_process 的
 	# _wrecked 分支——物理重力；原 tween 还带动 position 下沉 0.35 m，
 	# 与物理坠落互相打架，故只保留翻倒）。

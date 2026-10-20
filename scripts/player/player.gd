@@ -744,8 +744,9 @@ func ride_aircraft(craft: Aircraft) -> void:
 		+ "（起飞步骤看面板里的教练区）")
 
 
-## 下机：落到机身侧面。damage > 0 表示坠机抛出（照常扣血）。
-func exit_aircraft(damage: int = 0) -> void:
+## 下机：落到机身侧面。damage > 0 表示坠机抛出（照常扣血），
+## crash_reason 为坠机原因（仅坠机抛出时传，供自动归位的提示文案）。
+func exit_aircraft(damage: int = 0, crash_reason: String = "") -> void:
 	if _aircraft == null:
 		return
 	var craft := _aircraft
@@ -772,6 +773,14 @@ func exit_aircraft(damage: int = 0) -> void:
 	if damage > 0:
 		_damage(damage, REASON_CRASH)
 	Events.aircraft_ride_changed.emit(false)
+	# 坠机弹射且生还（D-056）：广播坠机生还事件，由 Main 自动执行飞行重置
+	# ——退出驾驶舱界面、回到本地图初始停机坪。不在这里自己传送：初始停机位
+	# /区块就绪/补机是 Main 的归位知识（D-039 reset_flight_experience）。
+	# 判据用 damage 而非「靠近残骸」：坠机抛出的伤害照常结算，正常 X 下机
+	# 不播；死亡也不播——_begin_death 已接管（它在 _damage 里同步置 _dead，
+	# 故此处判定时死亡已生效），复活流程送玩家回出生点，不由坠机救援抢占。
+	if damage > 0 and not _dead:
+		Events.aircraft_crash_survived.emit(crash_reason)
 
 
 ## 当前驾驶的飞行器（null 表示徒步）；HUD 飞行仪表据此显隐。

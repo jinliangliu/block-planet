@@ -94,6 +94,13 @@ func set_beeper(beeper: AlertBeeper) -> void:
 	_beeper = beeper
 
 
+## 整层收起（下机 / 坠机弹射 / 死亡退机，D-056）：tick 只在驾驶中驱动，
+## 不显式隐藏的话座舱仪表簇会冻结在屏上——用户实测「坠机后人物没挂，
+## 界面停留在驾驶舱画面」。再次登机由 tick 的 _apply_visibility 按视角恢复。
+func hide_all() -> void:
+	_hide_all()
+
+
 func register_view(view: Node) -> void:
 	if view != null and not _views.has(view):
 		_views.append(view)

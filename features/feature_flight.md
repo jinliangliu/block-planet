@@ -4,7 +4,7 @@
 > 引擎：Godot 4.6.3 / GDScript（Mobile 渲染器）
 > 文档性质：**已实现现状说明书**（不是开发任务书）
 > 事实来源：**代码**。本文与代码冲突时以代码为准，并应回头修订本文。
-> 相关决策：`docs/decisions.md` 的 D-030 ~ D-055；玩法基准见 `docs/game-design.md` 第 9 章。
+> 相关决策：`docs/decisions.md` 的 D-030 ~ D-056；玩法基准见 `docs/game-design.md` 第 9 章。
 
 ---
 
@@ -58,7 +58,8 @@
 → 接近机场（≤400 m 转进近，十字给 3° 下滑道指令，世界里有地面箭头 + 下滑道双轨）
 → 接地滑跑（空格刹车）
 → X 下机（自动熄火、油门锁 0）
-→ 坠机时：按 Y 一键回到本图初始跑道（玩家 + 飞机归位、满油待发）
+→ 坠机时：弹射生还即【自动】退出座舱界面、回到本图初始停机坪满油待发（D-056）；
+  卡住 / 想手动重开再按 Y（D-039 一键归位，语义相同）
 ```
 
 ---
@@ -241,7 +242,7 @@ scripts/
 | M | 战术地图 |
 | H | HUD 简单 / 详细 |
 | P | 手动回放最近一段飞行 |
-| Y | 飞行重置（回本图初始跑道） |
+| Y | 飞行重置（回本图初始跑道；坠机已自动归位，此键留给卡住/手动重开） |
 
 滚轮：空中微调油门（±5%）；追尾调距离；地图调高度。
 
@@ -533,6 +534,27 @@ s=1（1280×720）实测几何：
 顶部居中（追尾）/ 左上（座舱），236 px 宽。内容：标题、空速（含失速速度）、离地高度、油门条（█/░ 字形）、视角、发动机状态、失速行、起飞教练区。
 坠机时隐藏（`is_wrecked()`）。
 
+### 8.5 坠机与救援（D-039 / D-056）
+
+解体（超速 / 撞击 Δv ≥ 7 m/s）→ `wreck()`：喷碎屑、广播 `crashed(reason)`、**抛出乘员**（`exit_aircraft(CRASH_DAMAGE=6, reason)`）、残骸翻倒后 4 秒消散。
+
+弹射后的界面复原（D-056，全部随 `aircraft_ride_changed(false)` 一次到位）：
+
+| 项 | 行为 |
+|---|---|
+| 屏幕仪表 HUD | `hide_all()` 整层收起——tick 只在驾驶中驱动，不显式隐藏会冻结在座舱画面（用户实测病根） |
+| 座舱 3D 面板 / 世界标注 | 释放并注销 |
+| 飞行相机 | `set_active(false)` 让位，玩家相机恢复 |
+| 飞行卡片 / 触屏飞行层 / 教练 | 收起 |
+| 战术地图（M） | **代关**——它不锁输入且改了鼠标 VISIBLE，不关的话 M 键语义已变成开地图选择器，玩家再也关不掉 |
+| 左上状态块 / 物品栏 / 小地图 / 模式徽章 / 时间行 | 恢复显示 |
+
+**生还即自动归位**：`exit_aircraft` 在伤害结算之后发 `Events.aircraft_crash_survived(reason)`（判据 `damage > 0 and not _dead`），Main 延迟一帧执行 D-039 的 `reset_flight_experience`——残骸立即清除、停机位补/搬一架满油完好的飞机、玩家传送回初始出生点朝北正对飞机，Toast「💥 原因——已回到停机坪，满油待发。」
+
+- **致死弹射不走自动归位**：死亡流程接管（墓碑 + 2.2 s 停顿 + 回出生点复活），坠机救援不抢戏。
+- **弹射伤害照常扣**（6 点）：自动归位不得变成「免费重置」，探针 A13 钉死 `health == MAX_HEALTH - 6`。
+- 卡住 / 手动重开仍按 **Y**（与自动归位同一函数，`notice` 文案不同）。
+
 ---
 
 ## 9. 引导与教学
@@ -714,7 +736,7 @@ s=1（1280×720）实测几何：
 bash tmp/run_regression.sh     # 串行；跑前备份 user://，跑后 diff -r
 ```
 
-当前 **38 个探针**（28 无头 + 10 窗口截图），最近一次全量 **0 FAIL**、`[user://] RESTORED_OK`。
+当前 **41 个探针**（31 无头 + 10 窗口截图），最近一次全量 **0 FAIL**、`[user://] RESTORED_OK`。
 
 飞行相关探针：
 
@@ -727,7 +749,7 @@ bash tmp/run_regression.sh     # 串行；跑前备份 user://，跑后 diff -r
 | `flight_director_probe` | **51** 条：导引律、模式判据、不出屏、标签动作词 |
 | `flight_director_shot` | 三态截图取证（对准 / 偏航+偏高 / 起飞） |
 | `flight_hud_shot` | 真实飞行链路 HUD（39 条） |
-| `flight_view_probe`、`flight_stream_probe`、`flight_reset_probe`、`flight_settings_probe` | 视角 / 流式 / 重置 / 设置 |
+| `flight_view_probe`、`flight_stream_probe`、`flight_reset_probe`、`crash_recover_probe`、`flight_settings_probe` | 视角 / 流式 / 重置（D-039 Y 键 + D-056 坠机自动归位，40 条）/ 设置 |
 | `coach_cockpit_shot`、`takeoff_coach_shot`、`flight_panel_shot`、`flight_shot` | 教练与面板取证 |
 | `airport_probe`、`field_probe` | 机场与降落场 |
 | `terrain_block_probe`、`terrain_survey_probe` | D-055：新方块属性/纹理/掉落（22 条）；分层地形的数字验收（18 条，含**③b 全域无空气墙**——最大单步落差 ≤ `MAX_SLOPE+SLOPE_SLACK`，地形改陡了立刻 FAIL） |

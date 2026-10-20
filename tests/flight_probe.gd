@@ -716,14 +716,21 @@ func _run() -> void:
 		"P2-5：骑乘后 HUD 连接该机 crashed")
 	hud._last_crash_reason = ""
 	bp_craft.wreck("摔得太狠，机身解体")
-	await _frames(2)
+	# D-056：坠机原因/掉血播报都在 wreck 内同步完成，自动归位的收尾提示延迟
+	# 一帧才覆盖 Toast——故这里不 await 直接读，才能验到 P2-5 的合并文案。
 	var crash_toast := hud._toast_label.text if hud._toast_label != null else ""
 	_check(crash_toast.contains("飞机坠毁了") and crash_toast.contains("摔得太狠"),
 		"P2-5：坠机播报带具体原因（「%s」）" % crash_toast)
 	_check(not bp_craft.crashed.is_connected(hud._on_aircraft_crashed),
 		"P2-5：弹射下机后 HUD 断开连接（连接不泄漏）")
-	bp_craft.queue_free()
-	await get_tree().physics_frame
+	# D-056：弹射生还后 Main 自动执行飞行重置（延迟一帧）——残骸由它清除，
+	# 不再手动 queue_free（手动清了重置就找不到残骸，会改补一架默认机）。
+	# 注意：重置会把玩家传送回初始机场，测试跑道区块随之被流式卸载——N 段
+	# 断言（空中坠落 / 杆量归一）不依赖跑道地形，不受影响。
+	for i in range(10):
+		await get_tree().process_frame
+	_check(not is_instance_valid(bp_craft),
+		"D-056：坠机残骸已被自动重置清除（未等 4 秒消散）")
 
 	# ── N 段：残骸坠落 + 鼠标杆单位圆（P2-10 / P2-11）────────────
 	# P2-10：wreck 原来把 velocity 置零后 _physics_process 直接 return——
