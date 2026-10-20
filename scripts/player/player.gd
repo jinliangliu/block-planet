@@ -678,6 +678,9 @@ func set_spawn_position(pos: Vector3) -> void:
 ## 初始跑道所在区块可能已卸载，get_block 对未加载列逐步失败、搜索一路跑满
 ## ——此时回退 pos 原值（同 _safe_respawn_position 的兜底），区块随后随玩家
 ## 位置自动重载，绝不对玩家使用搜索后的位置。
+## D-060：姿态必须整体归正，不能只写 yaw——heading 只定朝向，pitch/roll 与
+## 相机俯仰若保留坠机前的极端值（俯冲低头/抬头），第三人称下相机几乎在玩家
+## 正上方，人像躺在地上（用户实测：解体重置后「身体姿态未重置」）。
 func teleport_to(pos: Vector3, heading: float) -> void:
 	velocity = Vector3.ZERO
 	_fall_speed = 0.0
@@ -699,7 +702,9 @@ func teleport_to(pos: Vector3, heading: float) -> void:
 		if found:
 			pos = Vector3(cell) + Vector3(0.5, 0.1, 0.5)
 	global_position = pos
-	rotation.y = heading
+	rotation = Vector3(0.0, heading, 0.0)
+	_camera.rotation.x = 0.0
+	_spring_arm.rotation.x = 0.0
 
 
 ## 选择快捷栏槽位并广播变化。
@@ -1453,6 +1458,13 @@ func _respawn() -> void:
 	# 清空坠落速度：重生前残留的坠落速度会在落地瞬间被误判为跌落伤害。
 	_fall_speed = 0.0
 	_stuck_frames = 0
+	# D-060：pitch/roll 与相机俯仰归正（同 teleport_to）——死亡瞬间视角可能
+	# 拉在极端位置，复活后第三人称相机留在高空，人像躺在地上。yaw 不重置
+	# （复活保留死亡时朝向是既有语义）。
+	rotation.x = 0.0
+	rotation.z = 0.0
+	_camera.rotation.x = 0.0
+	_spring_arm.rotation.x = 0.0
 	global_position = spawn_position
 	_last_hunger_int = MAX_HUNGER
 	health_changed.emit(health)

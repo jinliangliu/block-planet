@@ -1875,3 +1875,22 @@ D-057 曾断言「面板不加恢复默认，留待通用设置框架」；用�
 
 - 删除诊断探针 `tests/stuck_exit_probe.gd/.tscn`（B 段有协程猝死缺陷；其 A 段结论「正常下机落点在碰撞盒外」已实证，坠机场景由本探针 C 段 + `crash_recover_probe` 覆盖）。
 - `tmp/run_regression.sh` 无头列表加入 `stuck_rescue_probe`（41 → 42 探针）。
+
+## D-060 坠机归位 / 复活重置玩家身体姿态与相机俯仰（修复「解体重置后人物躺着」）
+
+用户反馈：飞机解体后飞机和玩家都重置了，但玩家的身体姿态未重置（截图：玩家仰躺在跑道旁地面上）。根因两层叠加，`teleport_to()` 与 `_respawn()` 各踩一遍：
+
+1. **身体姿态残留**：`teleport_to()`（D-039 飞行重置落点）原实现只写 `rotation.y = heading`，不归零 pitch/roll。而驾驶中 `_physics_process` 第 529 行 `global_transform = _aircraft.seat_transform()` **整体覆盖玩家 transform（含 rotation）**——坠机翻滚时机体带着 roll/pitch，弹射后玩家残留机身姿态；归位只写 yaw，人就躺着回到停机坪。
+2. **相机俯仰残留**：`_rotate_view` 写 `_camera.rotation.x`（clamp ±PITCH_LIMIT），`exit_aircraft` 第 804 行把 `_spring_arm.rotation.x` 同步成第一人称相机 pitch。坠机前的极端视角（俯冲低头/抬头）原样保留，第三人称下相机几乎在玩家正上方，人像趴在地上。
+
+### 修法（1 代码文件）
+
+- `player.gd` `teleport_to()`：姿态整体归正 `rotation = Vector3(0.0, heading, 0.0)`（heading 只定 yaw），第一人称相机与弹簧臂俯仰同步归零。
+- `player.gd` `_respawn()`：pitch/roll 与相机俯仰同样归正；**yaw 不重置**（复活保留死亡时朝向是既有语义，与 teleport_to 的差异保持）。
+- 不改 `exit_aircraft` 的「弹簧臂俯仰同步第一人称相机」（正常下机保持视角连续是既有设计）；不改开局摆机的 `_player.rotation.y = PI`。
+
+### 验证
+
+- `flight_reset_probe` A 段新增 A8b/A8c：进近前把玩家 roll/pitch（0.9/0.5）与相机俯仰（−0.9）弄脏再坠机，断言归位后全部归零。
+- **改造前对照**：A8b FAIL（残留 pitch=0.900 roll=0.500）+ A8c FAIL（残留 fp=−0.900 chase=−0.900），bug 实体复现；修复后 FLIGHT_RESET_TEST_OK。
+- 探针复现手法的坑：滚转写到 `craft` 上会被飞机自身的 basis 回同步在下帧抹平（D-048，`global_transform = Transform3D(_state.basis, ...)`），seat_transform 随即把玩家姿态也带回正——第一版对照因此 A8b 假阴性 PASS。`wreck()` 是同步弹出的，故在调用前一刻把滚转直接写到玩家节点，等价于「弹射瞬间机身歪着」。

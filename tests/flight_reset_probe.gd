@@ -4,6 +4,8 @@ extends Node
 ##   A 段 坠机重置：wreck() 弹出乘员 → **D-056 起生还即自动重置**（无需按 Y）
 ##        → 玩家回初始出生点、残骸清除、停机位出现一架满油完好的飞机、玩家
 ##        朝北正对飞机、已下机。
+##        D-060：进近前先把玩家 roll/pitch 与相机俯仰弄脏，断言归位后整体
+##        归正（修复前只写 yaw，第三人称下玩家像躺在地上）。
 ##   B 段 卡住重置（完好飞机归位）：把在场飞机 place() 到远处模拟「卡住」，
 ##        reset → 同一实例（instance_id 不变，蓝图装配不丢）被搬回停机位。
 ##        （玩家在远方时初始跑道区块已流式卸载——真实坠机场景，teleport_to
@@ -77,10 +79,25 @@ func _run() -> void:
 	# 先给玩家一个非零 yaw：进近引导的 looking_at 在「玩家-目标」共线时告警
 	# （真实开局玩家 yaw=π 已避开，探针默认 yaw=0 会踩）。
 	player.rotation.y = 0.8
+	# D-060：把身体姿态与相机俯仰弄脏再坠机，模拟坠机前的极端视角（俯冲低头
+	# /抬头）。不清脏的话归位后的归正断言恒真——假阴性。
+	player.rotation.x = 0.5
+	player.rotation.z = -0.3
+	var fp_cam := player.get_node("Camera3D") as Camera3D
+	var chase_spring := player.get_node("SpringArm3D") as SpringArm3D
+	fp_cam.rotation.x = -0.9
+	chase_spring.rotation.x = -0.9
 	player.ride_aircraft(craft)
 	for i in range(30):
 		await get_tree().physics_frame
 	_check(player.is_riding(), "A0 玩家已登机")
+	# 坠机翻滚：弹射前机体带着 roll/pitch。驾驶中 _physics_process 每帧
+	# global_transform = seat_transform() 整体覆盖玩家 transform，弹射后玩家
+	# 残留机身 roll/pitch——用户实测「身体姿态未重置」的实体来源。wreck() 是
+	# 同步弹出的，故在调用前一刻直接把滚转写到玩家节点，复现「弹射瞬间机身
+	# 歪着」（写到 craft 上会被飞机自身的 basis 回同步在下帧抹平，D-048）。
+	player.rotation.x = 0.9
+	player.rotation.z = 0.5
 	craft.wreck("探针触发坠机")
 	# wreck 同步置解体：必须在残骸被自动清除前读（清除后对象已释放）。
 	_check(craft.is_wrecked(), "A2 飞机已解体")
@@ -103,6 +120,12 @@ func _run() -> void:
 		"A7 玩家回到初始出生点（偏移 %s）" % str(player.global_position - flight_spawn))
 	_check(absf(absf(player.rotation.y) - PI) < 0.01,
 		"A8 玩家朝北正对飞机（yaw=%.3f）" % player.rotation.y)
+	_check(absf(player.rotation.x) < 0.001 and absf(player.rotation.z) < 0.001,
+		"A8b 玩家身体姿态归正（pitch=%.3f roll=%.3f，D-060 前残留 0.5/-0.3）"
+			% [player.rotation.x, player.rotation.z])
+	_check(absf(fp_cam.rotation.x) < 0.001 and absf(chase_spring.rotation.x) < 0.001,
+		"A8c 相机俯仰归正（fp=%.3f chase=%.3f，D-060 前残留 -0.9）"
+			% [fp_cam.rotation.x, chase_spring.rotation.x])
 	_check(not player.is_riding(), "A9 玩家处于下机状态")
 
 	# ── B 段：卡住重置（完好飞机同实例归位）────────────
