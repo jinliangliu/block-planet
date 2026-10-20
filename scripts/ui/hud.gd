@@ -2877,10 +2877,28 @@ func _on_settings_panel_closed() -> void:
 
 
 ## 设置改动即时生效（飞机每帧读 FlightSettings.current()）；此处只 Toast 确认。
-func _on_settings_changed(_difficulty: int, _assist_level: int, _livery_index: int) -> void:
+## changed 为变更键名；难度/辅助/涂装变更时为空串，走汇总文案（D-057）。
+func _on_settings_changed(_difficulty: int, _assist_level: int, _livery_index: int,
+		changed: String) -> void:
 	var s := FlightSettings.current()
-	Events.notice.emit("飞行设置：难度 %s · 辅助 %s · 涂装 %s" % [
-		s.difficulty_name(), s.assist_name(), s.livery_name()])
+	if changed.is_empty():
+		Events.notice.emit("飞行设置：难度 %s · 辅助 %s · 涂装 %s" % [
+			s.difficulty_name(), s.assist_name(), s.livery_name()])
+		return
+	var on_off := func(on: bool) -> String: return "开" if on else "关"
+	var msg := ""
+	match changed:
+		"camera_shake":
+			msg = "镜头抖动：%s" % on_off.call(s.camera_shake)
+		"auto_recenter":
+			msg = "松手回正：%s" % on_off.call(s.auto_recenter)
+		"hud_detail":
+			msg = "HUD %s模式" % ("详细" if s.hud_detail else "简单")
+		"auto_level":
+			msg = "双击改平：%s" % on_off.call(s.auto_level)
+		"beeper_enabled":
+			msg = "警告蜂鸣：%s" % on_off.call(s.beeper_enabled)
+	Events.notice.emit("飞行设置：" + msg)
 
 
 # ────────────────────────── 钓鱼（feature_fishing） ──────────────────────────

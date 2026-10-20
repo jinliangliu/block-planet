@@ -1812,3 +1812,26 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 - **无头环境 `MOUSE_MODE_CAPTURED` 不一定落得住**（没有窗口可捕获）：鼠标断言只能验「还原成打开前的值」的语义，不能硬编码 CAPTURED。
 - **残骸有自己的 4 秒消散计时**：探针数「场上飞机」时不能把它算成「下机清场」，要数完好机或避开计时窗口。
 - **自动归位会搬走玩家**：`flight_probe` 的测试跑道在世界东南角（300~616），离机场 500+ 格，玩家被传送回机场后跑道区块被流式卸载——后续断言必须不依赖跑道地形（该探针 N 段是空中坠落 + 杆量数学，恰好不受影响）。
+
+## D-057 设置面板补齐 5 键入口：8 键全部可在面板调整 + 滚动容器防溢出
+
+`feature_settings_panel.md` 现状说明书（02e9d5e）记录的最大差距——FlightSettings 8 个持久化键里 5 个没有面板入口（`camera_shake`/`auto_recenter`/`beeper_enabled` 连快捷键都没有，`hud_detail` 走 H 键、`auto_level` 走双击左键）——在本条落地修复。动机：防晕动症是儿童向刚需，且 `flight_settings.gd` 注释自 D-033/D-034 起就承诺「可在飞行设置面板里关掉」，承诺与实现脱节。
+
+### 改动范围（4 代码文件 + 1 探针）
+
+- `scripts/ui/settings_panel.gd`：涂装行之后新增「相机与提示」开关区 5 行（镜头抖动/松手回正/HUD 模式/双击改平/警告蜂鸣），两格分段按钮复用 `_make_segment` + ButtonGroup 选中态机制；`settings_changed` 信号加第 4 参 `changed`（变更键名，三项变更时为空串）；面板内容外包 ScrollContainer（高度 clamp 到 80% 视口、上限 760），宽度 min 取 680（涂装行 658 最宽，桌面不出横向滚动条、窄屏可横向滚到第 4 套涂装）。
+- `scripts/core/flight_settings.gd`：仅注释——类注释更新为 8 键全貌，原「面板可关」的承诺本次起为真。
+- `scripts/ui/hud.gd`：`_on_settings_changed` 按 `changed` 分支定制 Toast（与 H 键「📋 HUD 详细/简单模式」文案对齐），空串走原三项汇总文案。
+- `tests/settings_panel_probe.gd`：26 → **49 PASS**（+23）。新增开关段：5 行默认选中态、逐个切换（单例值 + 信号键名 + 选中态同步）、5 键落盘读回、与三项的隔离性（开关不动难度/辅助、难度变更不重置开关）。
+
+### 关键设计
+
+- **档位语义**：4 个 bool 键用「开/关」；`hud_detail` 用「简单/详细」（与 H 键 Toast 一致），index 1 = 详细——`refresh()` 的选中态映射因此反转（`1 if hud_detail else 0`），注释钉死防呆。
+- **信号签名**：`settings_changed(difficulty, assist_level, livery_index, changed)`。唯一连接方 `hud.gd` 同步改；不新增第二个信号（避免 Toast 分流两套机制）。
+- **难度→辅助联动不扩大**：`set_difficulty` 仍只重置 `assist_level`，绝不碰 5 个开关（探针钉「难度变更不重置开关值」）。
+- **面板不加「恢复默认」**：默认值 = `FlightSettings.new()` 的字段初值，加按钮等于引入新的持久化语义，留待通用设置框架时再做。
+
+### 踩坑
+
+- **ScrollContainer 无 `horizontal_enabled`/`scroll_horizontal_enabled` 属性**（Godot 4.6.3 实际是 `horizontal_scroll_mode` 枚举）：写错属性名触发 SCRIPT ERROR → 探针协程猝死 → 进程挂起 7 分钟（`get_tree().quit()` 没执行到）。修法：不禁用横向滚动（涂装行 658 > 面板 560，窄屏本来就需要横滚），改宽 min width 到 680。
+- **探针协程猝死 = 还原不执行**：`settings_panel_probe` 的还原逻辑原在 `_ready` 末尾，SCRIPT ERROR 直接杀死协程。已加双保险：`_exit_tree` 还原安全网（幂等 `_restored` 标记）+ 90 秒看门狗定时器强制 `quit()`。这是 D-010 教训在「无 SaveGuard 探针」上的同类应用。

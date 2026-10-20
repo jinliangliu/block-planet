@@ -1,6 +1,8 @@
 class_name FlightSettings
 extends RefCounted
-## 飞行手感设置：辅助稳定等级 + 难度预设，持久化 user://settings.json。
+## 飞行设置：难度、辅助稳定、涂装、镜头抖动、松手回正、HUD 详细、双击改平、
+## 警告蜂鸣共 8 键，全部可在 O 键「飞行设置」面板调整（D-057 补齐此前 5 个
+## 仅靠快捷键/手改 JSON 的开关），持久化 user://settings.json。
 ##
 ## 设计（D-032 打磨 Phase 5-a）：MVP 的「飞行（简化气动 + 辅助稳定）」要求儿童向
 ## 的温和手感，故把「辅助稳定」坐实为一个可调等级；难度预设只决定辅助等级的
@@ -53,12 +55,12 @@ var livery_index := 0
 ## 两者都可在飞行设置面板里关掉（防晕动症）。
 var camera_shake := true
 var auto_recenter := true
-## HUD 详细模式（D-034）：默认简单（儿童优先，信息少 = 不晕），H 键切换，
-## 随 settings.json 落盘（与涂装/抖动同机制）。
+## HUD 详细模式（D-034）：默认简单（儿童优先，信息少 = 不晕），H 键或飞行
+## 设置面板切换，随 settings.json 落盘（与涂装/抖动同机制）。
 var hud_detail := false
-## 自动改平开关（D-034 双击左键）：默认开，设置面板可关。
+## 自动改平开关（D-034）：默认开，双击左键或飞行设置面板可切。
 var auto_level := true
-## 警告蜂鸣码开关（D-034）：默认开（听到也能玩）；设置面板可关。
+## 警告蜂鸣码开关（D-034）：默认开（听到也能玩）；飞行设置面板可关。
 var beeper_enabled := true
 
 static var _current: FlightSettings = null

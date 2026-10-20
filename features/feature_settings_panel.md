@@ -4,7 +4,7 @@
 > 引擎：Godot 4.6.3 / GDScript（Mobile 渲染器）
 > 文档性质：**已实现现状说明书**（不是开发任务书）
 > 事实来源：**代码**。本文与代码冲突时以代码为准，并应回头修订本文。
-> 相关决策：`docs/decisions.md` D-032（Phase 5-a / 5-b / 5-c）、D-033、D-034；飞行玩法基准见 `features/feature_flight.md`
+> 相关决策：`docs/decisions.md` D-032（Phase 5-a / 5-b / 5-c）、D-033、D-034、D-057；飞行玩法基准见 `features/feature_flight.md`
 
 ---
 
@@ -16,23 +16,24 @@
 的 Autoload 列表里没有 `SettingsManager`，工程里没有 `.tres` 设置存档，也没有
 任何画面 / 音频类设置项。
 
-已实现的只是**飞行设置**一个模态面板（3 行分段按钮）。本文按代码现状重写为
-**现状说明书**；初稿中有价值的设计取向移入 §8「设计蓝图（未实现）」，供后续做
-通用设置系统时参考。**不要按初稿直接施工**——会假设不存在的基础设施，并重复
-建设已经跑通的 `FlightSettings` 持久化链路。
+已实现的只是**飞行设置**一个模态面板（3 行分段按钮 + 5 行开关，D-057 补齐开关
+入口）。本文按代码现状重写为**现状说明书**；初稿中有价值的设计取向移入 §8
+「设计蓝图（未实现）」，供后续做通用设置系统时参考。**不要按初稿直接施工**——
+会假设不存在的基础设施，并重复建设已经跑通的 `FlightSettings` 持久化链路。
 
 现状一句话：**设置面板 = 「飞行设置」模态窗（难度 / 辅助稳定 / 涂装 3 行分段
-按钮），数据层是 `FlightSettings` 类级单例，持久化 `user://settings.json` 共
-8 键，其中 5 键在面板里没有入口（§7）。**
+按钮 + 「相机与提示」5 行开关），数据层是 `FlightSettings` 类级单例，持久化
+`user://settings.json` 共 8 键，全部可在面板调整（D-057 前有 5 键无入口）。**
 
 ---
 
 ## 1. 概述
 
 玩家按 **O 键**打开「飞行设置」模态面板，用三行分段按钮调整飞行难度、辅助稳定
-等级与机身涂装；改动**即时生效并落盘**，关闭面板后继续游戏。面板本身只做展示
-与改写，不直接碰飞行动力学——飞机每个物理帧读 `FlightSettings.current()` 的
-增益表与涂装索引。
+等级与机身涂装，再用「相机与提示」五行开关控制镜头抖动、松手回正、HUD 模式、
+双击改平与警告蜂鸣；改动**即时生效并落盘**，关闭面板后继续游戏。面板本身只做
+展示与改写，不直接碰飞行动力学——飞机每个物理帧读 `FlightSettings.current()`
+的增益表与涂装索引。
 
 | 设计取向 | 落地方式 |
 |---|---|
@@ -52,7 +53,8 @@
    ▼
 SettingsPanel（scripts/ui/settings_panel.gd，纯 UI）
    │  点击分段按钮 → FlightSettings.set_*(…)
-   │  每次改动：save() 落盘 + refresh() 同步选中态 + settings_changed 信号
+   │  点击开关行（D-057）→ 直写 bool 字段
+   │  每次改动：save() 落盘 + refresh() 同步选中态 + settings_changed 信号（带变更键名）
    ▼
 FlightSettings（scripts/core/flight_settings.gd，纯逻辑，类级单例 current()）
    │  to_dict() → JSON → user://settings.json（save，失败返回 false）
@@ -85,15 +87,16 @@ FlightSettings（scripts/core/flight_settings.gd，纯逻辑，类级单例 curr
 | 1 | `difficulty` | 休闲 / 标准 / 硬核 | 标准 | ✅ 第一行分段按钮 | — | 决定辅助出发点（`DIFFICULTY_ASSIST`） |
 | 2 | `assist_level` | 关闭 / 半开 / 全开 | 半开 | ✅ 第二行分段按钮 | — | `Aircraft.gd:545` → 气动增益 |
 | 3 | `livery_index` | 0~3（经典红白 / 深海蓝 / 丛林绿 / 落日橙） | 0 | ✅ 第三行分段按钮 | — | `Aircraft.gd:308/600` → 材质 |
-| 4 | `camera_shake` | bool | true | ❌ 无 | ❌ 无 | `AircraftCamera.gd:79/409`（坠机 / 湍流镜头抖动） |
-| 5 | `auto_recenter` | bool | true | ❌ 无 | ❌ 无 | `AircraftCamera.gd:80/210/271`（自由观察松手回正） |
-| 6 | `hud_detail` | bool | false | ❌ 无 | **H 键**（`player.gd:305-311`） | `FlightInstrumentHUD.gd:175`（简单 / 详细模式） |
-| 7 | `auto_level` | bool | true | ❌ 无 | **双击左键**（`player.gd:236`） | 约 2 秒增强增益摆平坡度 |
-| 8 | `beeper_enabled` | bool | true | ❌ 无 | ❌ 无 | `FlightInstrumentHUD.gd:141`（警告蜂鸣码） |
+| 4 | `camera_shake` | bool | true | ✅ 开关行「开 / 关」（D-057） | — | `AircraftCamera.gd:79/409`（坠机 / 湍流镜头抖动） |
+| 5 | `auto_recenter` | bool | true | ✅ 开关行「开 / 关」（D-057） | — | `AircraftCamera.gd:80/210/271`（自由观察松手回正） |
+| 6 | `hud_detail` | bool | false | ✅ 开关行「简单 / 详细」（D-057） | **H 键**（`player.gd:305-311`） | `FlightInstrumentHUD.gd:175`（简单 / 详细模式） |
+| 7 | `auto_level` | bool | true | ✅ 开关行「开 / 关」（D-057） | **双击左键**（`player.gd:236`） | 约 2 秒增强增益摆平坡度 |
+| 8 | `beeper_enabled` | bool | true | ✅ 开关行「开 / 关」（D-057） | — | `FlightInstrumentHUD.gd:141`（警告蜂鸣码） |
 
-> ⚠️ `camera_shake` / `auto_recenter` / `beeper_enabled` **三个键目前没有任何
-> UI 入口**，只能靠手改 `user://settings.json`；`hud_detail` / `auto_level` 有
-> 键位但面板里看不到也改不了。详见 §7。
+> ✅ D-057（2026-10-20）起 8 键全部有面板入口。此前 5 个开关只有快捷键
+> （`hud_detail` H 键 / `auto_level` 双击左键）或只能手改 JSON
+> （`camera_shake` / `auto_recenter` / `beeper_enabled`）；快捷键入口保留，
+> 与面板双路生效、互不覆盖（探针钉「难度变更不重置开关值」的隔离性）。
 
 ---
 
@@ -105,25 +108,34 @@ FlightSettings（scripts/core/flight_settings.gd，纯逻辑，类级单例 curr
 SettingsPanel（Control，全屏矩形，初始 visible=false）
 ├── ColorRect        模态暗幕（黑 55% alpha，吃鼠标事件）
 ├── CenterContainer  居中容器（鼠标 IGNORE）
-└── PanelContainer   面板（560 px 最小宽）
+└── PanelContainer   面板（680 px 最小宽；内容外包 ScrollContainer，D-057）
     ├── StyleBoxFlat 米色底 (0.95,0.92,0.84) / 棕边 (0.62,0.47,0.27) / 3 px 边 / 12 圆角 / 16 px 内边距
-    └── VBoxContainer
-        ├── HBoxContainer  标题行：「飞行设置」(24 px) + UiKit.make_close()
-        ├── Label「难度」+ 分段按钮行：休闲 / 标准 / 硬核
-        ├── Label「辅助稳定」+ 分段按钮行：关闭 / 半开 / 全开
-        ├── Label「涂装」+ 分段按钮行：经典红白 / 深海蓝 / 丛林绿 / 落日橙
-        ├── Label 提示语：「辅助稳定只在松杆时接管：放手后自动摆平机翼、压住摆头；一压杆立刻让位。」
-        └── Label 状态行：「当前：难度 标准 · 辅助 半开 · 涂装 经典红白」
+    └── ScrollContainer（横向 AUTO：窄屏可横滚到涂装行；纵向高度 clamp 80% 视口、上限 760）
+        └── VBoxContainer
+            ├── HBoxContainer  标题行：「飞行设置」(24 px) + UiKit.make_close()
+            ├── Label「难度」+ 分段按钮行：休闲 / 标准 / 硬核
+            ├── Label「辅助稳定」+ 分段按钮行：关闭 / 半开 / 全开
+            ├── Label「涂装」+ 分段按钮行：经典红白 / 深海蓝 / 丛林绿 / 落日橙
+            ├── Label「相机与提示」（开关分区标题，D-057）
+            ├── Label「镜头抖动」+ 开关行：开 / 关
+            ├── Label「松手回正」+ 开关行：开 / 关
+            ├── Label「HUD 模式」+ 开关行：简单 / 详细
+            ├── Label「双击改平」+ 开关行：开 / 关
+            ├── Label「警告蜂鸣」+ 开关行：开 / 关
+            ├── Label 提示语：「辅助稳定只在松杆时接管：放手后自动摆平机翼、压住摆头；一压杆立刻让位。」
+            └── Label 状态行：「当前：难度 标准 · 辅助 半开 · 涂装 经典红白」
 ```
 
 ### 4.2 交互约定
 
 | 行为 | 实现 |
 |---|---|
-| 分段按钮选中态 | `ButtonGroup` + `toggle_mode`，`_sync()` 按当前值同步 `button_pressed`（`settings_panel.gd:103-122/152-154`） |
+| 分段按钮选中态 | `ButtonGroup` + `toggle_mode`，`_sync()` 按当前值同步 `button_pressed`（`settings_panel.gd:139-158/208-210`） |
+| 开关行（D-057） | 复用 `_make_segment` 两格按钮（`_make_toggle_row` 打包「行名 + 开关」，`settings_panel.gd:164-172`）；`hud_detail` 档位为「简单 / 详细」，index 1 = 详细，`refresh()` 选中态映射随之反转 |
 | 打开 | O 键（`toggle_settings`，`input_actions.gd:25`）；冻结玩家 + 非触屏时鼠标改 VISIBLE（`hud.gd:2859-2865`） |
 | 关闭 | 关闭按钮 / ESC / 再按 O；`closed` 信号 → 解冻 + 还原鼠标（`hud.gd:341-344/2874-2876`） |
-| 改动生效 | `set_*` → `save()` 落盘 → `refresh()` 同步 UI → `settings_changed` 信号 → HUD Toast 确认（`settings_panel.gd:172-179`、`hud.gd:2880-2883`） |
+| 改动生效 | `set_*` / 开关直写 → `save()` 落盘 → `refresh()` 同步 UI → `settings_changed(difficulty, assist_level, livery_index, changed)` 信号 → HUD Toast 确认（`settings_panel.gd:230-253`、`hud.gd:2879-2901`） |
+| Toast 分支 | `changed` 为空串（三项变更）走汇总文案「飞行设置：难度 … · 辅助 … · 涂装 …」；非空按键名定制（「飞行设置：镜头抖动：开」等；HUD 模式文案与 H 键 Toast 对齐） |
 | 模态互斥 | 纳入 `_any_overlay_open`（`hud.gd:2705`）：面板开着时其余热键与建造界面让位 |
 | 落盘失败 | `push_warning("SettingsPanel: 设置保存失败（磁盘写入被拒？）")`，不静默（P2-14） |
 
@@ -177,18 +189,16 @@ SettingsPanel（Control，全屏矩形，初始 visible=false）
 
 ## 7. 差距与已知问题（以代码为准）
 
-1. **5 个持久化键没有面板入口**（§3 表红字项）：`camera_shake` /
-   `auto_recenter` / `beeper_enabled` 连键位都没有，玩家只能手改
-   `user://settings.json`；`hud_detail` / `auto_level` 有键位但面板不可见。
-2. **代码注释与实现不符**：`flight_settings.gd:52-53` 注释称
-   「（抖动 / 松手自动回正）两者都可在飞行设置面板里关掉（防晕动症）」——
-   面板只有 3 行，没有这两个开关。修面板或修注释，二选一（建议补面板入口，
-   防晕动症是儿童向刚需）。
-3. **无「恢复默认」按钮**：改乱了只能手删 `user://settings.json`。
-4. **初稿 6 页签设计全部未实现**：画面 / 音频 / 控制 / 玩法 / 无障碍 / 系统
+1. **无「恢复默认」按钮**：改乱了只能手删 `user://settings.json`。（默认值 =
+   `FlightSettings.new()` 字段初值；加按钮等于引入新持久化语义，D-057 决定留到
+   通用设置框架时再做。）
+2. **初稿 6 页签设计全部未实现**：画面 / 音频 / 控制 / 玩法 / 无障碍 / 系统
    六组设置、`SettingsManager` Autoload、`.tres` 存档均不存在（§8 保留为蓝图）。
-5. **触屏无专属设置**：虚拟摇杆的 `radius` / `knob_radius` / `deadzone` 是
-   编辑器 `@export`（`virtual_joystick.gd:7-9`），非运行时设置项。
+3. **触屏无打开面板的入口**：O 键无触屏映射，触屏设备只能等桌面端打开——
+   见 §10 缺口表。
+4. ~~5 个持久化键没有面板入口~~ —— **已修复**（D-057，2026-10-20）。
+5. ~~`flight_settings.gd:52-53` 注释声称「面板可关」与实现不符~~ —— **已修复**
+   （D-057 补齐后面板确有关口；注释同步更新为 8 键全貌）。
 
 ---
 
@@ -199,12 +209,12 @@ SettingsPanel（Control，全屏矩形，初始 visible=false）
 - **分级呈现**：基础设置（音量、画质）一眼可见，进阶收折二级菜单。
 - **跨端自适应**：`OS.has_feature("mobile")` 动态显示摇杆 / 触控布局项。
 - **儿童防晕**：镜头平滑、自动回正、抖动幅度可调（对应现 `camera_shake` /
-  `auto_recenter`，应优先补面板入口而非新造轮子）。
+  `auto_recenter`，D-057 已补面板入口；「幅度可调」仍是蓝图）。
 - **持久化选型**：初稿的 `SettingsManager` Autoload + `GameSettings` Resource
   (.tres) 与现状 `FlightSettings` 类级单例 + JSON **二选一**；若换 Resource 方案，
   必须迁移现有 `settings.json` 的 8 键（玩家已有存档），或保留 JSON 双读过渡。
-- **建议施工顺序**：先补 §7.1 的 5 键面板入口（小步、可探针验证），再评估是否
-  值得引入通用设置框架。
+- **建议施工顺序**：5 键面板入口已完成（D-057）；下一步建议先做 §7.3 触屏
+  打开入口 + 「恢复默认」按钮（均小步可探针），再评估是否值得引入通用设置框架。
 
 ---
 
@@ -213,12 +223,14 @@ SettingsPanel（Control，全屏矩形，初始 visible=false）
 | 探针 | 断言数 | 覆盖 | 标记 |
 |---|---|---|---|
 | `tests/flight_settings_probe.gd` | 31 | 默认值 / 难度预设 / 增益表 / `to_dict`·`from_dict` / save 往返 / 损坏文件退回 / 坡度配平 / 辅助不干预俯仰 / 4 套涂装改色 | `FLIGHT_SETTINGS_OK` |
-| `tests/settings_panel_probe.gd` | 26 | 面板初始隐藏 / 三行按钮与文案 / 默认选中态 / 难度→辅助预设重置 / 辅助单独覆盖 / 落盘读回 / 涂装选中态与越界夹回 / 模态开关与 `closed` 信号 | `SETTINGS_PANEL_OK` |
+| `tests/settings_panel_probe.gd` | 49 | 面板初始隐藏 / 三行按钮与文案 / 默认选中态 / 难度→辅助预设重置 / 辅助单独覆盖 / 落盘读回 / 涂装选中态与越界夹回 / 模态开关与 `closed` 信号 / **5 行开关默认态、逐个切换、信号键名、选中态同步、落盘读回、与三项隔离性**（D-057 新增 23 断言） | `SETTINGS_PANEL_OK` |
 
 D-010 合规：`settings_panel_probe` 先快照真实 `user://settings.json`，用
 `FlightSettings.set_current(default_settings())` 隔离单例，结束原样还原
-（探针内 25-31 / 99-106 行）；按钮点击走 `pressed.emit()`，与真实点击同路。
-回归基线：2026-10-20 全量 41 探针 1583 PASS / 0 FAIL / 存档逐字节还原。
+（`_restore_settings()` 幂等还原 + `_exit_tree` 安全网 + 90 秒看门狗，
+防协程猝死时还原不执行）；按钮点击走 `pressed.emit()`，与真实点击同路。
+回归基线：2026-10-20 全量 41 探针 1606 PASS / 0 FAIL / 存档逐字节还原；
+D-057 后 `settings_panel_probe` 49 PASS（26 + 23 新增）。
 
 ---
 
@@ -226,9 +238,10 @@ D-010 合规：`settings_panel_probe` 先快照真实 `user://settings.json`，�
 
 | 维度 | PC（现状） | 移动端（现状） |
 |---|---|---|
-| 打开方式 | O 键 | 触屏无打开面板的入口按钮（O 键无触屏映射）——**缺口** |
-| 面板操作 | 鼠标点击分段按钮（160 px 宽，键鼠舒适） | 按钮可点但无触屏优化；打开时**不**改鼠标模式（`hud.gd:2864` 触屏分支跳过） |
-| 设置内容 | 飞行三行 | 同 PC；无摇杆大小 / 透明度 / 按钮布局等触屏专属项（初稿设计） |
+| 打开方式 | O 键 | 触屏无打开面板的入口按钮（O 键无触屏映射）——**缺口**（§7.3） |
+| 面板操作 | 鼠标点击分段按钮 / 开关（160 px 宽，键鼠舒适） | 按钮可点但无触屏优化；打开时**不**改鼠标模式（`hud.gd:2864` 触屏分支跳过） |
+| 设置内容 | 飞行三行 + 开关区 5 行（D-057） | 同 PC；无摇杆大小 / 透明度 / 按钮布局等触屏专属项（初稿设计） |
+| 面板布局 | 680 px 最小宽、纵向滚动（高度 clamp 80% 视口） | 纵向滚动可用；680 px 最小宽在窄屏会被挤出屏幕（宽度自适应属遗留缺口，D-057 未扩大范围） |
 | 冻结行为 | 冻结玩家 + ESC/O 关闭 | 冻结玩家；关闭依赖面板自带的关闭按钮 |
 
 ---
@@ -242,3 +255,4 @@ D-010 合规：`settings_panel_probe` 先快照真实 `user://settings.json`，�
 | D-032 Phase 5-c | 4 套涂装 `AircraftLivery`；索引随设置落盘；`_sync_livery` 整数比对 |
 | D-033 | 飞行视角：自动回正、镜头抖动可关（开关即 `auto_recenter` / `camera_shake`） |
 | D-034 | HUD 简单 / 详细（H 键）、双击左键自动改平、蜂鸣码——三项均随 `settings.json` 落盘 |
+| D-057 | 5 个开关补齐面板入口（「相机与提示」区）；`settings_changed` 加 `changed` 键名参；面板外包 ScrollContainer；探针 26 → 49 PASS |

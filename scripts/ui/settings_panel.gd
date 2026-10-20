@@ -2,14 +2,20 @@ class_name SettingsPanel
 extends Control
 
 ## 飞行设置面板（与任务面板同款的模态窗口，ESC/关闭键退出）。
-## 两行分段按钮：
+## 三行分段按钮：
 ##   - 难度：休闲 / 标准 / 硬核（预设决定默认辅助等级）
 ##   - 辅助稳定：关闭 / 半开 / 全开（可单独覆盖难度的默认值）
+##   - 涂装：四套 AircraftLivery
+## 一组「相机与提示」开关行（两格分段按钮，D-057 补齐入口）：
+##   - 镜头抖动 / 松手回正 / HUD 模式（简单|详细）/ 双击改平 / 警告蜂鸣
 ## 改动即时生效（飞机每帧读 FlightSettings.current().gains()）并落盘
 ## user://settings.json；面板本身只做展示与改写，不直接碰飞行动力学。
+## 8 键全部有面板入口；触屏设备仍缺「打开面板」的入口（见差距记录）。
 
 signal closed
-signal settings_changed(difficulty: int, assist_level: int, livery_index: int)
+## changed 为变更键名（camera_shake/auto_recenter/hud_detail/auto_level/
+## beeper_enabled）；难度/辅助/涂装变更时为空串，消费方按需分支。
+signal settings_changed(difficulty: int, assist_level: int, livery_index: int, changed: String)
 
 const PANEL_BG := Color(0.95, 0.92, 0.84)
 const PANEL_BORDER := Color(0.62, 0.47, 0.27)
@@ -20,6 +26,12 @@ var _settings: FlightSettings
 var _difficulty_buttons: Array[Button] = []
 var _assist_buttons: Array[Button] = []
 var _livery_buttons: Array[Button] = []
+## 开关行按钮组（D-057）：[0]=开/简单，[1]=关/详细（hud_detail 语义反转）。
+var _shake_buttons: Array[Button] = []
+var _recenter_buttons: Array[Button] = []
+var _hud_buttons: Array[Button] = []
+var _level_buttons: Array[Button] = []
+var _beeper_buttons: Array[Button] = []
 var _status_label: Label
 
 
@@ -43,10 +55,20 @@ func _ready() -> void:
 	panel.add_theme_stylebox_override("panel", _panel_style())
 	center.add_child(panel)
 
+	# D-057：开关区加入后面板变高，外包 ScrollContainer 防小屏/竖屏高度溢出。
+	# 宽度按内容最宽行（涂装 4×160+间距≈658）取 680：桌面不出现横向滚动条，
+	# 窄屏放不下时横向滚动可达（不裁剪涂装行）；横向模式保持默认 AUTO。
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(680, 0)
+	var vp_h := get_viewport_rect().size.y
+	if vp_h > 0.0:
+		scroll.custom_minimum_size.y = mini(int(vp_h * 0.8), 760)
+	panel.add_child(scroll)
+
 	var vbox := VBoxContainer.new()
-	vbox.custom_minimum_size = Vector2(560, 0)
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_theme_constant_override("separation", 10)
-	panel.add_child(vbox)
+	scroll.add_child(vbox)
 
 	var header := HBoxContainer.new()
 	vbox.add_child(header)
@@ -74,6 +96,20 @@ func _ready() -> void:
 	vbox.add_child(_make_segment(
 		AircraftLivery.names(), _settings.livery_index,
 		func(i: int): _on_livery(i), _livery_buttons))
+
+	# 「相机与提示」开关区（D-057）：此前这 5 个键只有快捷键/改 JSON 两种入口，
+	# 面板统一暴露；hud_detail 档位文案用「简单|详细」（与 H 键 Toast 一致）。
+	vbox.add_child(_make_row_label("相机与提示"))
+	vbox.add_child(_make_toggle_row("镜头抖动", "camera_shake", ["开", "关"],
+		_settings.camera_shake, _shake_buttons))
+	vbox.add_child(_make_toggle_row("松手回正", "auto_recenter", ["开", "关"],
+		_settings.auto_recenter, _recenter_buttons))
+	vbox.add_child(_make_toggle_row("HUD 模式", "hud_detail", ["简单", "详细"],
+		_settings.hud_detail, _hud_buttons))
+	vbox.add_child(_make_toggle_row("双击改平", "auto_level", ["开", "关"],
+		_settings.auto_level, _level_buttons))
+	vbox.add_child(_make_toggle_row("警告蜂鸣", "beeper_enabled", ["开", "关"],
+		_settings.beeper_enabled, _beeper_buttons))
 
 	var hint := Label.new()
 	hint.text = "辅助稳定只在松杆时接管：放手后自动摆平机翼、压住摆头；一压杆立刻让位。"
@@ -122,6 +158,20 @@ func _make_segment(names: Array, current: int, on_pick: Callable,
 	return row
 
 
+## 开关行（D-057）：行名 + 两格分段按钮。names[0] 对应 on=true 的档位
+## （「开」/「简单」），names[1] 对应 off；current_on 为当前布尔值。
+## 按钮写入 buttons_out 供 refresh 同步选中态。
+func _make_toggle_row(row_name: String, key: String, names: Array, current_on: bool,
+		buttons_out: Array[Button]) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	box.add_child(_make_row_label(row_name))
+	box.add_child(_make_segment(
+		names, 0 if current_on else 1,
+		func(i: int): _on_toggle(key, i), buttons_out))
+	return box
+
+
 func open() -> void:
 	visible = true
 	refresh()
@@ -144,6 +194,12 @@ func refresh() -> void:
 	_sync(_difficulty_buttons, _settings.difficulty)
 	_sync(_assist_buttons, _settings.assist_level)
 	_sync(_livery_buttons, _settings.livery_index)
+	# 开关选中态：[0]=开/简单。hud_detail 的「详细」在 index 1（语义反转）。
+	_sync(_shake_buttons, 0 if _settings.camera_shake else 1)
+	_sync(_recenter_buttons, 0 if _settings.auto_recenter else 1)
+	_sync(_hud_buttons, 1 if _settings.hud_detail else 0)
+	_sync(_level_buttons, 0 if _settings.auto_level else 1)
+	_sync(_beeper_buttons, 0 if _settings.beeper_enabled else 1)
 	if _status_label != null:
 		_status_label.text = "当前：难度 %s · 辅助 %s · 涂装 %s" % [
 			_settings.difficulty_name(), _settings.assist_name(), _settings.livery_name()]
@@ -169,14 +225,31 @@ func _on_livery(index: int) -> void:
 	_after_change()
 
 
-func _after_change() -> void:
+## 开关行回调（D-057）：index 0=开/简单，1=关/详细；hud_detail 语义反转
+## （「详细」在 index 1）。直接写属性（纯 bool，无越界风险），随后统一落盘。
+func _on_toggle(key: String, index: int) -> void:
+	match key:
+		"camera_shake":
+			_settings.camera_shake = (index == 0)
+		"auto_recenter":
+			_settings.auto_recenter = (index == 0)
+		"hud_detail":
+			_settings.hud_detail = (index == 1)
+		"auto_level":
+			_settings.auto_level = (index == 0)
+		"beeper_enabled":
+			_settings.beeper_enabled = (index == 0)
+	_after_change(key)
+
+
+func _after_change(changed: String = "") -> void:
 	# P2-14：设置落盘失败不静默（push_warning 进控制台；设置对本进程仍生效，
 	# 玩家下次启动会回到旧值——比无声丢失好排查）。
 	if not _settings.save():
 		push_warning("SettingsPanel: 设置保存失败（磁盘写入被拒？）")
 	refresh()
 	settings_changed.emit(
-		_settings.difficulty, _settings.assist_level, _settings.livery_index)
+		_settings.difficulty, _settings.assist_level, _settings.livery_index, changed)
 
 
 func _panel_style() -> StyleBoxFlat:
