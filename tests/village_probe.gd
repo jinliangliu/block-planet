@@ -181,6 +181,10 @@ func _run() -> void:
 		trader._wander_timer = 99.0
 		for i in range(40):
 			await get_tree().physics_frame
+		# D-062 P1：村民按真实米制缩小为 1.8 m 高，碰撞体顶仅到玩家眼高附近
+		# （差 4 cm 级）——真实玩家会瞄准躯干，探针同样显式瞄准，不再依赖
+		# 「水平视线恰好擦到 3.6 格高的旧碰撞盒」这一隐含前提。
+		player._camera.look_at(trader.global_position + Vector3(0.0, 0.6, 0.0))
 		var opened := player._interact_village()
 		_check(opened, "右键指向村民触发交易（_interact_village）")
 		_check(hud._trade_overlay.visible, "右键村民后交易面板处于打开状态")

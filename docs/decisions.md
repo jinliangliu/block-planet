@@ -1942,3 +1942,35 @@ float32 在 64 km 处量化约 8 mm：区块节点位置量化会让相邻区块
 
 - 新增 `tests/world_coord_probe`（27 断言全 PASS）：A 纯函数恒等式（区块接口互逆含负区块、边界取整 15.9→0/-0.1→-1/-16→-1/-16.1→-2、origin=0 恒等、非零 origin 往返、chunk_at 合成式）；B `request_shift_origin` 行为（origin/position=−origin/信号 delta/box_contents 重键/同值幂等）；C 真实 main 场景传送 6000 格（origin 对齐 (4096,0)、玩家世界坐标 x/z 不变、渲染锚点重基、卸载/重载/搬迁往返后标记方块仍在同一世界格）；D 实体不变式（船/飞机节点 +delta、世界坐标不变、harbor_pos/_state.position 重基、World 位置=−origin）。
 - 踩坑（均为 Vector2i 迁移漏改 `.z`→`.y`，parse error 直接杀死协程、探针挂起）：`world.gd` 的 `top_block_at`/`ensure/preload/rebuild_region`/`chunk_to_world`/`to_world`/`to_render`/`request_shift_origin`/`_maybe_shift_origin`/`_cell_local`/`_in_stream_window`/`_load_priority`/`_load_chunk` 命名、战术地图 sig 串、探针自身。教训：**类型迁移后必须全量 grep `.z` 并逐处确认基类型**，parse error 在 headless 下表现为「进程挂起无输出」（看门狗都救不了，因为脚本根本没编译出来）。
+
+## D-063 一格 = 一米尺度切换（P1）：移除 D-030 的 ×2 补偿，保真实米制
+
+D-062 P0 只落地坐标地基；本条把「1 方块 = 0.5 m」的旧约定（D-030）废止为「1 方块 = 1 m」。用户定夺：**移除 ×2 补偿、保真实米制**（而非「纯解释切换」或「只改显示」）。
+
+### 唯一规则
+
+**以米标定的常量不动；被 D-030 ×2 补偿过的块单位常量 ÷2。** 判据是常量的注释与来源：注释写「米」（如 `PICKUP_RANGE 7.0`、`CAM_DISTANCE_MAX 9.0`、`BoatSystem` 分带阈值）一律不动（P1 后自动变诚实）；D-030 明确「速度/重力/距离 ×2」的一律折半。
+
+### 飞行零改动（本条最重要的结论）
+
+`aircraft_flight.gd` 是**米制原生**：`GRAVITY 9.80665`、`VNE 55.0`，且 `state.position += state.velocity * delta` **从头到尾没有任何块↔米换算系数**——模型把「格」当「米」用。故 P1 后巡航 50.4 格/s 即 50.4 m/s，定夺项 ①「保持现行速度」自动成立。**这正是设计文档把 P4（速度尺度）标注为「无需实施」的真正原因**：既不需要提速改造，也不需要折半。船同理：米制原生 + 单一换算因子 `MPS_TO_BLOCKS`（2.0 → 1.0）。
+
+### 改动清单
+
+- 玩家：`GRAVITY 48→24`、`JUMP_VELOCITY 16→8`、`WALK 11→5.5`、`SPRINT 18→9`、`FLY 24→12`、`REACH_DISTANCE 16→8`、`FALL_DAMAGE_THRESHOLD 24→12`、`FISH_CAST_RANGE 28→14`、AABB `3.6→1.8` 格（宽 1.6→0.8），**含 `scenes/player.tscn` 胶囊 `radius 0.8→0.4` / `height 3.6→1.8` + 形状 y `1.8→0.9`**（脚本常量与场景资源必须同步改，只改一边会让碰撞体与 AABB 打架）。
+- 生物：`METRIC_SCALE 2.0→1.0`（速度/攻击距离/视觉/碰撞四路共用）、`GRAVITY 48→24`；掉落物立方 0.56→0.28、浮标 `VISUAL_SCALE 2.0→1.0` 与 `BOB_AMPLITUDE 0.12→0.06`、玩家模型缩放 ×2→×1；`mob_spawner` 落点净空 4→2 格（实体 1.8 格高）。
+- 船：`MPS_TO_BLOCKS 2.0→1.0`、`kmh()` 去掉 ×0.5、HUD 的 X/Z 与 `harbor_distance_m` 去掉 ×0.5（格距离即米）。
+- 注释订正：`part_data`/`airport_builder`/`harbor_builder`/`boat_system`/`aircraft_flight`/`player`/`mob` 里全部「1 格 = 0.5 m」表述改为 1 m（跑道 52 格 = 52 m、机库 12 格 = 12 m，按 §3.3 口径）。
+
+### 结构/地形几何不动（§3.3「格数不变」）
+
+跑道 112 格 = 112 m、世界高 256 格 = 256 m、最高山 188 格 = 188 m——按 §3.3 表保持格数、米值翻倍。村庄若要 ÷2 保米制占地，房屋 12×12→6×6、墙高 4→2、塔 5×5→2.5 会撞上非整数与不可用空间，属**几何重设计**（且 `village_probe` 38 条断言编码了这些尺寸），本轮不做，作为后续项。`GRID_METERS`（蓝图格→世界格）按 §3.3 飞机行「开放细节、默认不动」保留 0.5。
+
+### 验证与教训
+
+全量无头回归 34 探针 **1531 PASS / 0 FAIL / 存档逐字节还原**。真正的失败全部集中在**探针几何**而非产品逻辑：实体缩小后「水平视线恰好擦到 3.6 格高碰撞盒」这一隐含前提全废——`life_probe` 近战、`village_probe` 右键村民双双脱靶。四条可复用教训：
+
+1. 探针要**显式瞄准**（`_camera.look_at(target._collision.global_position)`），且**必须先等一物理帧**再读碰撞体全局坐标——新 `add_child` 的全局变换下一帧才落定，提前读会瞄准到陈旧方向。
+2. 瞄准会**永久改变相机朝向**，后续依赖射线的阶段（蟹/蛙/弓/钓）被连带打挂：必须 `global_transform` 原地还原（曾因此多出 10 条假失败）。
+3. 别靠「把玩家传送到空旷处」取视线——实测引入 10 条无关失败；正确做法是**换目标所在方位**（狼从 −Z 侧挪到 +Z 平坦侧，因为中间那道 1 m 高土埂会挡住低头射线）。
+4. 副作用：生物速度折半后 `life_probe` 里「等待走完固定格距」的循环耗时翻倍，逼近回归 400 s 超时——`tmp/run_regression.sh` 超时已提到 600 s。

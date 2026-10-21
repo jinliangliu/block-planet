@@ -7,7 +7,9 @@ extends Resource
 ## 贡献求和得到整机特性。外观即体素块——size 指定占地格数，Phase 2 建造编辑器
 ## 据此在体素网格上摆放。
 ##
-## 世界尺度：1 格 = 0.5 m（D-030），GRID_METERS 供 PlacedPart 折算式使用。
+## 蓝图格 → 世界格换算：GRID_METERS 供 PlacedPart 折算式使用（1 蓝图格 = 0.5 世界格）。
+## D-062 P1 起世界尺度为 1 格 = 1 m；整机尺寸属「开放细节」，本轮不动该系数
+## （见 features/feature_world_128km.md §3.3 飞机行）。
 
 ## 一格对应的米数（与 D-030 体素 0.5 m 化一致）。
 const GRID_METERS := 0.5

@@ -23,8 +23,8 @@ var _swing_tween: Tween
 
 
 func _ready() -> void:
-	# 体素 0.5m 化（D-030）：模型整体 ×2，玩家 1.8m ≈ 3.6 格。
-	scale = Vector3.ONE * 2.0
+	# D-062 P1：1 格 = 1 m，玩家模型按真实米制（1.8 m ≈ 1.8 格），不再 ×2。
+	scale = Vector3.ONE
 	_build()
 	set_third_person(false)
 

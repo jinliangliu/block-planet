@@ -119,9 +119,21 @@ func _run() -> void:
 	wanderer.queue_free()
 
 	# ── 阶段 C：按住左键连击（打猎修复） ──────────────────────────
+	# D-062 P1：实体缩小后近战必须低头瞄准，原 −Z 方向（狼在土埂另一侧）会被
+	# 中间那道 1 m 高地形挡住——P1 前视线水平恰好越过、实体缩小后暴露。改为
+	# +Z 侧（与玩家同高的平坦侧），瞄准躯干中心。
 	var target := _spawn_mob(main_scene, Mob.MobType.WOLF, player, day_night,
-		player.global_position + Vector3(0.0, 0.1, -2.0))
+		player.global_position + Vector3(0.0, 0.1, 2.0))
 	target.set_physics_process(false)
+	# D-062 P1：狼按真实米制缩小为 ~1 m 高，水平视线（眼高 1.4 m）会从其头顶
+	# 越过——真实玩家近战会低头瞄准，探针同样显式瞄准躯干中心。
+	# 注意：相机朝向是本探针后续阶段（钓点/蟹/蛙）的默认前提，必须原地还原，
+	# 否则「低头 21°」会连带打挂后面所有依赖射线的断言。
+	# 先等一帧：新 add_child 的碰撞体全局变换要下一帧才落定，此刻读取会拿到
+	# 陈旧坐标（曾据此瞄准到错误方向、脱靶）。
+	await get_tree().physics_frame
+	var _saved_cam_tf := player._camera.global_transform
+	player._camera.look_at(target._collision.global_position)
 	for i in range(40):
 		await get_tree().physics_frame
 	var hp0 := target.health
@@ -138,6 +150,8 @@ func _run() -> void:
 	_check(hp0 - hp_after >= 3, "按住左键 1.5 秒内连续攻击多次（共命中 %d 点）" % (hp0 - hp_after))
 	if is_instance_valid(target):
 		target.queue_free()
+	# 还原相机（见上方瞄准注记）：后续阶段一律按默认水平视线运行。
+	player._camera.global_transform = _saved_cam_tf
 
 	# ── 阶段 D：猪掉生猪排、狼夜晚追击且无掉落 ──────────────────────────
 	var pig2 := _spawn_mob(main_scene, Mob.MobType.PIG, player, day_night,

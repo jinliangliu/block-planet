@@ -11,11 +11,11 @@ class_name Mob
 ## 每过一个游戏日推进一阶段（DayNightCycle.day_changed 驱动），
 ## 幼体不可狩猎，长大后才会有完整掉落。
 
-## 体素 0.5m 化（D-030）：一格 = 0.5 米。米制量（速度/距离/尺寸）×2，
-## 格数体系不变。视觉模型整体经 METRIC_SCALE 放大。
-const METRIC_SCALE := 2.0
+## 世界尺度：1 格 = 1 米（D-062 P1，原 D-030 的 0.5 m/格 已废止）。
+## 米制量（速度/距离/尺寸）不再需要 ×2 补偿，METRIC_SCALE 折回 1.0。
+const METRIC_SCALE := 1.0
 
-const GRAVITY := 48.0
+const GRAVITY := 24.0
 ## 被动生物受击后的逃跑时长（秒）。
 const FLEE_TIME := 3.0
 ## 会反击的被动生物被击中后的追击时长（秒）。

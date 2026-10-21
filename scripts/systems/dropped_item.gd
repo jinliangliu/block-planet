@@ -20,8 +20,8 @@ func setup(player: Player, id: int, amount: int) -> void:
 func _ready() -> void:
 	var mesh := MeshInstance3D.new()
 	var box := BoxMesh.new()
-	# 体素 0.5m 化：视觉与吸附半径 ×2，相对玩家/方块的比例不变。
-	box.size = Vector3(0.56, 0.56, 0.56)
+	# D-062 P1：1 格 = 1 m，掉落物按真实米制（0.28 m 立方），不再 ×2。
+	box.size = Vector3(0.28, 0.28, 0.28)
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = _color()
 	mesh.mesh = box

@@ -5,9 +5,9 @@ class_name FishingBobber
 ## 由 Player 创建与回收，自身不判断钓况——咬钩时机由 Player 的垂钓状态机掌管。
 
 const BOB_SPEED := 3.4
-# 体素 0.5m 化：浮标本体与浮动幅度 ×2，钓线为全局拉线不动。
-const VISUAL_SCALE := 2.0
-const BOB_AMPLITUDE := 0.12
+# D-062 P1：1 格 = 1 m，浮标本体与浮动幅度按真实米制，不再 ×2。
+const VISUAL_SCALE := 1.0
+const BOB_AMPLITUDE := 0.06
 const LINE_THICKNESS := 0.012
 ## 浮标与竿尖（相机）距离过远时视为脱线。
 const LINE_MAX := 40.0

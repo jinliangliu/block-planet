@@ -11,9 +11,10 @@ extends RefCounted
 ##   forward = Vector2(sin h, cos h)     ⇒ h=0 时船头朝 +Z（北），节点 rotation.y = h
 ##   steer 输入 +1 = 向右打舵 ⇒ heading 减小（h 增大 = 左转）
 ##
-## 单位（D-030 体素 0.5m 化）：位置/速度内部一律用「格」（1 格 = 0.5 m），
+## 单位（D-062 P1：1 格 = 1 m）：位置/速度内部一律用「格」，而 1 格就是 1 m，
+## 故 MPS_TO_BLOCKS = 1.0（原 D-030 的 0.5 m/格 换算 ×2 已废止）。
 ## 数据表里的 m/s 设计值在 setup 时 × MPS_TO_BLOCKS 换算；HUD 显示 km/h 时
-## 再 ÷ 2 × 3.6。海况 wave_m / wind_mps 是「米」设计值，同样换算。
+## 再 × 3.6。海况 wave_m / wind_mps 是「米」设计值，同样换算。
 ##
 ## 手感模型（街机向，儿童要的是「推油就走、打舵就转」）：
 ##   速度趋近 = forward × throttle × 极速 × 海况减速（波高越大越推不动）
@@ -22,8 +23,8 @@ extends RefCounted
 ##   无动力船（木筏 fuel_l=0）不耗油也不会熄火；有油料时耗尽自动熄火，
 ##   发动机熄火后只随波漂流（速度趋近 0，但风仍能推着走）。
 
-## 米 → 格（D-030：1 格 = 0.5 m）。
-const MPS_TO_BLOCKS := 2.0
+## 米 → 格（D-062 P1：1 格 = 1 m，故为 1.0；原 D-030 的 0.5 m/格 时为 2.0）。
+const MPS_TO_BLOCKS := 1.0
 ## 速度趋近时间常数的倒数（1/s）：越大越跟手。
 const ACCEL_RESPONSE := 0.9
 ## 横向阻尼（1/s）：船不侧滑，速度矢量被拽回船头方向。
@@ -75,9 +76,9 @@ func speed() -> float:
 	return vel.length()
 
 
-## 对玩家显示的速度（km/h）：格/s ÷ 2 × 3.6。
+## 对玩家显示的速度（km/h）：格/s 即 m/s，× 3.6。
 func kmh() -> float:
-	return speed() * 0.5 * 3.6
+	return speed() * 3.6
 
 
 func max_speed() -> float:

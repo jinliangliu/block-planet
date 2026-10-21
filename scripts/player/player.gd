@@ -4,17 +4,18 @@ class_name Player
 ## 同时支持桌面（键盘 + 鼠标）与移动端（虚拟摇杆 + 触屏视角）。
 ## 键盘动作由 InputActions 运行时注册到 InputMap（见 scripts/core/input_actions.gd）。
 
-## 体素 0.5m 化（D-030）：一格 = 0.5 米。玩家 1.8m ≈ 3.6 格，方块相对玩家
-## 缩小一倍。所有米制常量（速度/重力/距离）×2，格数体系（地形/SEA_LEVEL）不变。
-const GRAVITY := 48.0
-const JUMP_VELOCITY := 16.0
-const WALK_SPEED := 11.0
-const SPRINT_SPEED := 18.0
-const FLY_SPEED := 24.0
+## 世界尺度：1 格 = 1 米（D-062 P1，原 D-030 的 0.5 m/格 已废止）。
+## 玩家 1.8 m ≈ 1.8 格；下方常量一律是**米制真值**（原为 ×2 的块单位补偿，
+## P1 已移除），格数体系（地形/SEA_LEVEL）不变。
+const GRAVITY := 24.0
+const JUMP_VELOCITY := 8.0
+const WALK_SPEED := 5.5
+const SPRINT_SPEED := 9.0
+const FLY_SPEED := 12.0
 const MOUSE_SENSITIVITY := 0.002
 const TOUCH_LOOK_SENSITIVITY := 0.004
 const PITCH_LIMIT := 1.55
-const REACH_DISTANCE := 16.0
+const REACH_DISTANCE := 8.0
 const MAX_HEALTH := 20
 const MAX_HUNGER := 20
 ## 饥饿消耗：站着不动满饥饿可撑 1000 秒（白天 600 秒，约 1.7 个白天）。
@@ -29,8 +30,8 @@ const STARVATION_DAMAGE_INTERVAL := 5.0
 const HURT_INVULN_TIME := 0.5
 ## 死亡停顿：原地立 R.I.P 墓碑的时长，倒计时结束才从出生点复活。
 const DEATH_PAUSE := 2.2
-# 落地速度阈值：sqrt(2 * GRAVITY * 6) ≈ 24 m/s，对应约 6 格内免伤。
-const FALL_DAMAGE_THRESHOLD := 24.0
+# 落地速度阈值：sqrt(2 * GRAVITY * 3) ≈ 12 m/s，对应约 3 m（3 格）内免伤。
+const FALL_DAMAGE_THRESHOLD := 12.0
 const FALL_DAMAGE_SCALE := 0.5
 ## 蓄力射箭：按住右键满蓄 BOW_MAX_CHARGE 秒，伤害与初速随蓄力提升。
 const BOW_MIN_CHARGE := 0.15
@@ -40,7 +41,7 @@ const FISH_IDLE := 0
 const FISH_WAITING := 1
 const FISH_BITING := 2
 ## 垂钓：抛竿最远距离、等待咬钩的时间区间与咬钩窗口。
-const FISH_CAST_RANGE := 28.0
+const FISH_CAST_RANGE := 14.0
 const FISH_WAIT_MIN := 2.0
 const FISH_WAIT_MAX := 5.0
 const FISH_BITE_WINDOW := 1.6
@@ -1331,7 +1332,8 @@ func _raycast_target() -> Dictionary:
 
 func _overlaps_player(cell: Vector3i) -> bool:
 	var cell_aabb := AABB(Vector3(cell), Vector3.ONE)
-	var player_aabb := AABB(global_position - Vector3(0.8, 0.0, 0.8), Vector3(1.6, 3.6, 1.6))
+	# 玩家 1.8 m × 0.8 m 宽（D-062 P1：1 格 = 1 m，原 3.6 格高已按米制折回）。
+	var player_aabb := AABB(global_position - Vector3(0.4, 0.0, 0.4), Vector3(0.8, 1.8, 0.8))
 	return cell_aabb.intersects(player_aabb)
 
 

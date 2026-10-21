@@ -5,14 +5,15 @@
 [ext_resource type="Script" path="res://scripts/player/player_model.gd" id="3_model"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
-radius = 0.8
-height = 3.6
+; D-062 P1：1 格 = 1 m，玩家 1.8 m 高 × 0.8 m 宽（原 3.6 格高为 0.5 m/格 补偿）。
+radius = 0.4
+height = 1.8
 
 [node name="Player" type="CharacterBody3D"]
 script = ExtResource("1_player")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
 shape = SubResource("CapsuleShape3D_player")
 
 [node name="Camera3D" type="Camera3D" parent="."]

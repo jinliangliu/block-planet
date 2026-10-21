@@ -227,8 +227,9 @@ func snapshot() -> Dictionary:
 		"pos": global_position,
 		"physics": physics.snapshot(),
 		"wave_m": float(_last_sea.get("wave_m", 0.0)),
-		"harbor_distance_m": dist_blocks * 0.5 if dist_blocks >= 0.0 else -1.0,
-		"band": BoatSystem.band_of(dist_blocks * 0.5) if dist_blocks >= 0.0 else "near",
+		# D-062 P1：1 格 = 1 m，格距离即米，不再 ×0.5。
+		"harbor_distance_m": dist_blocks if dist_blocks >= 0.0 else -1.0,
+		"band": BoatSystem.band_of(dist_blocks) if dist_blocks >= 0.0 else "near",
 		"at_harbor": is_at_harbor(),
 	}
 

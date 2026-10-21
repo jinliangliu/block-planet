@@ -24,7 +24,7 @@ signal boat_unlocked(boat_id: String)
 const DATA_PATH := "res://data/boating/boats.json"
 const JOURNAL_PATH := "user://boats.json"
 
-## 出海距离分带（米；1 格 = 0.5 m，HUD 与探针都读这两个阈值）。
+## 出海距离分带（米；D-062 P1 起 1 格 = 1 m，格距离即米，HUD 与探针都读这两个阈值）。
 const NEAR_MAX_M := 100.0
 const MID_MAX_M := 250.0
 ## 分带 → 钓点 id 后缀（spots.json 里 <ocean>_near/_mid/_far）。

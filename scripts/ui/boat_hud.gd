@@ -112,8 +112,9 @@ func _draw_position_panel(snap: Dictionary) -> void:
 	var font := ThemeDB.fallback_font
 	var ox := rect.position.x + 10.0
 	var oy := rect.position.y
-	var x_text := "X %+.0f m" % (pos.x * 0.5)
-	var z_text := "Z %+.0f m" % (pos.z * 0.5)
+	# D-062 P1：1 格 = 1 m，格坐标即米，不再 ×0.5。
+	var x_text := "X %+.0f m" % pos.x
+	var z_text := "Z %+.0f m" % pos.z
 	draw_string(font, Vector2(ox, oy + 24.0), x_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT_MAIN)
 	draw_string(font, Vector2(ox, oy + 44.0), z_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT_MAIN)
 	var dist_text := "距港 %.0f m" % dist_m if dist_m >= 0.0 else "距港 —（无港口）"
