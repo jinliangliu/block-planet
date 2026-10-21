@@ -38,6 +38,15 @@ signal aircraft_distance(meters: float)
 ## 残骸摔倒、任务外坠机解体不广播（那不是「降落」）。
 signal aircraft_landed(result: Dictionary)
 
+## 浮动原点搬迁后广播（128 km 大世界，D-062）：delta 为「同一世界位置的渲染
+## 坐标变化量」（= 旧 origin − 新 origin）。订阅方两类：
+##   - 世界锚定节点（World/MobSpawner/BreakFx/Player/飞行标记/船/箭/倒树/浮漂）：
+##     position += delta（其下绝对坐标子节点随之平移，无需逐个处理）；
+##   - 库存锚点（玩家 spawn_position、Main._craft_park/_mission_anchor 等渲染
+##     空间存量）：同样 += delta 完成重基。
+## 世界节点自身位置 = −origin，其下区块/结构/树木自动跟随，不经过本信号。
+signal origin_shifted(delta: Vector3)
+
 ## 右键命中村民或酿灶台时发出，HUD 监听后打开交易面板。
 signal request_trade
 

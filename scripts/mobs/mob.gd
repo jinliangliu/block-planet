@@ -578,6 +578,7 @@ func _shoot_arrow() -> void:
 	var target := player.global_position + Vector3(0.0, 1.8, 0.0)
 	arrow.setup(player, (target - _chest_position()).normalized(), self)
 	get_parent().add_child(arrow)
+	WorldAnchor.register(arrow)  # D-062：村民（Main 子节点）的箭不会随父搬迁，须登记
 	arrow.global_position = _chest_position()
 
 
@@ -812,6 +813,10 @@ func _spawn_one_drop(id: int, count: int) -> void:
 	var drop := DroppedItem.new()
 	drop.setup(player, id, count)
 	get_parent().add_child(drop)
+	# D-062：村民是 Main 子节点（已单独登记），其掉落物随父自动搬迁；
+	# 刷怪笼下的生物同理。register 的祖先去重会跳过这两种情况，
+	# 只在父节点未登记时才把掉落物本身登记进组。
+	WorldAnchor.register(drop)
 	drop.global_position = global_position
 
 

@@ -186,7 +186,7 @@ func _run() -> void:
 	# ── ⑦ 生成耗时（高度 4 倍后不能把流式加载拖垮） ──
 	var t0 := Time.get_ticks_usec()
 	for i in range(8):
-		world._load_chunk(Vector3i(200 + i, 0, 200), false)
+		world._load_chunk(Vector2i(200 + i, 200), false)
 	var dt_ms := float(Time.get_ticks_usec() - t0) / 8000.0
 	print("DBG 单块生成 %.2f ms（8 块平均）" % dt_ms)
 	_check(dt_ms < 60.0,

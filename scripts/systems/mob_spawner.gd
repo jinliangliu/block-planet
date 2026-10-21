@@ -123,6 +123,9 @@ func _spawn_one(mob_type: int) -> void:
 	var mob := Mob.new()
 	mob.setup(mob_type, _player, _day_night, Mob.pick_spawn_stage(mob_type))
 	add_child(mob)
+	# D-062：MobSpawner 本身已登记进搬迁组，本调用被祖先去重跳过——
+	# 留着是防御：将来刷怪笼不再整体搬迁时，生物仍随 origin 平移。
+	WorldAnchor.register(mob)
 	mob.global_position = pos
 	_mobs.append(mob)
 
@@ -249,13 +252,17 @@ func _find_water_cell(wx: int, y: int, wz: int) -> Vector3i:
 
 
 ## 池塘岸边的可站立落点：环形向外找非水列，取草地/沙地上的两格空气位。
+## wx/wz 为**渲染坐标**（由玩家周边搜索传入）：water_kind 是世界坐标创作
+## API（D-062），先 to_world；get_block/_find_ground_y 保持渲染坐标。
 func _find_pond_shore(wx: int, wz: int) -> Vector3:
+	var w := _world.to_world(Vector3(float(wx), 0.0, float(wz)))
 	for radius in range(1, SHORE_SEARCH_RADIUS + 1):
 		for dx in range(-radius, radius + 1):
 			for dz in range(-radius, radius + 1):
 				var cx := wx + dx
 				var cz := wz + dz
-				if _world.water_kind(cx, cz) != World.WATER_NONE:
+				var wc := w + Vector3(float(dx), 0.0, float(dz))
+				if _world.water_kind(int(floorf(wc.x)), int(floorf(wc.z))) != World.WATER_NONE:
 					continue
 				var y := _find_ground_y(cx, cz)
 				if y < 0:
@@ -271,6 +278,7 @@ func _place_water_mob(mob_type: Mob.MobType, pos: Vector3) -> void:
 	var mob := Mob.new()
 	mob.setup(mob_type, _player, _day_night, Mob.pick_spawn_stage(mob_type))
 	add_child(mob)
+	WorldAnchor.register(mob)  # D-062：同 _spawn_one（祖先去重，随 MobSpawner 搬迁）
 	mob.global_position = pos
 	_water_mobs.append(mob)
 
@@ -305,8 +313,11 @@ func _is_ground_block(id: int) -> bool:
 ## 从噪声地表高度起向上扫描，找到连续四格空气且脚下为实心方块的位置。
 ## 噪声高度不含树木与玩家建筑，直接使用会卡进树干或房屋。
 ## 玩家与生物体素 0.5m 化后身高 ≈3.6 格，落点需 4 格净空。
+## wx/wz 为**渲染坐标**：get_surface_height 收世界坐标（D-062 创作 API），
+## 先 to_world 取样；get_block 保持渲染坐标（查询 API 内部转换）。
 func _find_ground_y(wx: int, wz: int) -> int:
-	var y := _world.get_surface_height(wx, wz)
+	var w := _world.to_world(Vector3(float(wx), 0.0, float(wz)))
+	var y := _world.get_surface_height(int(floorf(w.x)), int(floorf(w.z)))
 	for i in range(GROUND_SCAN_STEPS):
 		if y >= World.CHUNK_SIZE.y - 4:
 			return -1

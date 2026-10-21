@@ -187,6 +187,7 @@ var _last_touchdown_vs := 0.0
 static func spawn(parent: Node, at: Vector3, heading: float = 0.0) -> Aircraft:
 	var craft := Aircraft.new()
 	parent.add_child(craft)
+	WorldAnchor.register(craft)  # D-062：Main 级实体，随 origin 搬迁
 	craft.place(at, heading)
 	return craft
 
@@ -202,10 +203,19 @@ static func from_loadout(
 	craft._blueprint = blueprint
 	craft.blueprint_built = true   # 试飞机：收回不退回物品（P2-3）
 	parent.add_child(craft)              # _ready 读到 _blueprint → 建零件体素外观
+	WorldAnchor.register(craft)          # D-062：Main 级实体，随 origin 搬迁
 	craft.place(at, heading)             # 落位并建默认气动框
 	craft._state.airframe = blueprint.aggregate()  # 覆盖为零件聚合结果
 	craft._refuel_full()                 # 蓝图油箱容量可能不同（2 油箱 = 110 L）
 	return craft
+
+
+## 浮动原点搬迁（D-062）：节点位置由 main 的组遍历整体 +delta，这里补纯
+## 逻辑层的 _state.position——它每物理帧末尾才从节点回同步（589 行），
+## 不立即重基的话搬迁当帧的 snapshot（HUD/遥测/录制）会读到旧坐标。
+func rebase_state_after_shift(delta: Vector3) -> void:
+	if _state != null:
+		_state.position += delta
 
 
 ## 落位：把机轮放到地面上（at 为地面点）。

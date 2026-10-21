@@ -309,7 +309,7 @@ func _ray_down(from: Vector3, to: Vector3) -> Dictionary:
 
 
 ## 强制卸载指定区块（模拟玩家走远），用于验证修改留存。
-func _force_unload(coord: Vector3i) -> bool:
+func _force_unload(coord: Vector2i) -> bool:
 	if not _world._chunks.has(coord):
 		return false
 	_world._unload_chunk(coord)

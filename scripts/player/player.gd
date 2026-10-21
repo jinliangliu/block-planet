@@ -391,7 +391,11 @@ func _use_aircraft_kit() -> bool:
 		forward = Vector3(1.0, 0.0, 0.0)
 	var at := global_position + forward.normalized() * 5.0
 	var cell := Vector3i(at.floor())
-	var surface := _world.get_surface_height(cell.x, cell.z)
+	# get_surface_height 收**世界坐标**（D-062 创作 API，纯噪声不依赖区块），
+	# at/cell 是渲染坐标——先 to_world 再取样。下面 get_block 的实心校验保持
+	# 渲染坐标（查询 API 内部转换），飞机落点用渲染坐标（节点位置）。
+	var at_w := _world.to_world(at)
+	var surface := _world.get_surface_height(int(floorf(at_w.x)), int(floorf(at_w.z)))
 	# 机轮要落在实心面上：脚下那格不是实心（水面/空中）就拒绝，避免放出一架掉下去的飞机。
 	if not BlockTypes.is_solid(_world.get_block(Vector3i(cell.x, surface - 1, cell.z))):
 		Events.notice.emit("前方不是平地，飞机放不稳。")
@@ -629,10 +633,17 @@ func _safe_respawn_position() -> Vector3:
 		return found
 	var wx := int(floorf(global_position.x))
 	var wz := int(floorf(global_position.z))
+	# ③ 的落点必须是**渲染坐标**（直接赋给 global_position），而
+	# get_surface_height 收世界坐标（D-062）——先 to_world 取样，返回时
+	# 保持渲染坐标。y 不受浮动原点影响（只平移 x/z）。
+	var w := _world.to_world(global_position)
+	wx = int(floorf(w.x))
+	wz = int(floorf(w.z))
 	var surface := _world.get_surface_height(wx, wz)
 	push_warning("Player: 脱困列搜索失败，回退噪声地表 col=(%d,%d) surface=%d"
 		% [wx, wz, surface])
-	return Vector3(wx + 0.5, float(surface + 8), wz + 0.5)
+	# 世界坐标 → 渲染坐标：调用方直接赋 global_position（节点坐标）。
+	return _world.to_render(Vector3(w.x + 0.5, float(surface + 8), w.z + 0.5))
 
 
 ## 从 cell 所在列向上找第一个「4 格空气 + 实海底」的可站立格（玩家 3.6 格高，
@@ -668,6 +679,12 @@ func get_world() -> World:
 
 func set_spawn_position(pos: Vector3) -> void:
 	spawn_position = pos
+
+
+## 浮动原点搬迁（D-062）：spawn_position 存**渲染坐标**（脱困搜索与重生都
+## 直接把它当格坐标用），origin 变化后整体 +delta 才继续指向同一世界位置。
+func rebase_spawn_position(delta: Vector3) -> void:
+	spawn_position += delta
 
 
 ## 传送救援（D-039 飞行重置入口之一）：清空全部运动状态并把玩家放到指定点。
@@ -1578,6 +1595,7 @@ func _release_bow() -> void:
 	var arrow := ArrowProjectile.new()
 	arrow.setup_player_shot(self, _ray_forward(), charge, HuntRules.bow_damage(charge))
 	get_parent().add_child(arrow)
+	WorldAnchor.register(arrow)  # D-062：Main 级实体，随 origin 搬迁
 	arrow.global_position = camera_position() + _ray_forward() * 0.6
 	_held_item.swing()
 	_model.swing_arms()
@@ -1619,6 +1637,7 @@ func _cast_fishing() -> bool:
 	_bobber = FishingBobber.new()
 	_bobber.setup(self)
 	get_parent().add_child(_bobber)
+	WorldAnchor.register(_bobber)  # D-062：Main 级实体，随 origin 搬迁
 	_bobber.global_position = found
 	_fishing = FISH_WAITING
 	_fish_timer = randf_range(FISH_WAIT_MIN, FISH_WAIT_MAX)

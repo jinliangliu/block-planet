@@ -177,4 +177,5 @@ func _spawn_mob(type: Mob.MobType, pos: Vector3) -> void:
 	var mob := Mob.new()
 	mob.setup(type, _player, _day_night)
 	_parent.add_child(mob)
+	WorldAnchor.register(mob)  # D-062：村民/掠夺者是 Main 子节点，随 origin 搬迁
 	mob.global_position = pos

@@ -45,6 +45,9 @@ var _saved_physics := true
 ## 否则会带着回放前的陈旧速度继续滑行（探针实测 3 帧蠕滑 0.5 m）。
 var _saved_velocity := Vector3.ZERO
 var _saved_state_velocity := Vector3.ZERO
+## 浮动原点搬迁（D-062）：录制轨迹已整体重基，幽灵条带按旧坐标建成即失效。
+## 置脏后下一帧重建一次（_build_trail 本身禁每帧重建，搬迁一帧一次不破例）。
+var _trail_dirty := false
 
 
 func begin(rec: FlightRecorder, craft: Aircraft, camera: AircraftCamera) -> void:
@@ -70,6 +73,13 @@ func skip() -> void:
 		_finish()
 
 
+## 浮动原点搬迁通知（D-062，由 main 在 Events.origin_shifted 里调用）：
+## 录制缓冲已重基，回放中的幽灵条带置脏待重建。
+func note_origin_shifted() -> void:
+	if _playing:
+		_trail_dirty = true
+
+
 func is_playing() -> bool:
 	return _playing
 
@@ -77,6 +87,11 @@ func is_playing() -> bool:
 func process_replay(delta: float) -> void:
 	if not _playing:
 		return
+	# 搬迁后幽灵轨迹失效：先按重基后的录制点重建（机体与相机每帧从
+	# sample_at 现取，天然跟随；只有一次性建成的条带需要显式刷新）。
+	if _trail_dirty:
+		_trail_dirty = false
+		_build_trail()
 	_time += delta
 	var d := _rec.duration()
 	if _time >= d:

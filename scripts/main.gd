@@ -112,6 +112,12 @@ func _ready() -> void:
 	_player.flight_camera = _flight_camera
 	_hud.setup_flight(_flight_camera, _recorder, _replay)
 	Events.aircraft_ride_changed.connect(_on_flight_ride_changed)
+	# 浮动原点（D-062）：世界锚定实体整群搬迁。静态根在此登记；动态实体
+	# （飞机/船/箭/浮漂/村民/飞行标注）在各自出生点调 WorldAnchor.register。
+	WorldAnchor.register(_player)
+	WorldAnchor.register(_mob_spawner)
+	WorldAnchor.register(_flight_camera)
+	Events.origin_shifted.connect(_on_origin_shifted)
 	# 坠机生还自动归位（D-056）：弹射后无需玩家按 Y，自动回到初始停机坪。
 	Events.aircraft_crash_survived.connect(_on_crash_survived)
 	# 飞行任务航路 / 降落区锚定机场或降落场（两者皆无才锚定出生点）：
@@ -189,7 +195,12 @@ func _physics_process(delta: float) -> void:
 	var telemetry := {
 		"altitude_agl": float(snap.get("altitude_agl", 0.0)),
 		"speed": float(snap.get("kmh", 0.0)),
-		"position": craft.global_position,
+		# 任务遥测约定（MissionManager 文档）：position 为**世界坐标**——
+		# 任务航路/降落区按世界空间锚定（missions_for_airport 用机场绝对坐标），
+		# 浮动原点搬迁后渲染坐标会变、世界坐标不变，故此处经 to_world 转换
+		# （origin=0 时恒等，行为与改造前一致）。屏幕仪表 HUD 不走本字典
+		# （它直读 craft.snapshot() 的渲染坐标），不受影响。
+		"position": _world.to_world(craft.global_position),
 		"on_ground": craft.is_on_floor(),
 		"vertical_speed": craft.velocity.y,
 		"wrecked": craft.is_wrecked(),
@@ -225,18 +236,24 @@ func _on_flight_ride_changed(riding: bool) -> void:
 			if _flight_markers == null:
 				_flight_markers = FlightMarkers.new()
 				add_child(_flight_markers)
+				WorldAnchor.register(_flight_markers)  # D-062：Main 级实体，随 origin 搬迁
 				_flight_markers.setup(craft, self)
 			_hud.instrument_hud().register_view(_cockpit_panel)
 			_hud.instrument_hud().register_view(_flight_markers)
 			# 导航目标 = 任务锚点（机场/出生点）：HSI/CDI 与 3D 标注同步标出。
-			_hud.set_flight_navigation(_mission_anchor, "机场/任务")
-			_flight_markers.set_target(_mission_anchor, "机场/任务")
+			# _mission_anchor 存**世界坐标**（真相）；HSI/CDI 按渲染坐标与机体
+			# 位置做差、3D 标注直接摆节点，故注入前统一 to_render 转换
+			# （origin=0 时恒等）。任务数据（missions_for_airport）保持世界坐标，
+			# 与 _physics_process 里 to_world 后的遥测位置配套。
+			var anchor_render := _world.to_render(_mission_anchor)
+			_hud.set_flight_navigation(anchor_render, "机场/任务")
+			_flight_markers.set_target(anchor_render, "机场/任务")
 			# 进近引导：以当前机头方向为进近轴，在目标后方铺箭头 + 3° 下滑道。
 			var fwd := -craft.global_transform.basis.z
 			fwd.y = 0.0
 			if fwd.length_squared() > 1e-4:
 				fwd = fwd.normalized()
-				_flight_markers.set_runway_guide(_mission_anchor, fwd)
+				_flight_markers.set_runway_guide(anchor_render, fwd)
 	else:
 		_flight_camera.set_active(false)
 		_recorder.stop()
@@ -250,6 +267,40 @@ func _on_flight_ride_changed(riding: bool) -> void:
 			_flight_markers.queue_free()
 			_flight_markers = null
 		_hud.instrument_hud().clear_navigation()
+
+
+## 浮动原点搬迁（D-062）：World.request_shift_origin 已把 World 节点移到
+## −new_origin（其下区块自动跟随）并重键了储物箱，这里负责 Main 级实体与
+## 渲染空间锚点。delta = 旧 origin − 新 origin：世界内容整体 +delta，
+## 玩家的**世界坐标**不变（render = world − origin 同步平移）。
+func _on_origin_shifted(delta: Vector3) -> void:
+	# ① 世界锚定实体（玩家/飞行相机/刷怪笼/飞机/船/箭/浮漂/村民/飞行标注）：
+	# 全部是 Main 级叶子节点，position += delta 即整体平移（子节点随父）。
+	for node in get_tree().get_nodes_in_group(WorldAnchor.GROUP):
+		if node is Node3D and is_instance_valid(node):
+			node.position += delta
+			# 带内部坐标态的实体补钩子：飞机的 _state.position 每物理帧末才
+			# 从节点回同步、船的 harbor_pos 是渲染锚点，不立即重基的话搬迁
+			# 当帧的读数会带着旧坐标。
+			if node is Aircraft:
+				(node as Aircraft).rebase_state_after_shift(delta)
+			elif node is Boat:
+				(node as Boat).rebase_anchors_after_shift(delta)
+	# ② 渲染空间锚点重基：这三个量以「注入时的渲染坐标」存储（传送/停机位
+	# 直接当 global_position 用），随 origin 平移保持指向同一世界位置。
+	_player.rebase_spawn_position(delta)
+	_flight_spawn += delta
+	_craft_park += delta
+	# ③ 轨迹录制与回放：样本按渲染坐标采样，整体重基后回放/幽灵轨迹不错位。
+	_recorder.shift(delta)
+	_replay.note_origin_shifted()
+	# ④ 任务锚点是世界坐标真相，不随搬迁改变；但 HSI/CDI 与 3D 标注消费
+	# 渲染坐标，登机中重新注入一次（下机态无导航视图，跳过）。
+	if _player.is_riding():
+		var anchor_render := _world.to_render(_mission_anchor)
+		_hud.set_flight_navigation(anchor_render, "机场/任务")
+		if _flight_markers != null and is_instance_valid(_flight_markers):
+			_flight_markers.set_target(anchor_render, "机场/任务")
 
 
 ## 飞行重置（D-039）：坠机 / 卡住的一键救援——玩家与飞机送回本地图初始
@@ -290,9 +341,12 @@ func reset_flight_experience(notice: String = "") -> void:
 		# 区块就绪（幂等，已加载即跳过），否则飞机 place 出去无地面可停，
 		# 会自由落体嵌入跑道、被 depenetration 乱推（实测浮起 1.6 m）。
 		# 顺带让玩家的落点安全搜索读到真实方块。
+		# _craft_park 是渲染坐标，ensure_chunks_in_region 收世界坐标（D-062）：
+		# 先 to_world 再取整——搬迁后二者相差一个 origin，直接传会保证错区域。
 		var pad := Vector3i(40, 0, 40)
-		_world.ensure_chunks_in_region(
-			Vector3i(_craft_park) - pad, Vector3i(_craft_park) + pad)
+		var park_w := _world.to_world(_craft_park)
+		var park_cell := Vector3i(floori(park_w.x), 0, floori(park_w.z))
+		_world.ensure_chunks_in_region(park_cell - pad, park_cell + pad)
 		if parked != null:
 			parked.place(_craft_park, PI)  # place() 自带状态复位与满油
 		else:
@@ -359,7 +413,10 @@ func _on_test_fly_requested(bp: Blueprint) -> void:
 	# 不能直接用 get_surface_height——那只是噪声地形基准，看不见机场整平垫高、
 	# 玩家自建平台；在垫高跑道旁试飞会把飞机嵌进跑道里再被物理弹飞
 	# （与本函数遥测里 block_under 的向下扫描同思路）。
-	var surface := _world.get_surface_height(cell.x, cell.z)
+	# get_surface_height 收**世界坐标**（D-062 创作 API），cell 是渲染坐标，
+	# 先 to_world；下面的 get_block 扫描保持渲染坐标（查询 API 自带转换）。
+	var at_w := _world.to_world(at)
+	var surface := _world.get_surface_height(int(floorf(at_w.x)), int(floorf(at_w.z)))
 	var scan := Vector3i(cell.x, cell.y + 6, cell.z)
 	for i in range(16):
 		var b := _world.get_block(scan - Vector3i(0, i, 0))
@@ -392,7 +449,11 @@ func _build_harbor(field_site: Vector3i, craft_park: Vector3) -> void:
 	if not bool(harbor.get("found", false)):
 		var at := craft_park + Vector3(7.0, 0.0, 0.0) if craft_park != Vector3.ZERO \
 			else Vector3(field_site.x + 7.0, 0.0, field_site.y)
-		var ground_y := float(_world.get_surface_height(int(at.x), int(at.z))) + 1.0
+		# get_surface_height 收世界坐标（D-062）；本函数虽只在场景就绪
+		# （origin=0）时运行，仍按契约转换，避免将来在别处复用踩坑。
+		var at_w := _world.to_world(at)
+		var ground_y := float(_world.get_surface_height(
+			int(floorf(at_w.x)), int(floorf(at_w.z)))) + 1.0
 		var boat := Boat.spawn(self, Vector3(at.x, ground_y, at.z), PI, player_boat_id)
 		boat.harbor_pos = Vector3.ZERO  # 无港口：距港 -1（近海带）
 		boat.setup_world(_world, _day_night)

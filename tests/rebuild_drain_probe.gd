@@ -50,8 +50,8 @@ func _run() -> void:
 		world._pending_load.size(), world._wanted.size()])
 
 	# X 与 E：X 在 wanted 东缘，E 在 pad 环内（已加载且不会被自动重载）。
-	var x_coord := c0 + Vector3i(1, 0, 0)
-	var e_coord := c0 + Vector3i(2, 0, 0)
+	var x_coord := c0 + Vector2i(1, 0)
+	var e_coord := c0 + Vector2i(2, 0)
 	_check(world._chunks.has(x_coord) and world._chunks.has(e_coord),
 		"① 缘区块 X 与外侧邻居 E 均在加载窗口内")
 	var x_chunk: Chunk = world._chunks[x_coord]

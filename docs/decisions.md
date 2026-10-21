@@ -1918,3 +1918,27 @@ D-057 曾断言「面板不加恢复默认，留待通用设置框架」；用�
 - 新增 `tests/landing_quality_probe`（45 断言全 PASS）：A 段纯逻辑边界（满分构成 40/30/30、vs 3.0 阈值、无参照中性 18、超阈值钳零、连续性、分级线 90/75）；B 段任务改造（软着陆 65 分与纯逻辑同参数一致、越轻分越高、硬着陆 0 分、防刷 repeat+奖励归零+仍计分）；C 段呼号（四层各一次、爬升/缓降不呼、同层不重复、着地重置、take 即消费）；D 段端到端（真实飞机 1.5 m 落跑道 → 88 分「飞得很漂亮」+ 事件字段完整）。
 - 探针踩坑（均为测试手法问题，非实现缺陷）：① 分级边界值口算错两次（roll 8.333 km/h 才是 90 分线，不是 3）；② 防刷要在**同一 MissionManager 实例**上跑两次才出 repeat（每次 new 实例自然没奖过）；③ 呼号测试步长 5 m 会跳过 5 m 层的 airborne 窗口（一帧从 5+ 跨到 <2 着地判据以下），细步长 1.25 m 模拟连续下沉才对；④ lambda 多行写法第一行末尾不能带 `)`。
 - `tmp/run_regression.sh` 无头列表加入 `landing_quality_probe`（33 探针）。
+
+## D-062 128 km 大世界坐标地基：Vector2i 区块键 + 浮动原点（P0 完成）
+
+用户规格：1 方块 = 1 米、区块 16×16、每区域地图 128 km × 128 km（±64000 格）、双环加载（高模 8 区块 / 低模 16 区块）、浮动原点保不抖、开飞机横跨约 4 分钟。四项定夺（用户答复）：**保持现行速度**（横跨约 42 分钟，不按规格提速 10 倍）、**每区域各 128 km**（保留 11 区域地球选择器）、**低模用高度图粗网格**、**P0→P3 全量连续实施**。本条只落地 P0 坐标地基；尺度切换（P1）、双环低模（P2）、边界与大洋（P3）另行记录。
+
+### 为什么必须浮动原点
+
+float32 在 64 km 处量化约 8 mm：区块节点位置量化会让相邻区块共享边错位（地面裂缝）、相机与物理体抖动。故逻辑坐标一律整数（世界空间，真相），渲染坐标 = 世界坐标 − origin；玩家越过 `ORIGIN_SHIFT_THRESHOLD = 4096` 格即 recenter（4 km 处 float32 量化 0.5 mm，不可见），新 origin 对齐 `ORIGIN_SHIFT_GRID = 4096` 网格（同一世界位置经不同路径到达时渲染坐标一致，探针可复现）。
+
+### 三层坐标契约（代码唯一事实来源）
+
+- **世界空间**（绝对整数，真相）：`world_to_chunk(pos) -> Vector2i` / `chunk_to_world(coord) -> Vector3` 底层接口（对负坐标同样正确，floori 向下取整）；创作 API（`get_surface_height`/`is_water_column`/`water_kind`/`ensure/preload/rebuild_chunks_in_region*`）收世界坐标；任务数据（`MissionData.zone_center`/`waypoints`，由机场绝对坐标生成）存世界坐标。
+- **渲染空间**（= 世界 − origin，节点持有）：查询/写入 API（`get_block`/`set_block`/`set_block_deferred`/`top_block_at`/`raycast_blocks`/`box_contents` 键）收渲染坐标（调用方持有节点坐标）；HUD 导航目标、3D 标注、小地图、战术地图采样全在渲染空间。
+- **搬迁分工**：`World` 节点位置 = −origin（其下区块/结构/树木保持绝对局部坐标，自动跟随）；Main 级实体与渲染锚点走 `Events.origin_shifted(delta)`（delta = 旧−新 origin，世界内容整体 +delta，世界坐标不变）。`WorldAnchor`（`scripts/world/world_anchor.gd`）注册组 + **祖先去重**（父已登记则跳过，防双重平移）：静态根（Player/MobSpawner/AircraftCamera）在 main._ready 登记，动态实体（飞机/船/箭/浮漂/村民/飞行标注）在各自出生点登记；掉落物随玩家、生物随 MobSpawner 自动跟随。带内部坐标态的实体补钩子：`Aircraft.rebase_state_after_shift`（`_state.position` 每物理帧末才从节点回同步，不立即重基则搬迁当帧快照读旧坐标）、`Boat.rebase_anchors_after_shift`（`harbor_pos` 是「距港距离」判据锚点）。
+- 重基清单（main `_on_origin_shifted`）：`player.spawn_position`、`_flight_spawn`、`_craft_park`、`FlightRecorder.shift`（样本按渲染坐标采样，回放/幽灵轨迹不错位）、`FlightReplay.note_origin_shifted`（条带一次性建成，置脏下帧重建）；`_mission_anchor` 是世界坐标真相不重基，但 HSI/CDI 与 3D 标注消费渲染坐标，登机中经 `to_render` 重新注入。
+
+### 结构生成 API 的既有陷阱（已文档化，未改语义）
+
+`set_block_deferred` 收渲染坐标（与 `get_block` 同语义，砍树路径直接用），而机场/村庄/港口建造器传的是绝对坐标——两者只在「建造器仅场景就绪时运行、彼时 origin=0」的前提下一致。本条不改语义（改则要动三个建造器 + 砍树三函数），在函数注释里钉死该前提；`ensure_chunks_in_region`（main 的坠机救援确保跑道区块就绪）已按契约改为先 `to_world(_craft_park)` 再取整。
+
+### 验证
+
+- 新增 `tests/world_coord_probe`（27 断言全 PASS）：A 纯函数恒等式（区块接口互逆含负区块、边界取整 15.9→0/-0.1→-1/-16→-1/-16.1→-2、origin=0 恒等、非零 origin 往返、chunk_at 合成式）；B `request_shift_origin` 行为（origin/position=−origin/信号 delta/box_contents 重键/同值幂等）；C 真实 main 场景传送 6000 格（origin 对齐 (4096,0)、玩家世界坐标 x/z 不变、渲染锚点重基、卸载/重载/搬迁往返后标记方块仍在同一世界格）；D 实体不变式（船/飞机节点 +delta、世界坐标不变、harbor_pos/_state.position 重基、World 位置=−origin）。
+- 踩坑（均为 Vector2i 迁移漏改 `.z`→`.y`，parse error 直接杀死协程、探针挂起）：`world.gd` 的 `top_block_at`/`ensure/preload/rebuild_region`/`chunk_to_world`/`to_world`/`to_render`/`request_shift_origin`/`_maybe_shift_origin`/`_cell_local`/`_in_stream_window`/`_load_priority`/`_load_chunk` 命名、战术地图 sig 串、探针自身。教训：**类型迁移后必须全量 grep `.z` 并逐处确认基类型**，parse error 在 headless 下表现为「进程挂起无输出」（看门狗都救不了，因为脚本根本没编译出来）。

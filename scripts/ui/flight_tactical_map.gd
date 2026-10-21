@@ -354,10 +354,13 @@ func _sample_terrain() -> void:
 				top_y = hit.y
 			if id == BlockTypes.Block.AIR:
 				id = _estimate_block(ix, iz)
-				top_y = _world.get_surface_height(ix, iz)
-			pos[k] = Vector2(wx, wz)
-			col[k] = _shaded_color(id, top_y)
-			k += 1
+				# get_surface_height 收**世界坐标**（D-062 创作 API）：ix/iz 由
+				# _center（机体渲染坐标）推出，先 to_world 再取样。
+				var iw := _world.to_world(Vector3(float(ix), 0.0, float(iz)))
+				top_y = _world.get_surface_height(int(floorf(iw.x)), int(floorf(iw.z)))
+				pos[k] = Vector2(wx, wz)
+				col[k] = _shaded_color(id, top_y)
+				k += 1
 	_cell_pos = pos
 	_cell_color = col
 
@@ -438,8 +441,11 @@ func _scan_runways() -> void:
 
 ## 该列顶面方块：自地表估算上方往下扫首个非空方块。
 ## 返回 Vector2i(方块 id, 顶面 y)；未命中返回 (AIR, -1)。
+## wx/wz 为**渲染坐标**：get_surface_height 收世界坐标（D-062），先 to_world；
+## get_block 保持渲染坐标（查询 API 内部转换）。y 不受浮动原点影响。
 func _top_at(wx: int, wz: int, up: int, down: int) -> Vector2i:
-	var surface := _world.get_surface_height(wx, wz)
+	var w := _world.to_world(Vector3(float(wx), 0.0, float(wz)))
+	var surface := _world.get_surface_height(int(floorf(w.x)), int(floorf(w.z)))
 	var y := surface + up
 	var limit := surface - down
 	while y >= limit:
@@ -454,19 +460,25 @@ func _top_at(wx: int, wz: int, up: int, down: int) -> Vector2i:
 ## ——水面列按区域水体策略出水 / 冰，陆地按 low_line 分界取 surface/surface_low。
 ## D-055：亚洲分层地形（雪线积雪 / 裸岩坡 / 河床砾石）也必须在这里体现，
 ## 否则战术地图会把雪山画成草地，与玩家脚下踩到的方块不一致。
+## wx/wz 为**渲染坐标**（由 _center 推出）：is_water_column / get_surface_height /
+## world_river_noise 全部收世界坐标（D-062 创作 API与同源噪声），入口统一
+## to_world 后全程用世界坐标。
 func _estimate_block(wx: int, wz: int) -> int:
+	var w := _world.to_world(Vector3(float(wx), 0.0, float(wz)))
+	var gx := int(floorf(w.x))
+	var gz := int(floorf(w.z))
 	var profile := RegionAtlas.profile(_world.get_region())
-	if _world.is_water_column(wx, wz):
+	if _world.is_water_column(gx, gz):
 		if String(profile.get("water", "normal")) == "iceberg":
 			return BlockTypes.Block.ICE
 		return BlockTypes.Block.WATER
 	var low_line := int(profile.get("low_line", World.SEA_LEVEL))
-	var height := _world.get_surface_height(wx, wz) - 1
+	var height := _world.get_surface_height(gx, gz) - 1
 	if String(profile.get("terrain", "")) == "layered":
 		# 与 World._surface_ids 同一组阈值（该函数不公开，这里复现其判据；
 		# 改阈值必须两处同步，否则地图与世界脱节）。
 		var river := 1.0 - smoothstep(World.RIVER_T0, World.RIVER_T1,
-			absf(world_river_noise(wx, wz)))
+			absf(world_river_noise(gx, gz)))
 		if river > 0.78:
 			return BlockTypes.Block.GRAVEL
 		if river > 0.34:
@@ -593,18 +605,23 @@ func _resolve_target() -> void:
 		_target_sig = ""
 		return
 	var m: MissionData = mm.mission
-	var sig := "%d|%d|%d" % [mm.status, m.get_instance_id(), m.waypoints.size()]
+	# sig 里带 origin：浮动原点搬迁（D-062）后任务数据没变、但渲染坐标全变，
+	# 必须重新解析（下面的 to_render 转换依赖当前 origin）。
+	var sig := "%d|%d|%d|%d,%d" % [mm.status, m.get_instance_id(),
+		m.waypoints.size(), _world.origin().x, _world.origin().y]
 	if sig == _target_sig:
 		return
 	_target_sig = sig
 	_waypoints.clear()
 	var target := Vector3.ZERO
+	# 任务航路/降落区按**世界坐标**锚定（MissionData 契约），而地图以机体
+	# 渲染坐标（_center/_own）为图心——注入前统一 to_render。
 	if not m.waypoints.is_empty():
 		for wp: Vector3 in m.waypoints:
-			_waypoints.append(wp)
-		target = m.waypoints[m.waypoints.size() - 1]
+			_waypoints.append(_world.to_render(wp))
+		target = _world.to_render(m.waypoints[m.waypoints.size() - 1])
 	elif m.type == MissionData.Type.LANDING:
-		target = m.zone_center
+		target = _world.to_render(m.zone_center)
 	if target == Vector3.ZERO:
 		_has_target = false
 		_dirty = true

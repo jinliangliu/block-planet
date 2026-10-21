@@ -284,6 +284,14 @@ func setup_world(world: World, day_night: DayNightCycle) -> void:
 	_day_night = day_night
 
 
+## 浮动原点搬迁（D-062）：节点位置由 main 的组遍历整体 +delta，这里补内部
+## 渲染锚点 harbor_pos——「距港距离 / 鱼种带」判据拿它与 global_position 做差，
+## 不随节点一起平移会让停靠中的船永远算出「已离港」。
+func rebase_anchors_after_shift(delta: Vector3) -> void:
+	if harbor_pos != Vector3.ZERO:
+		harbor_pos += delta
+
+
 ## 摆一艘船：parent 下的新节点，落位 at、船头朝向 facing（rotation.y）。
 ## use_player_input=false 的实例是港口里泊着的装饰船（不读输入、不广播）。
 static func spawn(parent: Node, at: Vector3, facing: float, which_boat_id: String,
@@ -294,4 +302,5 @@ static func spawn(parent: Node, at: Vector3, facing: float, which_boat_id: Strin
 	boat.position = at
 	boat.rotation.y = facing
 	parent.add_child(boat)
+	WorldAnchor.register(boat)  # D-062：Main 级实体，随 origin 搬迁
 	return boat

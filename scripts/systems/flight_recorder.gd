@@ -121,6 +121,15 @@ func _ord(i: int) -> int:
 	return (_head + i) % CAPACITY
 
 
+## 浮动原点搬迁（D-062）：录制样本按渲染坐标采样（craft.global_position），
+## origin 变化后世界轨迹不变、渲染表示整体平移 +delta。回放机体位姿与幽灵
+## 轨迹都读本缓冲，此处重基后二者继续贴合地形。delta = 旧−新 origin
+## （同 Events.origin_shifted）。
+func shift(delta: Vector3) -> void:
+	for i in range(_count):
+		_pos[_ord(i)] += delta
+
+
 func _push(t: float, pos: Vector3, quat: Quaternion, throttle: float, airspeed: float) -> void:
 	_t[_head] = t
 	_pos[_head] = pos

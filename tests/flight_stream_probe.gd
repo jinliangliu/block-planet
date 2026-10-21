@@ -49,7 +49,7 @@ func _run() -> void:
 	var walk_missing := 0
 	for dx in range(-2, 3):
 		for dz in range(-2, 3):
-			if not world._chunks.has(center + Vector3i(dx, 0, dz)):
+			if not world._chunks.has(center + Vector2i(dx, dz)):
 				walk_missing += 1
 	_check(walk_missing == 0,
 		"① 徒步窗口 5×5 区块全部加载（缺 %d 块）" % walk_missing)
@@ -128,13 +128,13 @@ func _run() -> void:
 	center = world.world_to_chunk(player.global_position)
 	var far := 0
 	for key in world._chunks:
-		var off: Vector3i = key - center
-		if absi(off.x) > 3 or absi(off.z) > 3:
+		var off: Vector2i = key - center
+		if absi(off.x) > 3 or absi(off.y) > 3:
 			far += 1
 	var back_missing := 0
 	for dx in range(-2, 3):
 		for dz in range(-2, 3):
-			if not world._chunks.has(center + Vector3i(dx, 0, dz)):
+			if not world._chunks.has(center + Vector2i(dx, dz)):
 				back_missing += 1
 	_check(back_missing == 0,
 		"⑤ 下机后徒步 5×5 窗口重新填满（缺 %d 块）" % back_missing)
@@ -148,8 +148,8 @@ func _run() -> void:
 # ── 辅助 ─────────────────────────────────────────────────────────────────
 
 ## 机头坐标系 (u 前 / v 右) → 区块偏移。DIR=(0,0,1) 时 u 沿 +Z、v 沿 −X。
-func _offset(u: int, v: int) -> Vector3i:
-	return Vector3i(roundi(-float(v) * DIR.z), 0, roundi(float(u) * DIR.z))
+func _offset(u: int, v: int) -> Vector2i:
+	return Vector2i(roundi(-float(v) * DIR.z), roundi(float(u) * DIR.z))
 
 
 ## 反复推进流式加载直至队列清空（或达到帧数上限）。
@@ -177,7 +177,7 @@ func _walk_gap(world: World) -> int:
 	var miss := 0
 	for dx in range(-2, 3):
 		for dz in range(-2, 3):
-			if not world._chunks.has(center + Vector3i(dx, 0, dz)):
+			if not world._chunks.has(center + Vector2i(dx, dz)):
 				miss += 1
 	return miss
 

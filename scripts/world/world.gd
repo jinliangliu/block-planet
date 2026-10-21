@@ -32,6 +32,17 @@ const FLIGHT_BUDGET_MS := 8.0
 const FLIGHT_CHUNKS_PER_FRAME := 6
 const SEA_LEVEL := 22
 
+## ── 浮动原点（origin shifting，128 km 大世界 D-062）──────────────────────
+## 世界 ±64000 格：float32 在 64 km 处量化约 8 mm——区块节点位置量化会让相邻
+## 区块共享边错位（地面裂缝）、相机与物理体抖动。故逻辑坐标一律整数（世界
+## 空间，真相），渲染坐标 = 世界坐标 − origin；玩家越过阈值即 recenter，
+## 全部世界内容随之搬迁。
+## 搬迁分工：World 节点位置 = −origin（其下区块/结构/树木自动跟随）；
+## Main 级实体（玩家/飞机/船/箭/倒树/浮漂/飞行标记）与渲染空间锚点
+## （player.spawn_position）经 Events.origin_shifted 信号搬迁。
+const ORIGIN_SHIFT_THRESHOLD := 4096   # 玩家距 origin 超此值即搬迁（4 km 处 float32 量化 0.5 mm，不可见）
+const ORIGIN_SHIFT_GRID := 4096        # 新 origin 对齐网格：同一世界位置经不同路径到达时渲染坐标一致（探针可复现）
+
 ## ── D-055 亚洲分层地形的尺度常量（单位：格，1 格 = 0.5 m） ──────────────
 ## 世界高 256 格 = 128 m，分配如下：
 ##   平原丘陵  22..42   老单一噪声的地盘，玩家日常活动区
@@ -79,13 +90,13 @@ const WATER_FLOOD_CAP := 300
 
 @export var seed_value := 12345
 
-var _chunks: Dictionary[Vector3i, Chunk] = {}
-var _pending_load: Dictionary[Vector3i, bool] = {}
+var _chunks: Dictionary[Vector2i, Chunk] = {}
+var _pending_load: Dictionary[Vector2i, bool] = {}
 # 玩家修改过的区块坐标；卸载时留存数据，重载时恢复，避免建筑凭空消失。
-var _edited_coords: Dictionary[Vector3i, bool] = {}
-var _modified_data: Dictionary[Vector3i, PackedByteArray] = {}
+var _edited_coords: Dictionary[Vector2i, bool] = {}
+var _modified_data: Dictionary[Vector2i, PackedByteArray] = {}
 # 卸载区块后需要补面的邻居重建队列，每帧限量处理以平滑卡顿。
-var _pending_rebuilds: Array[Vector3i] = []
+var _pending_rebuilds: Array[Vector2i] = []
 var _atlas_material: StandardMaterial3D
 var _emissive_material: StandardMaterial3D
 var _noise := FastNoiseLite.new()
@@ -117,12 +128,15 @@ var _neighbor_lookup: Callable
 # 每帧用新建 lambda 排序待加载队列。 wanted 集只在「中心区块变化」或「飞行时
 # 机头方向转过阈值」时才真正改变，故缓存之；排序同理加脏位。
 var _wanted: Dictionary = {}
-var _wanted_center := Vector3i(1 << 30, 0, 1 << 30)  # 不可能的中心值：首帧必重算
+var _wanted_center := Vector2i(1 << 30, 1 << 30)  # 不可能的中心值：首帧必重算
 var _wanted_dir := Vector3(0.0, 0.0, -1.0)
 var _wanted_flight := false
 var _pending_dirty := true
-var _sort_center := Vector3i.ZERO
+var _sort_center := Vector2i.ZERO
 var _priority_cmp: Callable
+## 浮动原点（D-062）：渲染坐标 = 世界坐标 − origin。世界节点位置 = −origin，
+## 其下子节点保持绝对（世界）坐标不变。origin 恒为 ORIGIN_SHIFT_GRID 的倍数。
+var _origin := Vector2i.ZERO
 # 储物箱内容物：按方块坐标记录独立 36 格背包，破坏时散落至地面。
 var box_contents: Dictionary[Vector3i, Inventory] = {}
 # 水体分类缓存：水面格 → WATER_LARGE / WATER_POND，同一水体只洪泛一次。
@@ -162,7 +176,7 @@ func get_region() -> int:
 func set_player(player: Player) -> void:
 	_player = player
 	# 先同步加载玩家所在区块，避免出生时脚下没有地形。
-	_load_chunk(world_to_chunk(player.global_position))
+	_load_chunk(chunk_at(player.global_position))
 
 
 func _process(_delta: float) -> void:
@@ -179,17 +193,17 @@ func get_surface_height(wx: int, wz: int) -> int:
 ## 区块数据内取顶，避免逐格 get_block 的 world_to_chunk + 字典查询
 ## （实测采样 6.5 ms/次 → 目标 <1 ms）。pristine 区块走列顶表 O(1)，
 ## 被改动过的区块退回列内扫描（仍只做一次区块定位）。
+## wx/wz 为**渲染空间**格（小地图持玩家节点坐标），内部转世界空间。
 func top_block_at(wx: int, wz: int) -> int:
-	var coord := Vector3i(
-		floori(float(wx) / float(CHUNK_SIZE.x)), 0,
-		floori(float(wz) / float(CHUNK_SIZE.z)))
+	var w := to_world(Vector3(float(wx), 0.0, float(wz)))
+	var coord := world_to_chunk(w)
 	var chunk: Chunk = _chunks.get(coord)
 	if chunk == null:
 		return BlockTypes.Block.AIR
 	var sx := CHUNK_SIZE.x
 	var plane := sx * CHUNK_SIZE.z
-	var lx := wx - coord.x * sx
-	var lz := wz - coord.z * CHUNK_SIZE.z
+	var lx := floori(w.x) - coord.x * sx
+	var lz := floori(w.z) - coord.y * CHUNK_SIZE.z
 	var base := lx + lz * sx
 	if chunk.pristine and not chunk.col_top.is_empty():
 		var top := int(chunk.col_top[base])
@@ -250,12 +264,13 @@ func _flood_water(start: Vector2i) -> Array[Vector2i]:
 
 ## 结构生成支持：强制同步加载区域内全部区块。
 ## 村庄等固定建筑生成前调用，确保 set_block 落到已加载区块（含网格重建）。
+## min_cell/max_cell 为**世界空间**格（建筑创作 API，绝对坐标）。
 func ensure_chunks_in_region(min_cell: Vector3i, max_cell: Vector3i) -> void:
 	var cmin := world_to_chunk(Vector3(min_cell))
 	var cmax := world_to_chunk(Vector3(max_cell))
 	for cx in range(cmin.x, cmax.x + 1):
-		for cz in range(cmin.z, cmax.z + 1):
-			_load_chunk(Vector3i(cx, 0, cz))
+		for cz in range(cmin.y, cmax.y + 1):
+			_load_chunk(Vector2i(cx, cz))
 
 
 ## 结构生成预加载：只落数据、不建网格（供机场/村庄在统一重建前把整片区域
@@ -264,22 +279,25 @@ func ensure_chunks_in_region(min_cell: Vector3i, max_cell: Vector3i) -> void:
 ## 的邻居重做一遍——每块双倍重建，机场 + 三村约 80 块 ≈ 1 s 级白工。预加载把
 ## 网格创建推后到统一重建：邻居齐备、列边界可信，一遍即终态。探针与常规流式
 ## 仍走 ensure_chunks_in_region（带网格），不受影响。
+## min_cell/max_cell 为**世界空间**格（同 ensure_chunks_in_region）。
 func preload_chunks_in_region(min_cell: Vector3i, max_cell: Vector3i) -> void:
 	var cmin := world_to_chunk(Vector3(min_cell))
 	var cmax := world_to_chunk(Vector3(max_cell))
 	for cx in range(cmin.x, cmax.x + 1):
-		for cz in range(cmin.z, cmax.z + 1):
-			_load_chunk(Vector3i(cx, 0, cz), false)
+		for cz in range(cmin.y, cmax.y + 1):
+			_load_chunk(Vector2i(cx, cz), false)
 
 
 ## 结构生成支持：批量写方块但不触发网格重建（配合 rebuild_chunks_in_region 一次重建）。
 ## 避免逐方块重建导致结构生成时数秒级卡顿；写入仍计入修改留存。
-func set_block_deferred(world_pos: Vector3i, id: int) -> void:
-	var coord := world_to_chunk(Vector3(world_pos))
+## pos 为**渲染空间**格（建造器开机时 origin=0，与运行时砍树路径同语义）。
+func set_block_deferred(pos: Vector3i, id: int) -> void:
+	var w := to_world(Vector3(pos))
+	var coord := world_to_chunk(w)
 	var chunk: Chunk = _chunks.get(coord)
 	if chunk == null:
 		return
-	chunk.set_block_local(world_pos - chunk_to_world(coord), id)
+	chunk.set_block_local(_cell_local(floori(w.x), floori(w.y), floori(w.z), coord), id)
 	_edited_coords[coord] = true
 
 
@@ -302,30 +320,97 @@ func _rebuild_region(min_cell: Vector3i, max_cell: Vector3i, near: Vector3) -> v
 	var cmin := world_to_chunk(Vector3(min_cell))
 	var cmax := world_to_chunk(Vector3(max_cell))
 	var use_near := is_finite(near.x) and is_finite(near.z)
-	var near_c := world_to_chunk(near) if use_near else Vector3i.ZERO
+	# near 是渲染坐标（出生点/停机位经玩家节点传入），转世界区块再比窗口。
+	var near_c := chunk_at(near) if use_near else Vector2i.ZERO
 	for cx in range(cmin.x, cmax.x + 1):
-		for cz in range(cmin.z, cmax.z + 1):
-			var coord := Vector3i(cx, 0, cz)
+		for cz in range(cmin.y, cmax.y + 1):
+			var coord := Vector2i(cx, cz)
 			if use_near and (absi(coord.x - near_c.x) > LOAD_RADIUS + UNLOAD_PAD
-					or absi(coord.z - near_c.z) > LOAD_RADIUS + UNLOAD_PAD):
+					or absi(coord.y - near_c.y) > LOAD_RADIUS + UNLOAD_PAD):
 				continue
 			_rebuild_chunk(coord)
 
 
-func world_to_chunk(pos: Vector3) -> Vector3i:
-	return Vector3i(floori(pos.x / CHUNK_SIZE.x), 0, floori(pos.z / CHUNK_SIZE.z))
+## 世界坐标（绝对，格）→ 区块坐标。底层接口：对负坐标同样正确（floori 向下
+## 取整）。区块竖直不分段，故只取 x/z 两维（Vector2i）。
+func world_to_chunk(pos: Vector3) -> Vector2i:
+	return Vector2i(floori(pos.x / float(CHUNK_SIZE.x)), floori(pos.z / float(CHUNK_SIZE.z)))
 
 
-func chunk_to_world(coord: Vector3i) -> Vector3i:
-	return Vector3i(coord.x * CHUNK_SIZE.x, 0, coord.z * CHUNK_SIZE.z)
+## 区块坐标 → 该区块最小角的世界坐标（浮点；逻辑层用整数时自行 floori）。
+## 底层接口：与 world_to_chunk 互逆（world_to_chunk(chunk_to_world(c)) == c）。
+func chunk_to_world(coord: Vector2i) -> Vector3:
+	return Vector3(float(coord.x * CHUNK_SIZE.x), 0.0, float(coord.y * CHUNK_SIZE.z))
+
+
+## 渲染坐标 → 世界坐标（浮动原点逆变换，D-062）。
+func to_world(render_pos: Vector3) -> Vector3:
+	return render_pos + Vector3(float(_origin.x), 0.0, float(_origin.y))
+
+
+## 世界坐标 → 渲染坐标（浮动原点正变换，D-062）。origin=0 时恒等。
+func to_render(world_pos: Vector3) -> Vector3:
+	return world_pos - Vector3(float(_origin.x), 0.0, float(_origin.y))
+
+
+## 玩家/实体所在的区块（渲染坐标入，世界区块出）——流式加载的中心。
+func chunk_at(render_pos: Vector3) -> Vector2i:
+	return world_to_chunk(to_world(render_pos))
+
+
+## 当前浮动原点（世界格）。
+func origin() -> Vector2i:
+	return _origin
+
+
+## 请求搬迁到指定 origin（生产路径由 _maybe_shift_origin 按玩家位置自动判定；
+## 探针/测试可直接调用）。语义见 Events.origin_shifted：delta = 旧−新 origin，
+## 世界锚定节点 position += delta、渲染空间锚点同步重基。
+func request_shift_origin(new_origin: Vector2i) -> void:
+	if new_origin == _origin:
+		return
+	var delta := Vector3(float(_origin.x - new_origin.x), 0.0, float(_origin.y - new_origin.y))
+	_origin = new_origin
+	# 世界节点位置 = −origin：其下全部子节点（区块/结构/树木，保持绝对坐标）
+	# 随之平移，无需逐个处理。
+	position = Vector3(-float(new_origin.x), 0.0, -float(new_origin.y))
+	# 储物箱以渲染格为键：同一世界位置的键随 origin 平移（+delta）。
+	if not box_contents.is_empty():
+		var rekeyed: Dictionary[Vector3i, Inventory] = {}
+		for cell: Vector3i in box_contents:
+			rekeyed[cell + Vector3i(delta)] = box_contents[cell]
+		box_contents = rekeyed
+	Events.origin_shifted.emit(delta)
+
+
+## 玩家越过阈值即把 origin 对齐到网格并搬迁（每帧一次，判定为两次整数比较）。
+func _maybe_shift_origin(player_render: Vector3) -> void:
+	var w := to_world(player_render)
+	var wx := floori(w.x)
+	var wz := floori(w.z)
+	var nx := _origin.x
+	var nz := _origin.y
+	if absi(wx - _origin.x) > ORIGIN_SHIFT_THRESHOLD:
+		nx = int(floorf(float(wx) / float(ORIGIN_SHIFT_GRID))) * ORIGIN_SHIFT_GRID
+	if absi(wz - _origin.y) > ORIGIN_SHIFT_THRESHOLD:
+		nz = int(floorf(float(wz) / float(ORIGIN_SHIFT_GRID))) * ORIGIN_SHIFT_GRID
+	if nx != _origin.x or nz != _origin.y:
+		request_shift_origin(Vector2i(nx, nz))
+
+
+## 渲染格 → 所在区块内的局部格（世界格 − 区块世界原点）。
+func _cell_local(wx: int, wy: int, wz: int, coord: Vector2i) -> Vector3i:
+	return Vector3i(wx - coord.x * CHUNK_SIZE.x, wy, wz - coord.y * CHUNK_SIZE.z)
 
 
 func get_block(world_pos: Vector3i) -> int:
-	var coord := world_to_chunk(Vector3(world_pos))
+	# 渲染空间格坐标（调用方持有的是节点坐标）；内部转世界空间查区块。
+	var w := to_world(Vector3(world_pos))
+	var coord := world_to_chunk(w)
 	var chunk: Chunk = _chunks.get(coord)
 	if chunk == null:
 		return BlockTypes.Block.AIR
-	return chunk.get_block_local(world_pos - chunk_to_world(coord))
+	return chunk.get_block_local(_cell_local(floori(w.x), floori(w.y), floori(w.z), coord))
 
 
 ## 体素射线：从 from 向 to 步进采样，找第一个「可破坏」方块（非 AIR 且在
@@ -392,26 +477,29 @@ static func _axis_delta(step_c: float) -> float:
 	return absf(1.0 / step_c) if absf(step_c) > 0.0000001 else INF
 
 
+## 写方块（玩家编辑路径）：world_pos 为**渲染空间**格（调用方持有节点坐标），
+## 内部转世界空间落账；编辑记录按世界区块键存，跨浮动原点搬迁不丢。
 func set_block(world_pos: Vector3i, id: int) -> void:
-	var coord := world_to_chunk(Vector3(world_pos))
+	var w := to_world(Vector3(world_pos))
+	var coord := world_to_chunk(w)
 	var chunk: Chunk = _chunks.get(coord)
 	if chunk == null:
 		return
 
-	var local := world_pos - chunk_to_world(coord)
+	var local := _cell_local(floori(w.x), floori(w.y), floori(w.z), coord)
 	chunk.set_block_local(local, id)
 	_edited_coords[coord] = true
 	_rebuild_chunk(coord)
 
 	# 修改位于区块边界时，重建相邻区块以更新交界处的可见面。
 	if local.x == 0:
-		_rebuild_chunk(coord + Vector3i(-1, 0, 0))
+		_rebuild_chunk(coord + Vector2i(-1, 0))
 	elif local.x == CHUNK_SIZE.x - 1:
-		_rebuild_chunk(coord + Vector3i(1, 0, 0))
+		_rebuild_chunk(coord + Vector2i(1, 0))
 	if local.z == 0:
-		_rebuild_chunk(coord + Vector3i(0, 0, -1))
+		_rebuild_chunk(coord + Vector2i(0, -1))
 	elif local.z == CHUNK_SIZE.z - 1:
-		_rebuild_chunk(coord + Vector3i(0, 0, 1))
+		_rebuild_chunk(coord + Vector2i(0, 1))
 
 
 ## 获取指定储物箱的背包；首次访问时创建 36 格空背包。
@@ -439,7 +527,7 @@ func spill_box(cell: Vector3i, player: Player) -> void:
 	box_contents.erase(cell)
 
 
-func _rebuild_chunk(coord: Vector3i) -> void:
+func _rebuild_chunk(coord: Vector2i) -> void:
 	var chunk: Chunk = _chunks.get(coord)
 	if chunk:
 		if chunk.pristine:
@@ -456,7 +544,7 @@ func _rebuild_chunk(coord: Vector3i) -> void:
 ##   rebuild 对该列全扫。邻列未知经 grounds=255 让贴邻的列也全扫——这正是
 ##   开挖后需要向四邻传播的语义（邻列侧向可能在任意高度露出新面）。
 ## 区块刚生成时尚未进 _chunks，故由参数带入。
-func _prepare_columns(coord: Vector3i, chunk: Chunk) -> void:
+func _prepare_columns(coord: Vector2i, chunk: Chunk) -> void:
 	if chunk.col_top.is_empty():
 		# 整块未知（被覆写恢复且尚未被编辑过）：不给表，rebuild 全量遍历。
 		chunk.tops_ext = PackedInt32Array()
@@ -474,17 +562,17 @@ func _prepare_columns(coord: Vector3i, chunk: Chunk) -> void:
 		for x in n:
 			_encode_column(tops, grounds, (z + 1) * w + (x + 1), chunk, x + z * n)
 	for z in n:
-		var nb: Chunk = _chunks.get(coord + Vector3i(-1, 0, 0))
+		var nb: Chunk = _chunks.get(coord + Vector2i(-1, 0))
 		if _has_columns(nb):
 			_encode_column(tops, grounds, (z + 1) * w, nb, (n - 1) + z * n)
-		nb = _chunks.get(coord + Vector3i(1, 0, 0))
+		nb = _chunks.get(coord + Vector2i(1, 0))
 		if _has_columns(nb):
 			_encode_column(tops, grounds, (z + 1) * w + (n + 1), nb, z * n)
 	for x in n:
-		var nbz: Chunk = _chunks.get(coord + Vector3i(0, 0, -1))
+		var nbz: Chunk = _chunks.get(coord + Vector2i(0, -1))
 		if _has_columns(nbz):
 			_encode_column(tops, grounds, x + 1, nbz, x + (n - 1) * n)
-		nbz = _chunks.get(coord + Vector3i(0, 0, 1))
+		nbz = _chunks.get(coord + Vector2i(0, 1))
 		if _has_columns(nbz):
 			_encode_column(tops, grounds, (n + 1) * w + (x + 1), nbz, x)
 	chunk.tops_ext = tops
@@ -536,8 +624,8 @@ func decay_tree_leaves(cell: Vector3i, force: bool = false) -> int:
 	var touched := {}
 	for p in removed:
 		set_block_deferred(p, BlockTypes.Block.AIR)
-		touched[world_to_chunk(Vector3(p))] = true
-	for coord: Vector3i in touched:
+		touched[chunk_at(Vector3(p))] = true
+	for coord: Vector2i in touched:
 		_rebuild_chunk(coord)
 
 	for p in removed:
@@ -588,8 +676,8 @@ func fell_trunk_above(cell: Vector3i) -> int:
 	var touched := {}
 	for p in cells:
 		set_block_deferred(p, BlockTypes.Block.AIR)
-		touched[world_to_chunk(Vector3(p))] = true
-	for coord: Vector3i in touched:
+		touched[chunk_at(Vector3(p))] = true
+	for coord: Vector2i in touched:
 		_rebuild_chunk(coord)
 	return cells.size()
 
@@ -611,10 +699,10 @@ func place_fallen_logs(cell: Vector3i, logs: int, dir: Vector3i) -> Array[Vector
 			if get_block(p + Vector3i(0, -1, 0)) == BlockTypes.Block.AIR:
 				continue
 			set_block_deferred(p, BlockTypes.Block.WOOD)
-			touched[world_to_chunk(Vector3(p))] = true
+			touched[chunk_at(Vector3(p))] = true
 			placed.append(p)
 			break
-	for coord: Vector3i in touched:
+	for coord: Vector2i in touched:
 		_rebuild_chunk(coord)
 	return placed
 
@@ -681,7 +769,10 @@ func _build_emissive_material() -> void:
 
 
 func _update_chunks() -> void:
-	var center := world_to_chunk(_player.global_position)
+	# 浮动原点判定先行：玩家越过阈值先搬迁（世界内容整体平移，区块键不变），
+	# 随后一切按「玩家所在世界区块」计算——搬迁前后语义一致。
+	_maybe_shift_origin(_player.global_position)
+	var center := chunk_at(_player.global_position)
 	_update_stream_dir()
 
 	# wanted 集缓存：只有中心区块变化、或飞行时机头方向转过阈值才重算
@@ -749,14 +840,14 @@ func _update_chunks() -> void:
 
 
 ## 重建 wanted 集（见 _wanted 缓存说明）：以中心区块为原点的保留窗口。
-func _rebuild_wanted(center: Vector3i) -> void:
+func _rebuild_wanted(center: Vector2i) -> void:
 	var wanted := {}
 	var reach := LOAD_RADIUS + UNLOAD_PAD
 	if _flight_stream:
 		reach = maxi(FLIGHT_FORWARD, maxi(FLIGHT_SIDE, FLIGHT_BACK)) + UNLOAD_PAD
 	for ex in range(-reach, reach + 1):
 		for ez in range(-reach, reach + 1):
-			var off := Vector3i(ex, 0, ez)
+			var off := Vector2i(ex, ez)
 			if _in_stream_window(off, 0):
 				wanted[center + off] = true
 	_wanted = wanted
@@ -766,7 +857,7 @@ func _rebuild_wanted(center: Vector3i) -> void:
 
 
 ## 加载优先级排序比较器（预建 Callable，中心由 _sort_center 带入）。
-func _cmp_load_priority(a: Vector3i, b: Vector3i) -> bool:
+func _cmp_load_priority(a: Vector2i, b: Vector2i) -> bool:
 	return _load_priority(a, _sort_center) < _load_priority(b, _sort_center)
 
 
@@ -797,11 +888,11 @@ func _update_stream_dir() -> void:
 ## 该偏移（相对中心区块）是否落在保留窗口内：徒步是 LOAD_RADIUS 方形（外扩
 ## pad 圈）；飞行是以机头为 +u 轴的偏置矩形——前方 FLIGHT_FORWARD、侧向
 ## FLIGHT_SIDE、后方 FLIGHT_BACK，再整体外扩 pad 圈。
-func _in_stream_window(offset: Vector3i, pad: int) -> bool:
+func _in_stream_window(offset: Vector2i, pad: int) -> bool:
 	if not _flight_stream:
-		return absi(offset.x) <= LOAD_RADIUS + pad and absi(offset.z) <= LOAD_RADIUS + pad
-	var u := float(offset.x) * _stream_dir.x + float(offset.z) * _stream_dir.z
-	var v := float(offset.x) * -_stream_dir.z + float(offset.z) * _stream_dir.x
+		return absi(offset.x) <= LOAD_RADIUS + pad and absi(offset.y) <= LOAD_RADIUS + pad
+	var u := float(offset.x) * _stream_dir.x + float(offset.y) * _stream_dir.z
+	var v := float(offset.x) * -_stream_dir.z + float(offset.y) * _stream_dir.x
 	var p := float(pad)
 	return (
 		u >= -float(FLIGHT_BACK) - p
@@ -817,21 +908,22 @@ func _in_stream_window(offset: Vector3i, pad: int) -> bool:
 ##   预算只够一两块，纯前方优先会把玩家脚下的区块排到队尾——实测飞机因此悬在
 ##   半空（脚下区块迟迟未加载、跑道尚未回填）。近处优先保证机体周围先落地，
 ##   前方偏置只在同一距离档内起作用。
-func _load_priority(coord: Vector3i, center: Vector3i) -> float:
+func _load_priority(coord: Vector2i, center: Vector2i) -> float:
 	if not _flight_stream:
-		return float(absi(coord.x - center.x) + absi(coord.z - center.z))
+		return float(absi(coord.x - center.x) + absi(coord.y - center.y))
 	var off := coord - center
-	var u := float(off.x) * _stream_dir.x + float(off.z) * _stream_dir.z
-	var v := float(off.x) * -_stream_dir.z + float(off.z) * _stream_dir.x
+	var u := float(off.x) * _stream_dir.x + float(off.y) * _stream_dir.z
+	var v := float(off.x) * -_stream_dir.z + float(off.y) * _stream_dir.x
 	return absf(u) + absf(v) - 0.6 * u
 
 
-func _load_chunk(coord: Vector3i, with_rebuild: bool = true) -> void:
+func _load_chunk(coord: Vector2i, with_rebuild: bool = true) -> void:
 	if _chunks.has(coord):
 		return
 
 	var chunk := Chunk.new()
-	chunk.name = "Chunk_%d_%d" % [coord.x, coord.z]
+	chunk.name = "Chunk_%d_%d" % [coord.x, coord.y]
+	# 子节点保持绝对（世界）坐标：World 节点位置 = −origin 负责整体平移（D-062）。
 	chunk.position = Vector3(chunk_to_world(coord))
 	add_child(chunk)
 
@@ -864,7 +956,7 @@ func end_bulk_writes() -> void:
 		chunk.end_bulk()
 
 
-func _unload_chunk(coord: Vector3i) -> void:
+func _unload_chunk(coord: Vector2i) -> void:
 	var chunk: Chunk = _chunks.get(coord)
 	if chunk == null:
 		return
@@ -872,9 +964,16 @@ func _unload_chunk(coord: Vector3i) -> void:
 		_modified_data[coord] = chunk.data
 	_chunks.erase(coord)
 	chunk.queue_free()
+	# 不变式：_wanted 里的区块「应载」。_update_chunks 的重新入队只在中心
+	# 区块变化时跑（D-038 缓存），窗口内区块若被直接卸载（探针/未来调用方），
+	# 队列不会自愈——这里补上：仍在 wanted 且未排队的重新入队。正常路径卸载的
+	# 是窗口外区块，不在 _wanted，本检查直接跳过，零行为变化。
+	if _wanted.has(coord) and not _pending_load.has(coord):
+		_pending_load[coord] = true
+		_pending_dirty = true
 	# 卸载后邻居外侧边界重新暴露，入队补面重建（去重：多个卸载共享同一邻居
 	# 时只留一份，避免同一coord 被反复重建）。
-	for offset: Vector3i in [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1)]:
+	for offset: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 		var nb := coord + offset
 		if not _pending_rebuilds.has(nb):
 			_pending_rebuilds.append(nb)
@@ -883,8 +982,9 @@ func _unload_chunk(coord: Vector3i) -> void:
 ## 区块数据生成（判据与 _block_at 同源，逐格结果一致）。
 ## 区域参数与逐列量提到循环外：原先每格都要做 3~5 次 _profile 字典查询、
 ## 极地列还要每格再算一次冰山噪声，16384 格累计占数据生成耗时的一半以上。
-func _generate_chunk(chunk: Chunk, coord: Vector3i) -> void:
-	var origin := chunk_to_world(coord)
+func _generate_chunk(chunk: Chunk, coord: Vector2i) -> void:
+	var origin_f := chunk_to_world(coord)
+	var origin := Vector3i(floori(origin_f.x), 0, floori(origin_f.z))
 	var water_policy := String(_profile.get("water", "normal"))
 	var low_line := int(_profile.get("low_line", SEA_LEVEL))
 	var surface_high := int(_profile.get("surface", BlockTypes.Block.GRASS))
