@@ -63,6 +63,12 @@ func _run() -> void:
 	# 清掉传送远点产生的历史积压（机场/村庄区块卸载入队），只保留本测试的
 	# 观测目标——E 的四个邻居。
 	world._pending_rebuilds.clear()
+	# D-064：环半径从 2 提到 4 后，X+2 的 E 仍在 wanted 里，`_unload_chunk` 的
+	# 「wanted 自愈」（D-038 不变式：wanted 里该载的区块被直接卸载就重新入队）
+	# 会把它重新排队、下一帧又加载回来——本段要观测的是「卸载后补面」，故先
+	# 清空 wanted/pending 关掉自愈，模拟「窗口外区块被卸载」的真实状态。
+	world._wanted.clear()
+	world._pending_load.clear()
 	world._unload_chunk(e_coord)
 	_check(not world._chunks.has(e_coord), "② E 已卸载")
 	_check(world._pending_rebuilds.has(x_coord), "③ X 已入队补重建队列")

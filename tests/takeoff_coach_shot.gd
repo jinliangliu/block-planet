@@ -11,18 +11,8 @@ extends Node
 ## 需窗口运行，勿加 --headless。
 ## 运行：Godot_v4.6.3-stable_win64_console.exe --path . res://tests/takeoff_coach_shot.tscn
 
+const PROBE_PAD := preload("res://tests/probe_pad.gd")
 const SHOT_DIR := "res://tmp"
-
-## 自建平整跑道（对齐 flight_hud_shot）：出生点附近不一定平，斜坡会让飞机一落
-## 地就撞地形解体，取证失真。
-const STRIP_CANDIDATES := [
-	Vector2i(300, 300),
-	Vector2i(300, 600),
-	Vector2i(600, 300),
-	Vector2i(600, 600),
-]
-const STRIP_WIDTH := 10
-const STRIP_LENGTH := 64
 
 var _craft: Aircraft = null
 var _player: Player = null
@@ -58,10 +48,33 @@ func _snap(file_name: String) -> void:
 	await _wait(2)
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(_shot_path(file_name))
+	# 机体可能已被坠机回收（残骸 4 s 自消散）：对已释放对象发消息会抛
+	# SCRIPT ERROR 杀掉协程，restore/quit 都跑不到 —— 进程挂到超时 rc=124，
+	# 而回归脚本只看 PASS/FAIL 汇总，会把这当成「探针本身坏了」。这里判有效
+	# 性并记一条 FAIL，让失败以断言形式暴露。
+	if not is_instance_valid(_craft):
+		_fails += 1
+		print("FAIL: 截图时机体已释放（", file_name, " 之前已坠机）")
+		return
 	var s := _craft.snapshot()
 	print("DBG ", file_name, " engine=", s["engine"], " throttle=%.2f" % float(s["throttle"]),
 		" kmh=%.1f" % float(s["kmh"]), " vs=%.1f m/s" % float(s["stall_speed"]),
 		" on_ground=", s["on_ground"], " agl=%.1f" % float(s["altitude_agl"]))
+
+
+## 写入杆量：机体已释放（坠机残骸 4 s 自消散后被回收）时静默跳过，避免对
+## freed 对象发消息抛 SCRIPT ERROR 杀掉协程（见 _snap 注释）。
+func _set_pitch(value: float) -> void:
+	if is_instance_valid(_craft):
+		_craft.controls.pitch = value
+
+
+## 离地高度读数；机体已释放（坠机回收）时返回 -1，让等待循环自然退出而不是
+## 对 freed 对象发消息（那会抛 SCRIPT ERROR 杀掉协程，见 _snap 注释）。
+func _agl() -> float:
+	if not is_instance_valid(_craft):
+		return -1.0
+	return float(_craft.snapshot()["altitude_agl"])
 
 
 func _ready() -> void:
@@ -90,28 +103,13 @@ func _run() -> void:
 
 	_player = main_scene.get_node("Player")
 	var world: World = main_scene.get_node("World")
-	# 以玩家出生点为中心清出一块净空并抹平脚下地面：出生点本身就是平地，
-	# 只需清掉头顶的树/杂物，飞机落下才不会当场解体（比自建跑道更稳——
-	# 候选跑道坐标会随区域尺寸落到地图外、飞机掉进虚空）。
-	var base := _player.global_position
-	var ox := int(base.x)
-	var oz := int(base.z)
-	var ground_y := int(base.y) - 1
-	var min_cell := Vector3i(ox - 16, 0, oz - 16)
-	var max_cell := Vector3i(ox + 16, 0, oz + 16)
-	world.ensure_chunks_in_region(min_cell, max_cell)
-	for x in range(ox - 16, ox + 17):
-		for z in range(oz - 16, oz + 17):
-			if world.get_block(Vector3i(x, ground_y, z)) == BlockTypes.Block.AIR:
-				world.set_block_deferred(Vector3i(x, ground_y, z),
-					BlockTypes.Block.COBBLESTONE)
-			for h in range(1, 13):
-				world.set_block_deferred(Vector3i(x, ground_y + h, z),
-					BlockTypes.Block.AIR)
-	world.rebuild_chunks_in_region(min_cell, max_cell)
+	# 场地：出生点周围铺平整平台并给出安全落位点（落位为什么要偏开玩家、
+	# 平台高度为什么要实心面扫描，见 tests/probe_pad.gd 的类注释）。
+	var pad := PROBE_PAD.prepare(world, _player)
 	await _wait_physics(12)
-
-	var spawn_pos := Vector3(float(ox) + 0.5, float(ground_y) + 0.3, float(oz) + 0.5)
+	# 显式标类型：字典取值是 Variant，直接传参触发 UNSAFE_CALL_ARGUMENT
+	# （本项目 GDScript 警告即错误）。
+	var spawn_pos: Vector3 = pad["spawn"]
 	_craft = Aircraft.spawn(main_scene, spawn_pos, PI)
 	await _wait_physics(2)
 
@@ -121,13 +119,27 @@ func _run() -> void:
 	_craft.drive_remotely()
 	for i in range(300):
 		await get_tree().physics_frame
+		# 机体可能已被坠机回收（残骸 4 s 自消散）：继续读它会抛 SCRIPT ERROR
+		# 杀掉协程，restore/quit 都跑不到 —— 进程挂到 rc=124 且污染存档。
+		if not is_instance_valid(_craft):
+			break
 		if _craft.is_on_floor() and _craft.velocity.length() < 0.5:
 			break
 	await _wait_physics(6)
+	if not is_instance_valid(_craft):
+		_check(false, "就位阶段机体解体并被回收（落位点压到玩家/地形）")
+		SaveGuard.restore()
+		print("PROBE_ABORT[COACH_SHOT_DONE] fails=%d" % _fails)
+		get_tree().quit(1)
+		return
 
 	# ① 刚登机：发动机默认熄火（这正是新手「推油门没反应」的卡点）。
 	# D-046 合并布局断言：教练区是飞行面板卡片的最后几行；登机即隐藏状态块
 	# 与世界名（用户要求「1区不显示」）。
+	# 先钉「机体完好」：飞机若在就位阶段就被地形顶穿解体，教练卡片会整卡隐藏
+	# （_refresh_flight_panel 见 is_wrecked 直接 return），后面四条断言全部连坐
+	# 假阴性——把根因单独钉出来，一眼看出是落位问题还是 UI 问题。
+	_check(not _craft.is_wrecked(), "就位后机体完好（未被地形顶穿解体）")
 	_check(_hud._flight_panel.visible, "登机后飞行面板卡片显示（教练区挂在其中）")
 	_check(_hud._coach_main.is_visible_in_tree(), "教练主句在卡片内显示（第①步点火）")
 	var card: Rect2 = _hud._flight_panel.get_global_rect()
@@ -155,25 +167,25 @@ func _run() -> void:
 	await _snap("coach_4_rotate.png")
 
 	# ⑤ 拉杆离地：爬升中 / 起飞成功。
-	_craft.controls.pitch = 0.7
+	_set_pitch(0.7)
 	for i in range(180):
 		await get_tree().physics_frame
-		if float(_craft.snapshot()["altitude_agl"]) > 4.0:
+		if _agl() > 4.0:
 			break
 	await _snap("coach_5_climb.png")
 
 	for i in range(240):
 		await get_tree().physics_frame
-		if float(_craft.snapshot()["altitude_agl"]) > 16.0:
+		if _agl() > 16.0:
 			break
 	await _snap("coach_6_success.png")
 
 	# ⑦ 成功横幅停留 3.5 s 后教练区收起、卡片缩回原高度（巡航不占屏）。
 	# 先缓爬保住离地高度（掉回 15 m 以下会重新显示「爬升中」），再等横幅过期。
-	_craft.controls.pitch = 0.4
+	_set_pitch(0.4)
 	for i in range(300):
 		await get_tree().physics_frame
-		if float(_craft.snapshot()["altitude_agl"]) > 20.0:
+		if _agl() > 20.0:
 			break
 	for i in range(280):
 		await get_tree().physics_frame
@@ -184,39 +196,3 @@ func _run() -> void:
 	SaveGuard.restore()
 	print("COACH_SHOT_DONE fails=%d" % _fails)
 	get_tree().quit(1 if _fails > 0 else 0)
-
-
-func _pick_strip_origin(world: World) -> Vector2i:
-	var best := STRIP_CANDIDATES[0]
-	var best_top := 1 << 30
-	for candidate: Vector2i in STRIP_CANDIDATES:
-		world.ensure_chunks_in_region(
-			Vector3i(candidate.x, 0, candidate.y),
-			Vector3i(candidate.x + STRIP_WIDTH, 0, candidate.y + STRIP_LENGTH))
-		var top := 0
-		for x in range(candidate.x, candidate.x + STRIP_WIDTH + 1, 2):
-			for z in range(candidate.y, candidate.y + STRIP_LENGTH + 1, 2):
-				top = maxi(top, world.get_surface_height(x, z))
-		if top < best_top:
-			best_top = top
-			best = candidate
-	return best
-
-
-func _build_strip(world: World, origin: Vector2i) -> int:
-	var max_cell := Vector3i(origin.x + STRIP_WIDTH, 0, origin.y + STRIP_LENGTH)
-	world.ensure_chunks_in_region(Vector3i(origin.x, 0, origin.y), max_cell)
-	var top := 0
-	for x in range(origin.x, origin.x + STRIP_WIDTH + 1):
-		for z in range(origin.y, origin.y + STRIP_LENGTH + 1):
-			top = maxi(top, world.get_surface_height(x, z))
-	var y := top + 1
-	if y > 58:
-		y = 58
-	for x in range(origin.x, origin.x + STRIP_WIDTH + 1):
-		for z in range(origin.y, origin.y + STRIP_LENGTH + 1):
-			world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.COBBLESTONE)
-			for h in range(1, 10):
-				world.set_block_deferred(Vector3i(x, y + h, z), BlockTypes.Block.AIR)
-	world.rebuild_chunks_in_region(Vector3i(origin.x, 0, origin.y), max_cell)
-	return y

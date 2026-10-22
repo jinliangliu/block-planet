@@ -42,23 +42,24 @@ func _run() -> void:
 	spawner._passive_timer = 9999.0
 	spawner._despawn_all()
 
-	# ── ① 徒步：5×5 方形窗口 ─────────────────────────────────
+	# ── ① 徒步：方形窗口（半径 World.LOAD_RADIUS，D-064 起为 4）─────────
 	_teleport(player, Vector3(400.0, 48.0, 400.0))
-	_settle(world, 60)
+	_settle(world, 400)
 	var center := world.world_to_chunk(player.global_position)
 	var walk_missing := 0
-	for dx in range(-2, 3):
-		for dz in range(-2, 3):
+	for dx in range(-World.LOAD_RADIUS, World.LOAD_RADIUS + 1):
+		for dz in range(-World.LOAD_RADIUS, World.LOAD_RADIUS + 1):
 			if not world._chunks.has(center + Vector2i(dx, dz)):
 				walk_missing += 1
 	_check(walk_missing == 0,
-		"① 徒步窗口 5×5 区块全部加载（缺 %d 块）" % walk_missing)
+		"① 徒步窗口 %d×%d 区块全部加载（缺 %d 块）"
+			% [World.LOAD_RADIUS * 2 + 1, World.LOAD_RADIUS * 2 + 1, walk_missing])
 
 	# ── ② 飞行：沿机头的偏置窗口（前 5 / 侧 2 / 后 1）─────────
 	world.set_flight_stream(true)
 	world._stream_dir = DIR
 	_teleport(player, Vector3(1200.0, 48.0, 1200.0))
-	_settle(world, 120)
+	_settle(world, 200)
 	center = world.world_to_chunk(player.global_position)
 	var front_missing := 0
 	for u in range(0, 6):
@@ -89,7 +90,7 @@ func _run() -> void:
 
 	# ── ④ 巡航推进：前方窗口不得持续留缺 ──────────────────────
 	_teleport(player, Vector3(2000.0, 48.0, 2000.0))
-	_settle(world, 120)
+	_settle(world, 300)
 	var miss_sum := 0.0
 	var samples := 0
 	var max_miss := 0
@@ -105,11 +106,11 @@ func _run() -> void:
 	_check(avg < 3.0,
 		"④ 50 m/s 巡航：前方 3 区块窗口内平均缺 %.2f 块（峰值 %d）" % [avg, max_miss])
 
-	# 对照组：同样的巡航，但用徒步的 5×5 方形窗口 + 每帧 2 块——这正是
+	# 对照组：同样的巡航，但用徒步方形窗口（半径 World.LOAD_RADIUS）——这正是
 	# D-035 之前的行为。只作诊断输出，不作断言（数值随机器性能浮动）。
 	world.set_flight_stream(false)
 	_teleport(player, Vector3(2400.0, 48.0, 2400.0))
-	_settle(world, 60)
+	_settle(world, 300)
 	var walk_miss_sum := 0.0
 	var walk_samples := 0
 	for i in FRAMES / 2:
@@ -118,29 +119,32 @@ func _run() -> void:
 		if i > FRAMES / 4:
 			walk_miss_sum += float(_walk_gap(world))
 			walk_samples += 1
-	print("INFO 对照：徒步 5×5 窗口同样巡航，窗口内平均缺 %.2f 块（飞行窗口为 %.2f）"
-		% [walk_miss_sum / float(walk_samples), avg])
+	print("INFO 对照：徒步 %d×%d 窗口同样巡航，窗口内平均缺 %.2f 块（飞行窗口为 %.2f）"
+		% [World.LOAD_RADIUS * 2 + 1, World.LOAD_RADIUS * 2 + 1,
+			walk_miss_sum / float(walk_samples), avg])
 	world.set_flight_stream(true)
 
 	# ── ⑤ 下机回落：窗口退回徒步尺寸 ──────────────────────────
 	world.set_flight_stream(false)
-	_settle(world, 120)
+	_settle(world, 400)
 	center = world.world_to_chunk(player.global_position)
+	var walk_reach := World.LOAD_RADIUS + World.UNLOAD_PAD
 	var far := 0
 	for key in world._chunks:
 		var off: Vector2i = key - center
-		if absi(off.x) > 3 or absi(off.y) > 3:
+		if absi(off.x) > walk_reach or absi(off.y) > walk_reach:
 			far += 1
 	var back_missing := 0
-	for dx in range(-2, 3):
-		for dz in range(-2, 3):
+	for dx in range(-World.LOAD_RADIUS, World.LOAD_RADIUS + 1):
+		for dz in range(-World.LOAD_RADIUS, World.LOAD_RADIUS + 1):
 			if not world._chunks.has(center + Vector2i(dx, dz)):
 				back_missing += 1
 	_check(back_missing == 0,
-		"⑤ 下机后徒步 5×5 窗口重新填满（缺 %d 块）" % back_missing)
-	_check(not world._chunks.has(center + _offset(5, 0)),
-		"⑤ 下机后不再保留机头前方 5 区块（飞行专属扩展已收回）")
-	_check(far == 0, "⑤ 下机后徒步窗口外的区块已全部卸载（残留 %d 块）" % far)
+		"⑤ 下机后徒步 %d×%d 窗口重新填满（缺 %d 块）"
+			% [World.LOAD_RADIUS * 2 + 1, World.LOAD_RADIUS * 2 + 1, back_missing])
+	_check(not world._chunks.has(center + _offset(walk_reach + 1, 0)),
+		"⑤ 下机后不再保留徒步窗口外的区块（飞行专属扩展已收回）")
+	_check(far == 0, "⑤ 下机后徒步窗口（含卸载滞后）外的区块已全部卸载（残留 %d 块）" % far)
 
 	_finish()
 
@@ -171,12 +175,12 @@ func _front_gap(world: World) -> int:
 	return miss
 
 
-## 徒步窗口（5×5）内尚未加载的区块数——对照组的同口径指标。
+## 徒步窗口（半径 World.LOAD_RADIUS 的方形）内尚未加载的区块数——对照组的同口径指标。
 func _walk_gap(world: World) -> int:
 	var center := world.world_to_chunk(world._player.global_position)
 	var miss := 0
-	for dx in range(-2, 3):
-		for dz in range(-2, 3):
+	for dx in range(-World.LOAD_RADIUS, World.LOAD_RADIUS + 1):
+		for dz in range(-World.LOAD_RADIUS, World.LOAD_RADIUS + 1):
 			if not world._chunks.has(center + Vector2i(dx, dz)):
 				miss += 1
 	return miss

@@ -9,6 +9,7 @@ extends Node
 ## 与飞行手感无关，只验证仪表渲染与布局。
 ## 运行：Godot_v4.6.3-stable_win64.exe --path . res://tests/cockpit_instruments_shot.tscn
 
+const PROBE_PAD := preload("res://tests/probe_pad.gd")
 const SHOT_DIR := "res://tmp"
 
 var _craft: Aircraft = null
@@ -129,26 +130,14 @@ func _run() -> void:
 
 	_player = main_scene.get_node("Player")
 	var world: World = main_scene.get_node("World")
-	# 以出生点为中心清净空 + 抹平（同 coach_cockpit_shot）：取证段要低空通场。
-	var base := _player.global_position
-	var ox := int(base.x)
-	var oz := int(base.z)
-	var ground_y := int(base.y) - 1
-	var min_cell := Vector3i(ox - 16, 0, oz - 16)
-	var max_cell := Vector3i(ox + 16, 0, oz + 16)
-	world.ensure_chunks_in_region(min_cell, max_cell)
-	for x in range(ox - 16, ox + 17):
-		for z in range(oz - 16, oz + 17):
-			if world.get_block(Vector3i(x, ground_y, z)) == BlockTypes.Block.AIR:
-				world.set_block_deferred(Vector3i(x, ground_y, z),
-					BlockTypes.Block.COBBLESTONE)
-			for h in range(1, 13):
-				world.set_block_deferred(Vector3i(x, ground_y + h, z),
-					BlockTypes.Block.AIR)
-	world.rebuild_chunks_in_region(min_cell, max_cell)
+	# 场地：出生点周围铺平整平台并给出安全落位点（落位为什么要偏开玩家、
+	# 平台高度为什么要实心面扫描，见 tests/probe_pad.gd 的类注释）。
+	var pad := PROBE_PAD.prepare(world, _player)
 	await _wait_physics(12)
-
-	var spawn_pos := Vector3(float(ox) + 0.5, float(ground_y) + 0.3, float(oz) + 0.5)
+	# 显式标类型：字典取值是 Variant，直接传参触发 UNSAFE_CALL_ARGUMENT
+	# （本项目 GDScript 警告即错误）。
+	var spawn_pos: Vector3 = pad["spawn"]
+	var pad_floor := float(pad["ground_y"])   # 平台顶面下一格（方块 y），place() 用
 	_craft = Aircraft.spawn(main_scene, spawn_pos, PI)
 	await _wait_physics(2)
 
@@ -159,9 +148,19 @@ func _run() -> void:
 	_craft.set_piloted(true, _player)
 	for i in range(300):
 		await get_tree().physics_frame
+		# 机体可能已被坠机回收（残骸 4 s 自消散）：继续读它会抛 SCRIPT ERROR
+		# 杀掉协程，restore/quit 都跑不到 —— 进程挂到 rc=124 且污染存档。
+		if not is_instance_valid(_craft):
+			break
 		if _craft.is_on_floor() and _craft.velocity.length() < 0.5:
 			break
 	await _wait_physics(6)
+	if not is_instance_valid(_craft):
+		_check(false, "就位阶段机体解体并被回收（落位点压到玩家/地形）")
+		SaveGuard.restore()
+		print("PROBE_ABORT[COCKPIT_INST_DONE] fails=%d" % _fails)
+		get_tree().quit(1)
+		return
 
 	# ── 起飞到巡航（复用 flight_hud_shot 验证过的模式：抬升 + launch 给速 ──
 	# D-055 教训（探针曾因此 4 项FAIL）：巡航高度不能拍脑袋写死。老地形下
@@ -172,7 +171,7 @@ func _run() -> void:
 	# 改为沿真实航线实测地形峰值再定巡航高度，并夹在世界天花板之下留出
 	# 爬升余量：地形再变也不用回来改这个数。
 	# 注意 place() 不复活已解体机体（_wrecked 不清），取证段必须先保住不坠毁。
-	var cruise_alt := _survey_cruise_alt(ground_y)
+	var cruise_alt := _survey_cruise_alt(int(pad["ground_y"]))
 	_craft.set_engine(true)   # 熄火状态油门锁 0，必须先点火
 	_craft.global_position.y += 50.0
 	_craft.launch(30.0, 2.0)
@@ -306,7 +305,7 @@ func _run() -> void:
 	# 放到净空垫上方 18m、给 -3 m/s 下沉：无前向速度即近似自由落体，1 秒后
 	# AGL≈10、下沉率<-2.5 → alt_warn≥1；撞地前约 2s，截图窗口足够。
 	# 首版教训：给前向速度会让失速速度下的升力不足、下沉率不可控；纯下落最稳。
-	_craft.place(Vector3(float(ox) + 0.5, float(ground_y) + 18.0, float(oz) + 0.5), PI)
+	_craft.place(Vector3(spawn_pos.x, pad_floor + 18.0, spawn_pos.z), PI)
 	_craft._state.velocity = Vector3(0.0, -3.0, 0.0)
 	_craft.velocity = _craft._state.velocity
 	_craft.controls.throttle = 0.3
@@ -321,7 +320,7 @@ func _run() -> void:
 	await _snap("cockpit_inst_lowalt.png")
 
 	# 拉回安全高度再收尾（带前向速度避免无升力直坠解体）。
-	_craft.place(Vector3(float(ox) + 0.5, float(ground_y) + 28.0, float(oz) + 0.5), PI)
+	_craft.place(Vector3(spawn_pos.x, pad_floor + 28.0, spawn_pos.z), PI)
 	_craft._state.velocity = Vector3(14.0, 1.0, 0.0)
 	_craft.velocity = _craft._state.velocity
 	_craft.controls.throttle = 0.6

@@ -101,6 +101,14 @@ func _ready() -> void:
 	_hud.setup(_player)
 	_hud.set_day_night(_day_night)
 	_hud.set_map_name(String(profile["title"]))
+	# 出生加载屏（D-064）：窗口环境下遮住世界，等高模环填满再放行——环 4 的
+	# 冷启动要生成 81 块（≈3.3 s），直接把玩家丢进去会看到地形一块块蹦出来。
+	# 加载屏期间 World 走 bootstrap 预算（每帧 4 块）尽快填满。
+	# 无头环境不建：探针靠 await 帧数断言世界状态，遮罩既无意义也拖慢流程。
+	if DisplayServer.get_name() != "headless":
+		var splash := SpawnLoading.new()
+		_hud.add_child(splash)
+		splash.begin(_world, String(profile["title"]))
 	# 飞行视角 / 录制 / 回放（D-033）：相机为场景级独立节点（不挂飞机），
 	# 登机时按机体位姿自驱动；录制器随驾驶起止；回放由 HUD 触发。
 	_flight_camera = AircraftCamera.new()

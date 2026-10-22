@@ -164,8 +164,11 @@ func _run() -> void:
 		"B0b 背包无不死图腾（致死前提）")
 	player.health = 1  # 弹射伤害 6 > 1 → 致死
 	craft2.wreck("探针致命坠机")
-	for i in range(20):
-		await get_tree().process_frame
+	# 只等 1 帧就断言「死亡」：死亡停顿 DEATH_PAUSE = 2.2 s 是**墙钟**计时器
+	# （SceneTreeTimer），而 D-064 出生预填期单帧可达 160 ms——原来这里等 20 帧
+	# 足够跑完 2.2 s，玩家已复活回家，B1/B5 双双假失败。判定死亡必须紧贴 wreck
+	# （_damage → _begin_death 同步置 _dead），不能依赖帧数换算出的时间。
+	await get_tree().process_frame
 	_check(player.is_dead(), "B1 玩家死亡（致死弹射）")
 	_check(not player.is_riding(), "B2 死亡也交还飞机")
 	_check(_instrument_layers_hidden(hud), "B3 死亡退机后座舱 UI 同样隐藏")

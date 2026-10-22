@@ -7,7 +7,34 @@ class_name World
 ## PackedInt32Array（见 Chunk.col_top 注释）；机场选址扫描起点也必须从
 ## CHUNK_SIZE.y-1 起（见 main._field_column_ok）。
 const CHUNK_SIZE := Vector3i(16, 256, 16)
-const LOAD_RADIUS := 2
+## 高模环半径（区块）：17 m/块…见下方 D-064 实测表，1 格 = 1 m 后单块 16 m。
+## D-064 定 4（64 m 视野）：单块冷加载实测 41 ms（生成 24 + 网格碰撞 11 + 保守
+## 边界全扫），环 8 需 289 块 ≈ 12 s 且每跨一格区块就要补 17 块——按时间预算
+## 每帧只够 1 块，玩家会长期停在 24 fps。环 4 每跨一格补 9 块（≈0.37 s/次），
+## 冷启动 81 块 ≈ 3.3 s，交给出生加载屏。视野远近由低模环承担（见 LOW_RADIUS）。
+const LOAD_RADIUS := 4
+
+## ── 低模环（D-064 双环加载）─────────────────────────────────────────────
+## 高模环之外到 LOW_RADIUS 区块（256 m）由「高度图粗网格」填充：每 4×4 区块
+## 合并成一组、每 4 格采样一个高度，顶点色上色、无方块数据、无碰撞。
+## 它只解决「看得见远处地形」，玩家撞不到也挖不到——细节仍由高模环负责。
+const LOW_RADIUS := 16
+## 低模合并粒度（区块/组）：4 区块 = 64 格 = 64 m，一组 17×17 顶点。
+const LOW_GROUP_CHUNKS := 4
+## 低模高度采样步长（格）：4 格 = 4 m。采样点落在 4 的倍数上，区块边界
+## （16 的倍数）必然落在采样网格上，故低模与高模在接缝处高度逐点相等。
+const LOW_SAMPLE := 4
+
+## ── 世界边界（D-064，128 km 区域）──────────────────────────────────────
+## ±64000 格：软边界——加载环在界外截断不生成（不产生区块键），海面与雾
+## 自然延伸到界，HUD 提示「已到世界边缘」。设硬空气墙违反本作铁律
+## （MEMORY.md：全域无空气墙，见 D-055 陡壁教训）。
+const WORLD_HALF := 64000
+## 每轴区块数的一半：chunk 4000 从 64000 起算，已在界外，故合法区间是
+## [-4000, 3999]。
+const HALF_CHUNKS := 4000
+## 进入边界这个距离（格）内开始提示「已到世界边缘」，离开时提示一次恢复。
+const EDGE_NOTICE_DIST := 512
 # 每帧加载 2 个并按距玩家距离优先：缩短玩家到达未生成区域的窗口，
 # 配合玩家防卡死检测（嵌入实心方块自动重生脱困）形成双保险。
 const CHUNKS_PER_FRAME := 2
@@ -15,6 +42,11 @@ const CHUNKS_PER_FRAME := 2
 ## 按块数。实测单块重建 23~29 ms，「每帧 2 块」最坏就是 46 ms 级的走向新地形卡顿；
 ## 低端机单块更慢时也不会因固定块数吃掉整帧。每帧至少加载 1 块保证队列推进。
 const WALK_BUDGET_MS := 10.0
+## 出生预填期（D-064）：加载屏挡着画面时不必顾忌帧率，每帧多塞几块把高模环
+## 尽快填满（4 块 × 41 ms = 164 ms/帧 ≈ 6 fps，但屏幕上只有一块进度条）。
+## 环填满后自动回落常规预算——玩家看到的第一帧起就不会再卡。
+const BOOTSTRAP_CHUNKS_PER_FRAME := 4
+const BOOTSTRAP_BUDGET_MS := 220.0
 # ── 飞行流式加载（D-035）────────────────────────────────────────────────
 # 徒步的 5×5 区块 = 40 m 见方对步行够用；飞行满油门 50 m/s 时每 0.16 s 就要
 # 换一行区块，前方地形会永远慢半拍。故飞行时把预算集中到真正会被看到的
@@ -128,6 +160,13 @@ var _neighbor_lookup: Callable
 # 每帧用新建 lambda 排序待加载队列。 wanted 集只在「中心区块变化」或「飞行时
 # 机头方向转过阈值」时才真正改变，故缓存之；排序同理加脏位。
 var _wanted: Dictionary = {}
+## 出生预填期开关（D-064）：见 BOOTSTRAP_CHUNKS_PER_FRAME。
+var _bootstrap := true
+## 低模环（D-064）：高模环之外的地形粗网格。为 null 时整条低模路径跳过
+## （世界尚未 setup 早期帧、或被探针单独构造的情形）。
+var _low_terrain: LowTerrain
+## 边界提示状态（D-064）：只在进出临近区时各提示一次，不做每帧播报。
+var _edge_notice_on := false
 var _wanted_center := Vector2i(1 << 30, 1 << 30)  # 不可能的中心值：首帧必重算
 var _wanted_dir := Vector3(0.0, 0.0, -1.0)
 var _wanted_flight := false
@@ -155,6 +194,36 @@ func _ready() -> void:
 		_profile = RegionAtlas.profile(RegionAtlas.DEFAULT_REGION)
 		seed_value = int(_profile["seed"])
 	_configure_noise()
+	# 低模环（D-064）：作为 World 的子节点，自动跟随「World.position = −origin」
+	# 的浮动原点搬迁，无需单独注册 WorldAnchor。
+	_low_terrain = LowTerrain.new()
+	_low_terrain.name = "LowTerrain"
+	add_child(_low_terrain)
+	_low_terrain.setup(self)
+
+
+## 低模环驱动（D-064）：高模环之外到 LOW_RADIUS 的粗网格。
+## LowTerrain 内部按「中心区块 + 跳过高模方形」签名做增量，签名不变时是
+## 一次比较即返回，故每帧调用无成本。
+func _update_low_ring(center: Vector2i) -> int:
+	if _low_terrain == null:
+		return 0
+	var skip := LOAD_RADIUS
+	if _flight_stream:
+		# 飞行窗口是沿机头的偏置矩形，低模按它的 AABB 整体让位：宁可让高模
+		# 多承担几块，也不让 4 m 粗网格从精细地形里穿出来（穿出来会看到尖刺）。
+		skip = FLIGHT_FORWARD + FLIGHT_SIDE
+	return _low_terrain.update_window(center, skip)
+
+
+## 边界提示（D-064 软边界）：临近世界边缘各提示一次。不阻止移动——硬空气墙
+## 违反本作铁律；界外没有地形，玩家自然会在海面上被雾挡住视线后掉头。
+func _update_edge_notice() -> void:
+	var near := is_near_world_edge(to_world(_player.global_position))
+	if near == _edge_notice_on:
+		return
+	_edge_notice_on = near
+	Events.notice.emit("已到世界边缘" if near else "已回到世界内部")
 
 
 ## 切换区域：同步种子与生成配置。区域切换由 Main 通过重载主场景完成
@@ -179,6 +248,46 @@ func set_player(player: Player) -> void:
 	_load_chunk(chunk_at(player.global_position))
 
 
+## 出生预填（D-064）：同步载入 center 周围 radius 圈区块，返回实际新建块数。
+## 供 Main 的出生流程在「加载屏」期间分步调用：先把近处填实，玩家一放行
+## 就看得到完整地面，剩下的高模环由常规定时预算在随后几秒内补齐。
+func fill_ring_sync(center: Vector2i, radius: int) -> int:
+	var n := 0
+	for dx in range(-radius, radius + 1):
+		for dz in range(-radius, radius + 1):
+			var key := center + Vector2i(dx, dz)
+			if _chunks.has(key) or not is_chunk_in_bounds(key):
+				continue
+			_load_chunk(key)
+			n += 1
+	return n
+
+
+## 高模环填装进度（0..1）：加载屏据此决定何时放行。分母是 wanted 集
+## （已扣掉界外区块），故在边界处也算得对。
+func ring_fill_ratio() -> float:
+	if _wanted.is_empty():
+		return 1.0
+	var have := 0
+	for key: Vector2i in _wanted:
+		if _chunks.has(key):
+			have += 1
+	return float(have) / float(_wanted.size())
+
+
+## 高模环是否已填满（加载屏放行条件）。
+func is_ring_filled() -> bool:
+	for key: Vector2i in _wanted:
+		if not _chunks.has(key):
+			return false
+	return true
+
+
+## 低模环组数（探针用；未 setup 返回 0）。
+func low_group_count() -> int:
+	return 0 if _low_terrain == null else _low_terrain.group_count()
+
+
 func _process(_delta: float) -> void:
 	if _player == null:
 		return
@@ -187,6 +296,35 @@ func _process(_delta: float) -> void:
 
 func get_surface_height(wx: int, wz: int) -> int:
 	return _terrain_height(wx, wz) + 1
+
+
+## 低模层（D-064）采样用：该列地表的显示颜色。
+## 与 Chunk 的上色同源——地表方块的**顶面瓦片**主色（雪线/裸岩/河床等分层
+## 材质经 _surface_ids 判定）；水面/冰面按水体策略覆盖。
+## 世界坐标、纯噪声，不依赖区块加载（低模环远超高模环，不能要求有数据）。
+func surface_color_at(wx: int, wz: int) -> Color:
+	return surface_color_at_height(wx, wz, _terrain_height(wx, wz))
+
+
+## 同上，但高度由调用方提供（低模采样已经在同一列算过高度，不重复算：
+## 地形高度在多噪声叠加的分层区域每列约 13 μs，是低模构建的主要成本）。
+func surface_color_at_height(wx: int, wz: int, h: int) -> Color:
+	var policy := String(_profile.get("water", "normal"))
+	if policy == "iceberg":
+		if _iceberg_top(wx, wz) > 0:
+			return _tile_color(BlockTypes.Block.SNOW)
+		if h < SEA_LEVEL:
+			return _tile_color(BlockTypes.Block.ICE)
+	elif policy != "dry" and h < SEA_LEVEL:
+		return _tile_color(BlockTypes.Block.WATER)
+	var ids := _surface_ids(wx, wz, h)
+	return _tile_color(ids.x)
+
+
+## 方块 → 其顶面瓦片的代表色（低模顶点色用）。未知方块退回石头色。
+func _tile_color(block_id: int) -> Color:
+	var tiles: Vector3i = BlockTypes.TILES.get(block_id, Vector3i(3, 3, 3))
+	return TextureAtlas.tile_color(tiles.x)
 
 
 ## 该列最高的非空气格（未加载返回 AIR）。供小地图采样：一次定位区块后直接在
@@ -356,6 +494,20 @@ func to_render(world_pos: Vector3) -> Vector3:
 ## 玩家/实体所在的区块（渲染坐标入，世界区块出）——流式加载的中心。
 func chunk_at(render_pos: Vector3) -> Vector2i:
 	return world_to_chunk(to_world(render_pos))
+
+
+## 区块坐标是否在世界边界内（D-064 软边界）。
+## 区块 c 覆盖 [c*16, c*16+15] 格，故 ±64000 对应合法区间 [-4000, 3999]：
+## 负数侧多一格是因为 -4000 覆盖 [-64000, -63985]，恰好在界内。
+func is_chunk_in_bounds(coord: Vector2i) -> bool:
+	return coord.x >= -HALF_CHUNKS and coord.x < HALF_CHUNKS \
+		and coord.y >= -HALF_CHUNKS and coord.y < HALF_CHUNKS
+
+
+## 世界坐标是否已贴到边界（供 HUD 提示用；不阻止移动——软边界，禁空气墙）。
+func is_near_world_edge(world_pos: Vector3) -> bool:
+	return absf(world_pos.x) > float(WORLD_HALF - EDGE_NOTICE_DIST) \
+		or absf(world_pos.z) > float(WORLD_HALF - EDGE_NOTICE_DIST)
 
 
 ## 当前浮动原点（世界格）。
@@ -774,6 +926,8 @@ func _update_chunks() -> void:
 	_maybe_shift_origin(_player.global_position)
 	var center := chunk_at(_player.global_position)
 	_update_stream_dir()
+	_update_low_ring(center)
+	_update_edge_notice()
 
 	# wanted 集缓存：只有中心区块变化、或飞行时机头方向转过阈值才重算
 	# （卸载判定仍每帧用实时中心精确计算，不受缓存影响）。
@@ -810,7 +964,11 @@ func _update_chunks() -> void:
 		keys.sort_custom(_priority_cmp)
 		_pending_dirty = false
 	var max_chunks := FLIGHT_CHUNKS_PER_FRAME if _flight_stream else CHUNKS_PER_FRAME
+	if _bootstrap:
+		max_chunks = BOOTSTRAP_CHUNKS_PER_FRAME
 	var budget_us := int((FLIGHT_BUDGET_MS if _flight_stream else WALK_BUDGET_MS) * 1000.0)
+	if _bootstrap:
+		budget_us = int(BOOTSTRAP_BUDGET_MS * 1000.0)
 	var t0 := Time.get_ticks_usec()
 	var loaded := 0
 	for key in keys:
@@ -838,6 +996,10 @@ func _update_chunks() -> void:
 		_rebuild_chunk(_pending_rebuilds.pop_front())
 		rebuilt += 1
 
+	# 出生预填结束判定：wanted 全部到齐即回落常规预算（此后不再进 bootstrap）。
+	if _bootstrap and _pending_load.is_empty():
+		_bootstrap = false
+
 
 ## 重建 wanted 集（见 _wanted 缓存说明）：以中心区块为原点的保留窗口。
 func _rebuild_wanted(center: Vector2i) -> void:
@@ -848,8 +1010,12 @@ func _rebuild_wanted(center: Vector2i) -> void:
 	for ex in range(-reach, reach + 1):
 		for ez in range(-reach, reach + 1):
 			var off := Vector2i(ex, ez)
-			if _in_stream_window(off, 0):
-				wanted[center + off] = true
+			if not _in_stream_window(off, 0):
+				continue
+			var key := center + off
+			# D-064 软边界：界外区块不进 wanted（进也不会被生成，白占队列）。
+			if is_chunk_in_bounds(key):
+				wanted[key] = true
 	_wanted = wanted
 	_wanted_center = center
 	_wanted_dir = _stream_dir
@@ -919,6 +1085,9 @@ func _load_priority(coord: Vector2i, center: Vector2i) -> float:
 
 func _load_chunk(coord: Vector2i, with_rebuild: bool = true) -> void:
 	if _chunks.has(coord):
+		return
+	# D-064 软边界：界外不生成（不产生区块键），玩家走到界外只会看到海面与雾。
+	if not is_chunk_in_bounds(coord):
 		return
 
 	var chunk := Chunk.new()

@@ -1974,3 +1974,66 @@ D-062 P0 只落地坐标地基；本条把「1 方块 = 0.5 m」的旧约定（D
 2. 瞄准会**永久改变相机朝向**，后续依赖射线的阶段（蟹/蛙/弓/钓）被连带打挂：必须 `global_transform` 原地还原（曾因此多出 10 条假失败）。
 3. 别靠「把玩家传送到空旷处」取视线——实测引入 10 条无关失败；正确做法是**换目标所在方位**（狼从 −Z 侧挪到 +Z 平坦侧，因为中间那道 1 m 高土埂会挡住低头射线）。
 4. 副作用：生物速度折半后 `life_probe` 里「等待走完固定格距」的循环耗时翻倍，逼近回归 400 s 超时——`tmp/run_regression.sh` 超时已提到 600 s。
+
+## D-064 128 km 大世界 P2+P3：双环加载 + 低模 LOD + 软边界
+
+D-062（坐标地基）/ D-063（1 格 = 1 m）之后，本条把世界从「32 m 视野的无限噪声地形」推到「64 m 高模 + 256 m 低模 + ±64000 格软边界」，即设计文档 §5 的 P2、P3 两个 Phase。用户定夺：Terrain3D/DEM 资产**保留不入库**（`addons/`、`demo/`、`data/ASTER_GDEM_V2-Shanghai/` 留在工作区、不动作）；直接实施 P2→P3。
+
+### 高模环半径 8 → 4：由实测反推，不是拍脑袋
+
+设计文档原定「高模环 8 区块（128 m）+ 低模环 16」，估算依据是旧尺度下「单块 25 ms × 289 块 ≈ 7 s」。1 格 = 1 m 后重测（`tmp/p2_bench`，桌面 headless，邻块齐备的快路径）：
+
+| 量 | 实测 |
+|---|---|
+| 单块生成（`_generate_chunk` + `col_top`） | 23.7 ms |
+| 单块网格 + 碰撞（`rebuild`） | 11.4 ms |
+| **单块冷加载合计** | **41 ms** |
+| 单块「四邻未知」保守全扫（流式边界的常态） | **143 ms** |
+| 环 2 / 4 / 5 / 8 冷填充 | 2.0 s / **3.3 s** / 5.0 s / **11.9 s** |
+
+环 8 的真实问题不是「出生慢」（加载屏能盖住），而是**走路时每跨一格区块要补 17 块**：`_update_chunks` 的时间预算保证「每帧至少 1 块」，1 块 41 ms → 17 帧 ≈ 0.7 s 的 24 fps 段，而走完这 16 m 只需 2.9 s——**帧率会持续塌陷**。环 4 补 9 块（≈0.37 s / 2.9 s），冷启动 3.3 s。
+
+故：`LOAD_RADIUS := 4`（64 m 高模、9×9 = 81 块），视野交给低模环（256 m）。玩家感知的「看得远」由低模提供，高模只负责**撞得到、挖得到**的 64 m。`LOAD_RADIUS` 是单常量，将来把生成挪进 `WorkerThreadPool` 后可一键上调。
+
+### 低模环（`scripts/world/low_terrain.gd`，`class_name LowTerrain`）
+
+- **规格**：每 `LOW_GROUP_CHUNKS = 4` 区块合并一组（64×64 格 = 64 m），每 `LOW_SAMPLE = 4` 格采样一个高度 → 17×17 顶点；顶点色取 `World.surface_color_at_height`（与方块地表同源的图集瓦片色，`.srgb_to_linear()` 后当反照率）；无方块数据、无 `CollisionObject3D`、`cast_shadow = OFF`。
+- **接缝无缝的原理**：采样步长 4、组边界落在 16 的倍数上 ⇒ 区块边界必然落在采样网格上；接缝两侧都读同一个 `World.get_surface_height`，故**逐点严格相等**（探针钉 2312 个顶点误差 0 m）。不用「取格内最大值」之类补偿手段——那会在接缝处造出台阶。
+- **水面**：顶点 y 取 `max(地表顶面, SEA_LEVEL)`。海底地形必须被抬到海面，否则海是一串深坑（低模最经典的丑陋错误）。**但取色要用真地形高度**（`surface - 1`），不能用被抬升过的值——地表材质有雪线/岩线/河床分档。
+- **让位规则**：中心格落在「高模方形 ±(skip_radius+1) 区块」内的 quad 一律跳过，否则 4 m 粗网格会从精细地形里穿出来（看到尖刺）。飞行时 `skip_radius = FLIGHT_FORWARD + FLIGHT_SIDE`（偏置矩形的 AABB），宁可让高模多承担几块。
+- **增量**：签名 = (中心区块, skip_radius)，相同即返回 0；中心跨一组只重建「新入窗的组 + 与高模方形相交的组」（实测 24 组 ≈ 150 ms / 每 64 m）。整组被高模完全覆盖时记入 `_empty`、不出网格——**必须单独记账**，否则这些组每帧都被判成「缺失 → 重建」，白烧采样。
+- **已知观感取舍**：4 m 采样在掠射角（贴地平视看远处坡地）会看到「梯田台阶」——相邻格心高度差被放大成明暗交替的斜面。这是高度图 LOD 的固有代价，不是破面（顶点共享，几何连续）。要改善只有两条路：`LOW_SAMPLE = 2`（单组成本 ×3.8，增量 24 组会到 530 ms/64 m，不可接受）或加雾遮远景。**当前选择接受**，因为低模只在 64 m 之外，且真机小屏 + 雾 + 夜/昼光照下可读性尚可（窗口截图目检 `tmp/low_shot_*.png`、`tmp/flight_e2e_airborne.png`）。
+- **成本**：单组 6.3 ms（首次实现 10.8 ms，因为 `surface_color_at` 内部又算了一遍地形高度；改为 `surface_color_at_height(wx, wz, h)` 复用后降 42%）。满窗口 79 组、22831 顶点、约 450 ms。
+
+### 出生加载屏（`scripts/ui/spawn_loading.gd`）
+
+环 4 冷启动 81 块 ≈ 3.3 s，直接把玩家丢进去会看到地形一块块蹦出来。做法：
+- `World._bootstrap` 期间每帧 4 块、预算 220 ms（屏幕上只有一块进度条，6 fps 也看不出来）；`_pending_load` 清空即自动回落常规预算，**此后不再进 bootstrap**。
+- `SpawnLoading`（Control，挂在 HUD 这个 CanvasLayer 下）自驱 `_process` 轮询 `World.ring_fill_ratio()`，填满或超时 8 s 后淡出 0.35 s 自毁；`mouse_filter = IGNORE`，不拦输入。配色沿用 D-057 的纸质 UI。
+- **无头环境不创建**（`DisplayServer.get_name() != "headless"` 守卫）：34 个探针靠 await 帧数断言世界状态，遮罩没有意义。
+
+### 软边界 ±64000（P3）
+
+- `WORLD_HALF = 64000`、`HALF_CHUNKS = 4000`；`is_chunk_in_bounds` 是唯一判据。区块 c 覆盖 `[c*16, c*16+15]`，故合法区间是 `[-4000, 3999]`——**负数侧多一格**（-4000 覆盖 -64000 恰好界内）。写 `absi(c) <= 3999` 会错杀 -4000 那一列。
+- 拦点只有两处：`_load_chunk`（界外直接返回，不产生区块键）与 `_rebuild_wanted`（界外不进 wanted）。`fill_ring_sync` / `ensure_chunks_in_region` / `preload_chunks_in_region` 全部经 `_load_chunk`，自然继承。
+- **不设空气墙**（MEMORY.md 铁律）：玩家可以走出边界，那里没有地形、海面与雾延伸到界，HUD 播「已到世界边缘」（进 `EDGE_NOTICE_DIST = 512` 格提示一次，离开提示恢复，状态变化才播）。走到底掉进虚空后走既有死亡/复活链。
+
+### 大洋区域无需新算法
+
+`RegionAtlas` 的 `water: "normal" | "iceberg"` + 噪声起伏 + `has_landing_field` 已经天然满足「128 km 大洋 + 岛礁 + 降落场 + 港口」。±60000 均匀采样（234×234 点）实测：太平洋 84.1% / 大西洋 75.4% / 印度洋 77.5% 低于海平面且都有 15~25% 陆地（岛礁），北极 100% 低于海平面（`iceberg` 策略把水面封冻、冰盖在水面之上）。
+
+### 验证
+
+验收档（`run_regression.sh full`）46 探针 **1742 PASS / 0 FAIL / 存档逐字节还原**。新增 low_ring_probe 15 断言、world_bounds_probe 23 断言；`flight_stream_probe` 的窗口断言改为读 `World.LOAD_RADIUS` 自适配，帧数上限 60→400。同一轮还修好了 P1（D-063）遗留的三个取证探针（`takeoff_coach_shot` / `coach_cockpit_shot` / `cockpit_instruments_shot`）——它们此前登机前就机毁、协程猝死、挂到超时，长期以「PASS=0 假绿」混在基线里，见踩坑 9。
+
+### 踩坑（可复用）
+
+1. **`Events.notice` 是信号，不是函数**：写 `Events.notice("...")` 是 parse error（"Name called as a function but is a Signal"），必须 `.emit(...)`。
+2. **探针与 `_process` 抢签名 = 假阴性**：low_ring_probe 的「增量重建」段原本先 `await process_frame` 再显式调 `_update_low_ring`——World 的 `_process` 每帧都会调它，签名已被抢先更新，显式调用恒返回 0（报「跨一组重建 0 组」）。要测增量就必须**在同一帧内**改位置 + 立刻调用，不能插 await。
+3. **取色别重算高度**：`surface_color_at` 内部 `_terrain_height` 一次约 13 μs（亚洲分层地形要算 plateau/ridge/river + 限坡松弛），低模采样已经算过高度，重复算让单组成本 6.3 → 10.8 ms。
+4. **整组被跳过要单独记账**（`_empty`）：`_groups` 只放真有网格的组，否则 `null` 混进字典会让 `total_vertices()` 崩，或者每帧重建。
+5. **边界不对称**：`fill_ring_sync(Vector2i(4000,4000), 1)` 的 ±1 圈里还夹着界内的 `(3999,3999)`——「界外中心」要取 4001 才全越界。
+6. `.tscn` 忘建只报 `Cannot open file`，不报缺哪个脚本；新探针必须成对建 `.gd` + `.tscn` 并加进 `tmp/run_regression.sh`。
+7. **帧数 ≠ 时间**：`Player.DEATH_PAUSE = 2.2 s` 走的是 `SceneTreeTimer`（墙钟）。环半径变大后流式队列一忙，单帧可达 160 ms，`crash_recover_probe` 原来「wreck 后等 20 帧再断言死亡」足够跑完 2.2 s → 玩家已复活回家 → B1「玩家死亡」与 B5「不传送回出生点」双双假失败（单独跑必过、全量跑偶发）。判定「瞬时状态」必须紧贴触发点（1 帧内），要等状态**结束**才轮询。
+8. **卸载 wanted 内的区块会被自愈**：D-038 的不变式（`_unload_chunk` 里「wanted 且未排队就重新入队」）让环半径变大后的 `rebuild_drain_probe` 失效——它在 X+2 处卸载邻居，而 X+2 现在仍在 wanted 里，下一帧就被加载回来，补面断言变成 `4408 → 4408`。测「卸载后补面」要么清空 `_wanted` 关掉自愈，要么挑一个窗口外区块。
+9. **探针放飞机不能放在玩家脚下**（`takeoff_coach_shot` 的一串假失败的真根因）：机体碰撞盒 6.6×4.8×15.6 m、底面在原点下 `GROUND_CLEARANCE = 2.55 m`，在玩家所站点位落位会把玩家整只**包进碰撞盒**。两者重叠时物理首帧就做分离，实测把机体顶起 1.60 m（39.60→41.20）并给出 **7.07 m/s** 分离速度——刚好越过解体阈值 Δv 7.0，于是「登机前一刻机毁」。后续连锁：`_refresh_flight_panel` 见 `is_wrecked()` 直接 return → 教练卡片整卡隐藏 → 「面板显示 / 教练主句显示」两条断言假失败；残骸 4 s 自消散后 `_craft.snapshot()` 变成对已释放对象发消息 → **协程猝死 → `SaveGuard.restore()` 与 `quit()` 都跑不到 → 进程挂到超时 rc=124，且飞行计数器（`flew` +2 / `flew_distance` +400 / 四个 `flew_alt_*` 档）在 `Progress._exit_tree` 里写盘，污染存档**。同一份场地代码被三个取证探针各抄一遍，于是同一个坑踩了三遍（`coach_cockpit_shot`、`cockpit_instruments_shot` 挂到 600 s 超时，跑全量才暴露）。修法：抽 `tests/probe_pad.gd`（`preload` 静态调用，不新增 `class_name`、免重扫类缓存）统一给「实心面扫描定平台高度 + 脚下无条件铺一层压平垫层 + 落位横向偏开 8.5 m」，三个探针共用；再在落稳循环加 `is_instance_valid` 守卫 + 早退路径（先 `SaveGuard.restore()` 再 `quit(1)`），失败以 FAIL 呈现而不是挂起。**注意这批失败是 P1（D-063）就带上的，不是 P2 引入**——窗口档只在验收时跑，P1 当时只跑了无头档，问题被压了一轮。
