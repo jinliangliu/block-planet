@@ -363,6 +363,9 @@ func _check_d_selector() -> void:
 
 	var asia_count := RegionAtlas.landmarks_of(RegionAtlas.ASIA).size()
 	selector._show_intro(RegionAtlas.ASIA)
+	# 必须等一帧：旧条目是 queue_free 掉的，本帧末尾才真正离开树，
+	# 立刻数会数到「旧的 + 新的」。
+	await get_tree().process_frame
 	_check(selector._landmark_grid.get_child_count() == asia_count,
 		"介绍页为所选区域生成地标条目（亚洲 %d 条，实际 %d）" % [
 			asia_count, selector._landmark_grid.get_child_count(),
@@ -372,6 +375,7 @@ func _check_d_selector() -> void:
 
 	var europe_count := RegionAtlas.landmarks_of(RegionAtlas.EUROPE).size()
 	selector._show_intro(RegionAtlas.EUROPE)
+	await get_tree().process_frame
 	_check(selector._landmark_grid.get_child_count() == europe_count,
 		"切换区域后地标条目随之刷新（欧洲 %d 条，实际 %d）" % [
 			europe_count, selector._landmark_grid.get_child_count(),
