@@ -2102,3 +2102,53 @@ BL(323.7,726.8)  BR(956.3,726.8)
 8. **A 柱不能照抄 2D 的 `PILLAR_TOP_W = 44 px`**：那是画在屏幕中央附近的装饰性收纳边，按它布柱会让两根柱子在中线并拢成「Λ」把视野劈成两半（首轮取证实测 3D 框占了 1/3 屏）。真实立柱在风挡两侧边角，柱宽 0.052 m 在 1.29 m 处张角 2.3°（17 px），两根合计 3.1% ≤ 7%，中线 ±200 px 内零 3D 几何。
 9. **后隔板宽度要按视场算，不要凭感觉**：82° 竖直 FOV + 16:9 → 水平半角 57°，在 1.10 m 处要 ±1.70 m 才铺满；2.30 宽漏两条天空、3.40 仍漏右角一小块，最终 4.40（留 0.5 m 余量）。两轮截图才收敛——回望视角的漏光靠想象算不出来。
 10. **`scripts/flight/look_down.gd` 是作废路线**：全库零引用的残留（自建一个「低头」相机层），L2 落地后彻底没有存在理由，文件头已加 ⚠️ 作废横幅，禁止接线。
+
+## D-066 三份地图/导航文档回订与实施（航线规划、中国地标、地图架构命名）
+
+用户要求「优化并实现」三份文档：`feature_Map System Architecture.md`（架构命名）、`feature_World Selector UI-Landmark_CHINA.md`（地标）、`feature_flight-flight_path_planning_dynamic_navigation.md`（航线）。勘察后发现**三份都是脱离代码的理想架构**：代码已实现大半但命名全面不符，且各自有真缺口。本条记录实施内容与几处刻意的取舍。
+
+### 通用前提：尺度已变（三份文档的 km 级旧值一律作废）
+
+D-063 起 **1 格 = 1 m**，世界高 256 m，分层地形实测最高 **188 m**。三份文档里「1 格 = 0.5 m / 世界高 128 m / 巡航 50~90 m」等数值全部作废。另一个被文档忽略的硬约束：**内容全在原点附近数百米内**（亚洲机场中心格 `(114,96)`、村庄 x∈[22,86]），而流式高模半径 64 m、低模 256 m——所以**不可能**把地标按真实地理比例铺到 128 km 平面上（那里区块不加载、玩家飞不到），也**不能**规划 km 级航线。
+
+### 一、航线规划与动态导航（价值最高，先做）
+
+**核心缺陷（玩法级）**：登机时只注入一次任务锚点，绕点（CIRCUIT）任务推进到下一个航点后，HSI/CDI 与飞行指引十字仍指着老目标——玩家不知道下一个点在哪。`mission_manager._step_circuit` 有判定但 `_next_waypoint` 是私有、无信号、从不喂给仪表。
+
+**实施**：
+- 新增 `scripts/flight/route_plan.gd`（`RoutePlan`，RefCounted 纯逻辑）：航路点序列 + `set_current_index()` / `advance()` / `progress()`。
+- 新增 `scripts/flight/route_generator.gd`（`RouteGenerator`）：沿直线采样 `world.get_surface_height()`（**不依赖区块加载**，不要用 `get_block`）→ 超限段插侧向绕行点 → 平滑 → 返回带净空的航线。
+- 接线：`main._sync_mission_navigation()` 每帧从 HUD 取「当前航点（世界坐标）+ 序号」，`to_render` 一次后注入仪表与世界标注，并更新战术地图航线图层；用 `_nav_sync_key` 去重短路（否则逐帧 `queue_redraw`）。
+- `flight_tactical_map.set_route()` 新增航线折线图层（复用既有 `_world_to_screen`，**不新建 SubViewport 相机**）。
+
+**关键取舍：不让 RoutePlan 自己判定飞越。** 任务航点的飞越真相在 `MissionManager`（用任务自带的 `radius()`），若 `RoutePlan` 再按 40 m 推进一次就是**双份真相**——会出现「地图已切下一个点、仪表还指上一个」。故任务链路统一走 `set_current_index()` 对齐，`advance()` 只留给无任务的自由航线。RouteGenerator 的避山能力由探针独立验证，不强行塞进任务链路。
+
+### 二、世界选择器与中国地标（按工程现实降级）
+
+**现状**：`MapGlobe`（球面顶点色地球，只转不缩放）+ `MapSelector`（地球页/介绍页/加载页三页）+ `RegionAtlas`（11 区域），但**地标零实现**。
+
+**实施**：`scripts/world/geo_projection.gd`（经纬度 ↔ 区域/球面，球面映射全转发 `RegionAtlas` 已有互逆函数）、`RegionAtlas.REGION_LANDMARKS`（38 条：亚洲 11 条含五岳/长江/黄河/三峡/青藏高原/珠峰，其余区域各 2~3 条）、`MapGlobe` 地标图钉 + 江河光带、`MapSelector` 介绍页地标卡 + 「去这里」。
+
+**三处刻意降级（已写进代码注释）**：
+1. **不提供 `lat_lon_to_world()`**。文档要求经纬度→世界坐标，但世界是程序化生成的、**零地标建筑**，且 128 km 外区块不加载。地标只能是「地球上的标记 + 科普卡」；「快速旅行」= 进入该地标**所属区域**并落在该区域机场/降落场（按钮文案写「去亚洲看看」而非「降落在泰山」，不误导儿童）。
+2. **不用 ShaderMaterial 做水流**。项目零 `.gdshader`、Mobile 渲染器、目标中低端 Android。长江/黄河改用既有 unshaded 顶点色 + 代码层脉冲 alpha，效果够且零新增渲染路径。
+3. **不做微缩沙盘与三级缩放 LOD**（成本极高、无美术资产）。降级为「地球页 + 区域介绍页」两级。
+
+### 三、地图系统架构：命名订正，但**不引入 MapManager**
+
+文档规定的 `WorldSelectorUI` / `InGameWorldMapUI` / `TacticalRadar` / `MapManager` 四个名字，**代码里一个都不存在**。实际是 `MapSelector` /（无独立大地图，M 键复用选择器）/ `FlightTacticalMap` /（无，spawn 存在 `GameState.current_region`）。文档已按「文档术语 ↔ 代码实体」对照表订正。
+
+**不新建 `MapManager` autoload**：它要求的 `set_spawn_point/get_spawn_point` 已由 `GameState.current_region`（存**区域 id** 而非坐标）+ `RegionAtlas` 承担，再建一个存坐标的单例就是双份真相。同理 **M 键语义保持不变**（非飞行态开选择器）——现状选择器需走完加载页才生效，不是「一点就换区域」，破坏性可控；另立一个独立大地图在单区域无缝世界里收益有限（战术地图 180 m 视野 + 常驻 minimap 已覆盖导航）。这两条若未来做跨区域自由旅行再重评。
+
+### 验证
+
+- `tests/route_nav_probe.gd` **36 PASS**：逐点净空、绕山生成、切点/完成、HSI 方位距离、全部退化输入。
+- `tests/route_wiring_probe.gd` **36 PASS**（端到端接线证据）：起飞 CIRCUIT 任务后目标 = `waypoints[0]`，飞越后**切换为 `waypoints[1]`**，战术地图 `_route_points`/`_route_current_index` 同步，去重短路不误伤，下机清空。
+- `tests/landmark_probe.gd` **44 PASS**：投影互逆、地标数据完整性、图钉枚数与抬升、河流光带脉冲、拾取命中/背面 -1、跨区提示。
+- 既有探针 `mission_probe`(37) / `flight_instruments_probe`(58) 未打穿。
+
+### 踩坑（可复用）
+
+1. **untyped Array 的循环变量会让 `:=` parse error**：`for pin in pins:`（pins 是 `Array`）里 `var d := pin.position.length()` 报「Cannot infer the type of "d" variable」——元素是 Variant，无类型可推断。必须写 `for pin: Node3D in pins:`，或用 `as` 强转。本项目 `enable_all_warnings=true`，**parse error 会让探针直接跑不起来**（上一批探针栽在这，且因为派工时不许跑 Godot，问题留到串行验证才暴露）。
+2. **`clampi` 式的越界保护会伪装 bug**：`landmarks_of(-3)` 原被夹成太平洋、`999` 夹成南极洲——「调用方传错 id」的现象会完全对不上原因。改为越界返回空数组。
+3. **派工并行写码时，务必约定「谁都不许跑探针」**：`user://` 竞态会污染结论；由主理人串行跑，才能顺带抓出上一条那种 parse error。

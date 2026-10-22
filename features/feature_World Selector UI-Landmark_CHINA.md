@@ -5,6 +5,23 @@
 目标：在 128km × 128km 的体素世界中，将中国地貌（三山五岳、长江黄河、三峡）以多级缩放（Zoom Levels）和互动沙盘的形式完美呈现在地图选择器中。
 
 
+> **D-066 实施状态（2026-10-22）**：本特性已实施，但**按工程现实做了三处降级**——
+> 下文原设计（写实地球 Shader、微缩沙盘、UV 滚动水流）未照做。取舍理由见 §0，
+> 实施内容见 §5。阅读时请以 §0/§5 为准，§1~§4 保留的是原始设计意图。
+
+## 0. 工程现实与三处降级（先读，决定了方案）
+
+本作世界是**程序化生成**的：地形由噪声生成，**没有任何地标建筑**；且流式加载半径只有
+高模 64 m、低模 256 m，内容（机场、村庄）全在原点附近数百米内。因此：
+
+| 原设计要求 | 工程现实 | 本轮实际做法 |
+|---|---|---|
+| 经纬度 → 游戏世界坐标 `lat_lon_to_world()`，快速旅行降落到地标旁 | 世界零地标建筑；按真实比例映射出的坐标在几十 km 外，区块不加载、玩家飞不到 | **不提供 `lat_lon_to_world()`**。地标 = 地球上的图钉 + 科普卡片；「去这里」= **进入该地标所属区域**，落在该区域机场/降落场。按钮文案写「去亚洲看看」而非「降落在泰山」，不误导儿童 |
+| 长江黄河用 UV 滚动发光 Shader 模拟水流 | 项目零 `.gdshader` 文件、Mobile 渲染器、目标中低端 Android，新增 shader 是未验证的渲染路径 | 改用**既有 unshaded 顶点色 + 代码层脉冲 alpha** 实现光带流动，零新增渲染路径 |
+| 三级缩放 LOD（太空 → 洲际浮雕 → 微缩沙盘模型） | 微缩沙盘需要大量美术资产，成本极高；地球当前只支持旋转、无缩放 | 降级为**两级**：地球页（图钉 + 江河光带）+ 区域介绍页（地标卡）。缩放 LOD 未做 |
+
+---
+
 ## 1. 设计理念与视觉层级
 
 由于游戏世界是缩比的，地图选择器不能直接塞入 1:1 的真实比例地形。我们采用 “多级缩放 + 空间投影 + 体素沙盘渲染” 的体验流，让玩家通过缩放地球，逐步聚焦到中国区微缩景观。
@@ -89,12 +106,60 @@ func lat_lon_to_world(lat: float, lon: float) -> Vector3:
 ## 4. 给 AI 智能体的开发指令 (Checklist)
  请将以下内容添加至开发任务书的【地图选择器与 UI 系统】模块，并逐一实现：
 
-□ 实现 MapSelectorUI，包含 3D 地球仪模型（SphereMesh + 地球贴图 Shader）。
-□ 开发 OrbitCamera 脚本，支持鼠标右键/触屏拖动旋转地球，滚轮/双指捏合缩放。
-□ 编写坐标映射工具 GeoProjection.gd，提供 lat_lon_to_world() 和 world_to_lat_lon() 接口，用于地标锚点。
-□ 创建 LandmarkPin.tscn。每帧通过 camera.unproject_position() 将 3D 世界中的地标坐标（如三峡、华山）转换为屏幕坐标，在 CanvasLayer 中绘制图标。
-□ 当相机缩放值（camera.size 或 position.z）达到阈值时，使用 Tween 将地球球体平滑过渡为 3D 微缩沙盘（可通过切换 LOD 节点或直接移动相机进入实体世界实现）。
-□ 地标点击事件：点击 Pin 弹出信息面板，点击【出发】按钮后，将玩家角色生成在目标地标的安全坐标点，并关闭地图选择器。
-□ 在长江与黄河的河道 Mesh 上应用 UV 滚动的发光 Shader，模拟水流。
+> 注：以下为**原始 checklist**，D-066 的实施结果与偏差见 §5。
+
+- [x] 3D 地球仪：`MapGlobe`（`scripts/ui/map_globe.gd`）——**顶点色球面网格，非贴图 Shader**（项目无美术资产，顶点色方案已在用且工作良好）。
+- [ ] OrbitCamera 缩放：地球**仍只支持拖动旋转，未做缩放**。
+- [~] 坐标映射 `scripts/world/geo_projection.gd`（`GeoProjection`）：提供 `region_bounds` /
+      `in_region` / `landmark_dir` / `landmark_ref` / `landmark_total` / `self_test`。
+      **故意不提供 `lat_lon_to_world()`**（理由见 §0）；球面映射全转发
+      `RegionAtlas.lat_lon_to_dir` / `dir_to_lat_lon`（已有严格互逆，不另造一套）。
+- [x] 地标图钉：在 `MapGlobe` 上按地标经纬度生成**立体图钉**（非 2D CanvasLayer 投影——
+      本项目地球是 3D 的，图钉随球旋转才不会「贴在屏幕上不动」），支持射线拾取
+      `landmark_at_world_ray()`。
+- [ ] 缩放阈值 → 微缩沙盘 Tween 过渡：未做（见 §0）。
+- [~] 地标卡片 + 【去这里】：介绍页地标分区 → 点击弹卡片（科普文案）→
+      **进入该地标所属区域**（非精确坐标降落，见 §0）；跨区地标会明确提示并允许一键切换。
+- [~] 长江黄河光带：**未用 Shader**，改为沿河道经纬度采样的一串小方块 + 脉冲透明度动画。
+- [ ] 动物图标跳图鉴（中华鲟/黄河鲤鱼）：未做——现有区域级「看看这里的生物」/「去钓鱼」
+      按钮已覆盖入口需求，地标级再挂一遍是重复入口。
+
+---
+
+## 5. D-066 实施记录
+
+### 5.1 交付物
+
+| 文件 | 内容 |
+|---|---|
+| `scripts/world/geo_projection.gd`（新，158 行） | 经纬度 ↔ 区域/球面工具；`self_test()` 供探针断言互逆性 |
+| `scripts/world/region_atlas.gd` | 新增 `REGION_LANDMARKS`（38 条）+ `landmarks_of()` |
+| `scripts/ui/map_globe.gd` | 地标图钉、河流光带、脉冲 alpha、`landmark_at_world_ray()` |
+| `scripts/ui/map_selector.gd` | 介绍页地标分区 + 详情浮层 + 球体图钉点击跳转 |
+| `tests/landmark_probe.gd`（新，430 行） | 44 条断言 |
+
+### 5.2 地标数据（38 条）
+
+- **亚洲 11 条**：五岳（泰山/华山/衡山/恒山/嵩山）、黄山、长江、黄河、三峡、青藏高原、珠穆朗玛峰。
+- 欧洲/非洲/北美洲/南美洲/大洋洲/南极洲 各 3 条；太平洋 3 条；大西洋/印度洋/北冰洋 各 2 条。
+- 每条字段：`title / kind / lat / lon / text`；`kind` ∈ `mountain / river / gorge / plateau / lake / reef / monolith`。
+  `kind` 为 `river` 时另有 `path`（河道采样点数组），供光带绘制。
+
+### 5.3 验收与回归
+
+- `landmark_probe` **44 PASS / 0 FAIL**：`GeoProjection.self_test` 球面往返（误差 < 0.01°）、
+  11 区域地标齐全性与经纬度范围、亚洲必备条目、**七大洲河道点落在自己的陆地掩码内**、
+  图钉枚数（38）与抬升层、与既有标记（区域名/小飞机/小鱼）间距 ≥ 0.05、河流方块数、
+  脉冲 alpha 区间、拾取命中/背面 -1、跨区提示与 `region_entered` 发出。
+- 需目检：`globe_flags_shot` / `map_mode_shot` 截图内容会变（地球多了 38 枚图钉 + 31 块河水方块）；
+  可用新增的 `set_landmarks_visible(false)` 拍对照图。
+- 性能留意：地球页多约 110 个 draw call / 材质，中低端机需实测。
+
+### 5.4 踩坑
+
+- `landmarks_of()` 原用 `clampi` 做越界保护，会把 `-3` 夹成太平洋、`999` 夹成南极洲，
+  「调用方传错区域 id」的现象完全对不上原因。已改为**越界返回空数组**。
+- 探针里 `for pin in pins:`（untyped `Array`）内部用 `var d := pin.position.length()` 会
+  **parse error**（元素是无类型 Variant）。必须写 `for pin: Node3D in pins:`。
 
 
