@@ -2037,3 +2037,68 @@ D-062（坐标地基）/ D-063（1 格 = 1 m）之后，本条把世界从「32 
 7. **帧数 ≠ 时间**：`Player.DEATH_PAUSE = 2.2 s` 走的是 `SceneTreeTimer`（墙钟）。环半径变大后流式队列一忙，单帧可达 160 ms，`crash_recover_probe` 原来「wreck 后等 20 帧再断言死亡」足够跑完 2.2 s → 玩家已复活回家 → B1「玩家死亡」与 B5「不传送回出生点」双双假失败（单独跑必过、全量跑偶发）。判定「瞬时状态」必须紧贴触发点（1 帧内），要等状态**结束**才轮询。
 8. **卸载 wanted 内的区块会被自愈**：D-038 的不变式（`_unload_chunk` 里「wanted 且未排队就重新入队」）让环半径变大后的 `rebuild_drain_probe` 失效——它在 X+2 处卸载邻居，而 X+2 现在仍在 wanted 里，下一帧就被加载回来，补面断言变成 `4408 → 4408`。测「卸载后补面」要么清空 `_wanted` 关掉自愈，要么挑一个窗口外区块。
 9. **探针放飞机不能放在玩家脚下**（`takeoff_coach_shot` 的一串假失败的真根因）：机体碰撞盒 6.6×4.8×15.6 m、底面在原点下 `GROUND_CLEARANCE = 2.55 m`，在玩家所站点位落位会把玩家整只**包进碰撞盒**。两者重叠时物理首帧就做分离，实测把机体顶起 1.60 m（39.60→41.20）并给出 **7.07 m/s** 分离速度——刚好越过解体阈值 Δv 7.0，于是「登机前一刻机毁」。后续连锁：`_refresh_flight_panel` 见 `is_wrecked()` 直接 return → 教练卡片整卡隐藏 → 「面板显示 / 教练主句显示」两条断言假失败；残骸 4 s 自消散后 `_craft.snapshot()` 变成对已释放对象发消息 → **协程猝死 → `SaveGuard.restore()` 与 `quit()` 都跑不到 → 进程挂到超时 rc=124，且飞行计数器（`flew` +2 / `flew_distance` +400 / 四个 `flew_alt_*` 档）在 `Progress._exit_tree` 里写盘，污染存档**。同一份场地代码被三个取证探针各抄一遍，于是同一个坑踩了三遍（`coach_cockpit_shot`、`cockpit_instruments_shot` 挂到 600 s 超时，跑全量才暴露）。修法：抽 `tests/probe_pad.gd`（`preload` 静态调用，不新增 `class_name`、免重扫类缓存）统一给「实心面扫描定平台高度 + 脚下无条件铺一层压平垫层 + 落位横向偏开 8.5 m」，三个探针共用；再在落稳循环加 `is_instance_valid` 守卫 + 早退路径（先 `SaveGuard.restore()` 再 `quit(1)`），失败以 FAIL 呈现而不是挂起。**注意这批失败是 P1（D-063）就带上的，不是 P2 引入**——窗口档只在验收时跑，P1 当时只跑了无头档，问题被压了一轮。
+
+## D-065 座舱 3D 化 L1+L2+L3：环绕框 / 3D 仪表台（与 2D 簇重合）/ 单手一根杆
+
+用户对 `features/feature_cockpit_3d.md` 的分层方案做出三项定夺，本条一次性实施完毕：① 本轮做 L1+L2（不是先只做 L1）；② L2 走「第一人称显示 3D 仪表台」的反转，正视时 3D 仪表台与 2D 像素簇**重合**；③ L3 体素风的「一只手 + 一根杆」形态接受，不做第二只手、不做手指细节。
+
+### 语义：两个相反极性并存，必须写在代码里
+
+| 组件 | 可见性判据 | 含义 |
+|---|---|---|
+| `CockpitPanel`（3D 仪表台） | `visible = _base_visible`（**非蓝图即显**） | 第一人称即显示；正视时它的投影正好落在 2D dash 矩形内被完全遮住 = 「重合」 |
+| `CockpitInterior`（环绕框/杆手） | `visible = _base_visible and active`（`active` = 座舱内视） | 只在座舱视角显示，追尾/后视/地图隐藏 |
+
+两者极性相反，由 `aircraft_camera._set_exterior_hidden()` 的**同一个**子节点遍历循环驱动。**收益点是环顾与低头，不是正视**：正视时 3D 仪表台被不透明 2D 簇完全盖住；自由观察 / 低头时 2D 簇按既有规则（`flight_instrument_hud.gd:181` `_cockpit.visible = fp`）自动隐藏，3D 仪表台接管画面。
+
+### L2 面板几何：从 2D dash 的像素矩形反解
+
+四个常量成为单一事实源（`cockpit_panel.gd`）：`PANEL_W 0.98` / `PANEL_H 0.215` / `PANEL_POS (0, 0.75, −4.15)` / `PANEL_TILT_DEG −27.8`，SubViewport `768×168` @ 30 Hz 不透明。反解思路：先读 2D dash 板在 720p 下的矩形，用 `AircraftCamera` 的 82° FOV 反推「距眼多远、多宽、多少倾角才能四角落在同一像素」，再让 `CockpitInterior` 的承托板尺寸**全部派生于这组常量**（`DASH_POS` / `PLATE_SIZE` 都在 `CockpitPanel.PANEL_*` 上算），面板一换位承托板自动跟随。
+
+对齐容差与实测（窗口档 `cockpit_align_probe`，四角目标 / 实测偏差）：
+
+```
+TL(373.7,572.1)  TR(906.3,572.1)   实测偏差 0.2~0.3 px（软断言 ±12 px）
+BL(323.7,726.8)  BR(956.3,726.8)
+```
+
+### L1/L3 内装：39 盒 / 9 材质 / 蓝图机零几何
+
+`scripts/flight/cockpit_interior.gd`（`CockpitInterior extends Node3D`）挂 `Aircraft` **直接子节点**（相机只遍历一层），节点原点 = 相机眼位 `AircraftCamera.COCKPIT_OFFSET`，全部坐标眼位相对。L1 22 盒（顶檐 / 后拱 / 导轨 / A 柱 / 侧 console / 金属压条 / 两只红杆 / 通风栅 / 地板 / 椅背 / 座垫 / 头枕 / 后隔板 / 两块踏板）、L2 12 盒（承托板 + 上暗缝 + 下暗缝 + 下唇 + 6 螺钉 + 2 支架）、L3 5 盒（杆座 / 杆身 / 握把 / 手 / 小臂）。`cast_shadow` 全关（舱内无直射收益，省一遍 shadow pass）。
+
+### R1：座舱相机 12 m 稳态滞后（既有缺陷，本轮必修）
+
+指数阻尼对匀速目标的稳态滞后 = v/rate，`rate` 在 `dist > TRANSITION_DIST(2 m)` 时跌到 `RATE_FAR = 4` → 50 m/s 滞后 **12.09 m**、55 m/s **13.30 m**（600 帧数值模拟）。3D 面板距眼只有 0.85 m，滞后十几米会把面板投影缩到 1/14 并甩到画面中部——「与 2D 簇重合」在数学上就不可能。试过「按机体速度前馈一帧位移」：不够，无头下 `_process` 只有 20~30 Hz，前馈与物理帧错拍仍有 4 m 级锯齿。**根子上不该给座舱加位移阻尼**（真人头靠在头枕上，眼位与机体是刚性关系）：座舱两模式位置改为每帧**刚性吸附** `global_position = target.origin`，姿态仍走 slerp。代价：进座舱是**硬切**（原来 1.5 s 的 16 m 飞入动画消失），出座舱仍平滑——`flight_view_probe ④` 因此劈成两条断言（进 ≥90% 刚性吸附 / 出 <95% 平滑）。
+
+### 白屏（阻塞级，双因叠加）
+
+① 路径式 `ViewportTexture.viewport_path` 在材质资源上解析失败；② 材质先挂网格、后补 `emission_texture`，编出的「无纹理」变体不会重编译 → emission 退化成纯白；叠加 albedo 也是白贴图 = 满屏白。修法三件套：`shading_mode = UNSHADED` + `albedo_texture = _subviewport.get_texture()`（直接引用，不走路径）+ **材质带纹理一次成形**（在 `set_surface_override_material` 之前赋好），`render_target_update_mode` 移到 `add_child(_subviewport)` 之后，首帧后再重绑一次 albedo。闸：窗口档读屏幕像素，四角最亮通道 **0.173~0.275 < 0.62**（白屏是 1.0）；无头只验「取消绑定失效」那一半。
+
+### HUD 让位（顺带修）
+
+自由观察（底层为座舱）时 `_is_first_person()` 返回 false，卡片会从左上跳回顶部居中，正好压在 3D 仪表台上。判据与相机/内装显隐**统一用 `AircraftCamera.is_cockpit_view()`**，避免「2D 让位而卡片不让位」的错配。
+
+### 抖动口径（不动 SHAKE_AMP）
+
+`SHAKE_AMP 0.05` 在 0.85 m 处产生 ±20 px（巡航）/ ±36.6 px（满油门）位移。判定：**3D 内装随相机抖、2D 簇不抖**是正确观感（座舱是「世界」，HUD 是「玻璃上的读数」），玩家可用 `FlightSettings.camera_shake` 关掉；「抖动开 = 生命感 / 关 = 对齐最准」写进文案。承托板因此把板顶沿藏进 2D dash 带（549 > dash 上沿 538.67），满油门峰值只剩 ≤27 px 深色板沿呼吸（旧方案 48.3 px，亮银条会闪成 6–13 Hz 亮线，故受光条语义交给贴图 `texture y8..11`、3D 只留暗缝）。
+
+### 验证
+
+- `tests/cockpit_interior_probe.gd`（无头）**28 PASS**：装配与预算（39 盒 / 9 共享材质 / 全不投影 / 原点=眼位 / 枢轴=面板中心 / 同倾角 / 蓝图机零几何）、可见性状态机 7 条、L3 方向符号与微颤幅度、杆不挡面板（净空 0.221 m）、相机吸附（容差 2.0 m，拦 39 m 级回归）。
+- `tests/cockpit_align_probe.gd`（无头 + 真投影）**16 PASS**：材质绑定四闸（unshaded / albedo 是 ViewportTexture / 尺寸 768×168 / emission 关闭）、2D dash 未变形（分数量 0.2518）、四角投影 ±12 px、板沿与 2D 簇包络关系、可见性反转三闸。
+- `tests/cockpit3d_shot.gd`（窗口）10 张图 + 白屏像素闸 + 蓝图机对照，fails=0。
+- `flight_panel_shot` 的「3D 面板在座舱视角可见」断言按 L2 反转更新；`flight_view_probe` ④ 按「进硬切 / 出平滑」重写。
+- 全量回归 49 探针（38 无头 + 11 窗口）**0 FAIL**，`user://` 逐字节还原。
+
+### 踩坑（可复用）
+
+1. **`get_tree().process_frame` 在节点 `_process` 之前发出**：`await process_frame` 后立刻读相机位姿，读到的是**上一帧**的值。实测「进座舱首帧位移 0.00 m」，把一条刚写好的断言判成 FAIL。测单帧位移必须 `await` 至少 2 次，或用确定性判据（瞬移后看是否贴回）。
+2. **无头根视口是 1280×1280 正方形**：`unproject_position` 在无头下不算真投影，四角断言全偏 376~499 px。探针开头必须 `get_window().size = Vector2i(1280, 720)` 再等一帧。
+3. **脚本类 `new()` 的节点名是 `@Node3D@3325`**：`find_child("CockpitInterior")` 静默返回 null（不报错），必须按**类型**遍历 `get_children()`。`find_children("*", "MeshInstance3D", true, false)` 的第四个参数 `owned` 必须给 false，否则编辑器外创建的节点全被过滤掉。
+4. **帧数 ≠ 时间（第二次踩）**：引擎 0.3 油门一直在推，全量回归下流式队列一忙单帧可达 100~200 ms，「等 90 帧让视角阻尼收敛」可能横跨十几秒 → 飞机滑出探针平台摔成残骸 → D-056 自动归位把玩家弹回出生点 → 断言报成「座舱仪表簇不可见」这种**完全误导**的失败。等待真实时间过程一律 `create_timer`（墙钟），并在依赖「人还在座舱」的段落前加前置守卫，把「意外坠机」如实报出来。
+5. **本机窗口档单帧 delta ≈ 62 ms（约 16 fps）**：协程恢复与节点 `_process` 并非一一对应（实测前 3 次 `process_frame` 读到同一坐标、第 4 次才跳 3.71 m），所以「首帧位移」这类量要取 6 次 `process_frame` 的窗口，并用「硬切 100% vs 阻尼 ≤55%」这种量级差做阈值（取 95%），不要取 40% 这种会被帧率打穿的窄区间。
+6. **拍摄光照：`_time = 0` 是黎明不是正午**。`sun = sin(PI·t/600)`，t=0 时 sun=0 → `light_energy 0.2`（全天最低）、`ambient 0.35`、天幕 DUSK，且主光 `rotation.x = lerpf(-85,-10,0) = −85°` 属病态角度。取证图必须拨 `dn.set_weather(CLEAR)`（钉住天气，`_weather == -1` 时按 `_elapsed / WEATHER_SLOT(150 s)` 自动轮换，跨槽会让整屏半数像素变化）+ `dn._time = DAY_LENGTH * 0.5` + `_apply_lighting()`。第一轮十张图全是黎明，「板像黑墙」有一半是欠曝造成的假象。
+7. **`M_METAL`（metallic 0.55 / roughness 0.35）在无 IBL 环境里风险高**：本项目 `Environment` 是 `background_mode = 1`（纯色）+ `ambient_light_source = 2`（颜色）、无 Sky/反射探针。若正午读成黑螺钉，改 `_make_mat(Color(0.62,0.65,0.70), 0.15, 0.45)`——不影响盒数/材质数/探针。
+8. **A 柱不能照抄 2D 的 `PILLAR_TOP_W = 44 px`**：那是画在屏幕中央附近的装饰性收纳边，按它布柱会让两根柱子在中线并拢成「Λ」把视野劈成两半（首轮取证实测 3D 框占了 1/3 屏）。真实立柱在风挡两侧边角，柱宽 0.052 m 在 1.29 m 处张角 2.3°（17 px），两根合计 3.1% ≤ 7%，中线 ±200 px 内零 3D 几何。
+9. **后隔板宽度要按视场算，不要凭感觉**：82° 竖直 FOV + 16:9 → 水平半角 57°，在 1.10 m 处要 ±1.70 m 才铺满；2.30 宽漏两条天空、3.40 仍漏右角一小块，最终 4.40（留 0.5 m 余量）。两轮截图才收敛——回望视角的漏光靠想象算不出来。
+10. **`scripts/flight/look_down.gd` 是作废路线**：全库零引用的残留（自建一个「低头」相机层），L2 落地后彻底没有存在理由，文件头已加 ⚠️ 作废横幅，禁止接线。

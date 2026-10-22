@@ -74,9 +74,11 @@ func _run() -> void:
 	var group_span := World.LOW_RADIUS / World.LOW_GROUP_CHUNKS
 	var full_groups := (group_span * 2 + 2) * (group_span * 2 + 2)
 	var got := low.group_count()
-	_check(got > 0, "A2 低模环已生成组（%d 组）" % got)
-	_check(got <= full_groups,
-		"A2 低模组数不超过窗口上限（%d ≤ %d）" % [got, full_groups])
+	# 下限 60：真实实现稳定在 77~100 组（中心是否对齐组边界决定 9~10 组/轴，
+	# 再减去被高模方形整组覆盖的那几组）。不写死精确值，免得每次实现微调都红。
+	var min_groups := 60
+	_check(got >= min_groups and got <= full_groups,
+		"A2 低模组数落在窗口区间内（%d ≤ %d ≤ %d）" % [min_groups, got, full_groups])
 	# 高模方形（±(LOAD_RADIUS+UNLOAD_PAD) 区块 = ±80 格）覆盖的组必须整组不出
 	# 网格：中心组整组落在里面，必须被跳过——否则 4 m 粗网格会从精细地形里
 	# 穿出来（看到尖刺）。用「中心组原点有没有 MeshInstance3D」直接验。
@@ -95,29 +97,84 @@ func _run() -> void:
 	print("INFO 网格数：高模 %d 块 + 低模 %d 组 ≈ %d 次绘制（未含发光面/碰撞体）"
 		% [world._chunks.size(), low.group_count(), world._chunks.size() + low.group_count()])
 
-	# ── B 低模几何：顶点高度与噪声地形逐点相等 ─────────────────
+	# ── B 低模几何：**全量**逐点校验（不抽样）──────────────────
+	# 每组 × 每个顶点（77~100 组 × 289 ≈ 2.2~2.9 万点，一次约 0.3~0.5 s）：
+	#   ① y == max(world.get_surface_height(wx,wz), SEA_LEVEL)，误差 0；
+	#   ② 物理边界：SEA_LEVEL-1 ≤ y ≤ CHUNK_SIZE.y-8（地形高度上限）；
+	#   ③ 组足迹互不重叠（重叠 = 同一片天空里两块网格，即「悬空组」）。
+	# ① 就足以钉死「整组用了旧高度 / 没重建」：那些顶点的 wx/wz 与真实高度对不上。
+	# ②③ 再堵「网格挪了位置但自身自洽」那一类。原先只抽 8 组，漏掉一个就是玩家
+	# 抬头看见天上悬着一块草皮。
+	# 为什么不用「中心列 + 40」：真实山脉里一个 64 m 组从谷底跨到山脊能差 100+ 格
+	# （MAX_SLOPE=6 格/格 → 32 格可差 192 格），拿它当硬断言会假红；该指标改为
+	# 下面的 INFO 打印，只作记录。
+	# 口径注记：顶点 y 是**水面抬升后**的高度（低模把海底抬到海平面，否则海是一组
+	# 深坑），故比对必须带 maxi(..., SEA_LEVEL)，用裸 get_surface_height 会让
+	# 所有水下列假红。
 	var meshes := _low_meshes(low)
 	_check(meshes.size() == got, "B0 低模 MeshInstance3D 数 = 组数（%d/%d）"
 		% [meshes.size(), got])
 	var mismatch := 0
 	var checked_verts := 0
-	var scanned := 0
+	var bounds_bad := 0
+	var worst_over := 0.0
+	var bad_at := Vector3i.ZERO
+	var bad_want := 0
+	var half_group := int(float(World.LOW_GROUP_CHUNKS * World.CHUNK_SIZE.x) * 0.5)
+	var y_cap := float(World.CHUNK_SIZE.y - 8)   # 地形高度上限（_terrain_height 的 clamp）
 	for mi: MeshInstance3D in meshes:
-		if scanned >= 8:
-			break
 		var verts := _verts(mi)
 		if verts.is_empty():
 			continue
-		scanned += 1
+		var ymin := INF
+		var ymax := -INF
 		for v in verts:
 			var wx := roundi(mi.position.x + v.x)
 			var wz := roundi(mi.position.z + v.z)
 			var want := maxi(world.get_surface_height(wx, wz), World.SEA_LEVEL)
 			checked_verts += 1
 			if want != roundi(v.y):
+				if mismatch == 0:
+					bad_at = Vector3i(wx, roundi(v.y), wz)
+					bad_want = want
 				mismatch += 1
+			ymin = minf(ymin, v.y)
+			ymax = maxf(ymax, v.y)
+		# 中心列作参照，只用于 INFO：真实山脉里一个 64 m 组从谷底跨到山脊
+		# 可以差 100+ 格（MAX_SLOPE=6 格/格，32 格就是 192 格），拿它当硬断言
+		# 会假红。硬断言只用「地形上限」与「海平面下限」这两个物理边界。
+		var center_y := maxi(
+			world.get_surface_height(roundi(mi.position.x) + half_group,
+				roundi(mi.position.z) + half_group),
+			World.SEA_LEVEL)
+		worst_over = maxf(worst_over, ymax - float(center_y))
+		if ymin < float(World.SEA_LEVEL - 1) or ymax > y_cap:
+			bounds_bad += 1
+	# 组足迹不得重叠：两条重叠的网格会在同一片天空里打架（悬空/重影的直接证据）
+	var footprints: Array[Rect2i] = []
+	for mi: MeshInstance3D in meshes:
+		footprints.append(Rect2i(roundi(mi.position.x), roundi(mi.position.z),
+			World.LOW_GROUP_CHUNKS * World.CHUNK_SIZE.x,
+			World.LOW_GROUP_CHUNKS * World.CHUNK_SIZE.z))
+	var overlaps := 0
+	for i in footprints.size():
+		for j in range(i + 1, footprints.size()):
+			if footprints[i].intersects(footprints[j]):
+				overlaps += 1
+	var detail := ""
+	if mismatch > 0:
+		detail = "；首个不符：列 (%d,%d) 顶点 y=%d 应为 %d" % [bad_at.x, bad_at.z, bad_at.y, bad_want]
 	_check(checked_verts > 0 and mismatch == 0,
-		"B1 低模顶点高度与噪声地形逐点相等（%d 个顶点，误差 0 m）" % checked_verts)
+		"B1 低模顶点高度与噪声地形逐点相等（全量 %d 点 / %d 组，误差 %d）%s"
+			% [checked_verts, meshes.size(), mismatch, detail])
+	_check(bounds_bad == 0,
+		"B1b 每组高度都在物理边界内（SEA_LEVEL-1 .. %d，违规 %d 组）"
+			% [int(y_cap), bounds_bad])
+	_check(overlaps == 0,
+		"B1c 组足迹互不重叠（重叠 %d 对；重叠=同片天空两块网格，即「悬空组」）"
+			% overlaps)
+	print("INFO 组内「顶点最高 − 中心列」最大 %.0f 格（含山脉，只作记录；不作断言）"
+		% worst_over)
 
 	# 格内插值误差：4 m 采样 → 用格心双线性插值 vs 真值。平原地带（出生点
 	# 附近、坡度 ≤1 格/格）应 ≤ 4 m——D-064 的「低模高度误差 ≤4 m」口径。

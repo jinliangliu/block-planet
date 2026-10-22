@@ -84,7 +84,8 @@ scripts/
 │   ├── landing_quality.gd       # 接地质量连续评分（U-7/D-061，纯逻辑）
 │   ├── cockpit_instruments.gd   # ★ 座舱 2D 像素仪表板 + 座舱内装（1038 行）
 │   ├── flight_director.gd       # ★ 飞行指引十字（D-054，335 行）
-│   ├── cockpit_panel.gd         # 3D 仪表板（SubViewport → ViewportTexture，低头可见）
+│   ├── cockpit_panel.gd         # 3D 仪表台（SubViewport 768×168 → ViewportTexture，D-065 起第一人称即显示）
+│   ├── cockpit_interior.gd      # ★ 3D 座舱内装 L1+L3（39 盒 / 9 共享材质，D-065）
 │   ├── flight_markers.gd        # 世界 3D 引导（目标双环 / 地面箭头 / 3° 下滑道双轨）
 │   ├── instrument_dial.gd       # 通用圆形仪表控件（3D 面板用）
 │   └── alert_beeper.gd          # 程序生成蜂鸣码播放器（零语音资产）
@@ -289,17 +290,22 @@ scripts/
 
 ## 7. 座舱设计（重点）
 
-### 7.1 结构性结论：座舱是"画的"，不是"建的"
+### 7.1 结构性结论：座舱是「2D 画的 + 3D 建的」双层
 
-`Aircraft` **没有座舱内装几何**。第一人称的实现是三步：
+> **D-065 起本节结论已改写**。原结论是「座舱是画的，不是建的：`Aircraft` 没有座舱内装几何，环顾时框不动、低头看不到仪表台」（U-1 结构性项）。D-065 用 L1 环绕框 + L2 3D 仪表台 + L3 杆手补上了 3D 那一层；下面的「三步」里第 1、2 步不变，第 3 步从「唯一实现」变成「像素读数层」。
 
-1. **隐藏整机外观**（`set_cockpit_interior(true)`）——因为眼位 `(0, 1.15, -3.4)` 落在机身盒内部，而机翼（y 1.335..1.785）正压在视平线上。不隐藏的话，"第一人称"看到的先是自己的机翼再是世界（用户实测截图：机翼横贯全屏）。
-2. **相机放进机身内**（见 §6）。
-3. **一块全屏 2D `Control` 画整个座舱**（`CockpitInstruments`）——框体、仪表板、六件仪表、磨损，全部是 `draw_rect` / `draw_colored_polygon` / `draw_circle(antialias=false)` 拼出来的硬边像素。
+第一人称 = **两层叠加**：
 
-由此推出的必然结果（不是 bug）：**环顾时框不动**（2D 层不参与 3D 相机）、**低头看不到仪表台**（没有 3D 内装）。这两条是审核报告 U-1 的结构性项，待定路线（补 3D 内装 / 锁死环顾 / 维持现状）。
+1. **隐藏整机外观**（`set_cockpit_interior(true)`）——眼位 `(0, 1.15, −3.4)` 落在机身盒内部，机翼（y 1.335..1.785）正压视平线。不隐藏的话第一人称先看到自己的机翼横贯全屏。
+2. **相机放进机身内**（见 §6），座舱两模式位置**刚性吸附**眼位（D-065，见 §7.9）。
+3. **两层画座舱**：
+   - **2D 像素层** `CockpitInstruments`：屏幕空间的框体 + dash + 六件仪表 + 磨损，`draw_rect` / `draw_colored_polygon` / `draw_circle(antialias=false)` 硬边像素。锚屏幕、**不参与 3D 相机**，尺寸纪律见 §7.8。
+   - **3D 内装层** `CockpitInterior`（39 盒 / 9 共享材质，D-065）+ `CockpitPanel`（3D 仪表台）：挂机体、参与相机，所以**环顾时有视差、低头能看到仪表台与杆手**。
+4. **可见性极性相反**（写死在代码里，勿"统一"）：
+   - `CockpitInterior.visible = _base_visible and active`（`active` = 座舱内视）
+   - `CockpitPanel.visible = _base_visible`（非蓝图即显）——正对前方时它的投影落在 2D dash 矩形内被完全遮住，这就是「重合」的字面含义；**收益点是环顾与低头，不是正视**。
 
-`CockpitPanel`（3D 仪表板，SubViewport → ViewportTexture）是**另一条独立路径**：它挂在机体上、低头可见，但第一人称下也被隐藏（读数已由 2D 簇接管），只在追尾/环顾时随 3D 视野出现。蓝图试飞机无座舱罩，按契约不建几何。
+由此推出的必然结果：2D 簇在自由观察 / 低头时按 `flight_instrument_hud.gd:181`（`_cockpit.visible = fp`）整体让位，由 3D 仪表台接管；正视时 2D 簇仍是权威读数层。蓝图试飞机无座舱罩，按契约**两层都不建**。
 
 ### 7.2 座舱框体（2D 像素内装）
 
@@ -482,15 +488,23 @@ s=1（1280×720）实测几何：
 | 追尾四角 | 座舱隐藏 |
 | 右上角信息列 | 座舱隐藏（小地图 / 模式徽章 / 天数·时钟·天气行全收，D-053 用户圈注取消）；徒步仍全部保留 |
 
-### 7.7 3D 座舱面板（`CockpitPanel`，低头可见）
+### 7.7 3D 座舱面板（`CockpitPanel`，第一人称与 2D 簇重合）
 
-`SubViewport(1024×640)` → `ViewportTexture` 贴到座舱仪表板平面（0.32×0.20 m，位于 `(0, −0.35, −1.7)`，绕 X 上仰 25°），自发光（背光也清晰可读）。
+**几何由 2D dash 的像素矩形反解**（D-065），四个常量是单一事实源，`CockpitInterior` 的承托板尺寸全部派生自它们：
 
-- 上排 4 圆：空速 / 姿态仪 / 高度 / 航向
-- 下排 3 圆：转弯协调仪 / 垂直速度 / HSI（含 CDI 偏差条）
-- 底部 4 数字条（LCD）：离地 / 转速 / 燃油 / 襟翼·起落架
+| 常量 | 值 | 说明 |
+|---|---|---|
+| `PANEL_W` / `PANEL_H` | 0.98 / 0.215 m | 反解自 720p 下 2D dash 板矩形 |
+| `PANEL_POS` | `(0, 0.75, −4.15)` 机体局部 | 距眼 0.85 m |
+| `PANEL_TILT_DEG` | −27.8° | 面板法线朝眼 |
+| `VP_SIZE` | 768 × 168 @ 30 Hz，不透明 | SubViewport 内容 |
 
-第一人称下被隐藏（读数已由 2D 簇接管）；蓝图试飞机按契约不建几何。
+- 材质必须 `shading_mode = UNSHADED` + `albedo_texture = _subviewport.get_texture()`（**直接引用，不用 `viewport_path`**），且**带纹理一次成形**——先挂网格后补纹理编出的「无纹理」变体不会重编译，表现为满屏白（D-065 白屏事故）。
+- 盘面：上排 4 圆（空速 / 姿态 / 高度 / 航向）+ 下排 3 圆（转弯协调 / 升降率 / HSI），均 92×92 @ y=10、x=8+110i；底部 4 条 LCD（离地 / 转速 / 燃油 / 襟翼·起落架）175×48 @ y=108、x=10+191i。
+- `PANEL_*` 与 2D 簇的贴合容差：四角投影目标 TL(373.7,572.1) TR(906.3,572.1) BL(323.7,726.8) BR(956.3,726.8)，实测偏差 **0.2~0.3 px**（`cockpit_align_probe` 软断言 ±12 px）。
+- **可见性（D-065 反转）**：第一人称即显示；正视时被不透明 2D 簇完全遮住 → **不改变任何 2D 观感**，只在环顾/低头时兑现价值。蓝图试飞机按契约不建几何。
+
+承托板（`CockpitInterior` L2 的 12 盒：板 + 上/下暗缝 + 下唇 + 6 螺钉 + 2 支架）的四周边距 `DASH_RIM = 0.05`，板顶沿藏在 2D dash 带内（549 > dash 上沿 538.67）。抖动口径见 §7.10。
 
 ### 7.8 座舱尺寸演进（纪律）
 
@@ -503,6 +517,27 @@ s=1（1280×720）实测几何：
 | D-053 | **盘排高度 −1/3**（用户圈注） | **25.2% / 14.1%** |
 
 ⚠️ 用户明确要求过一次"缩小"，**改版不得借"战雷化"把尺寸顶回去**。基准尺寸维持 D-051 量级。
+
+### 7.9 座舱相机：位置刚性吸附（D-065，R1 缺陷修复）
+
+座舱两模式（`FIRST_PERSON` / 自由观察且底层为座舱）下，`AircraftCamera._process` 不再走位移阻尼：
+
+```gdscript
+if is_cockpit_view():
+    global_position = target.origin          # 刚性吸附眼位
+else:
+    var dist := global_position.distance_to(target.origin)
+    var rate := lerpf(RATE_FAR, RATE_NEAR, clampf(1.0 - dist / TRANSITION_DIST, 0.0, 1.0))
+    global_position = global_position.lerp(target.origin, _damp_rate(rate, delta))
+```
+
+**为什么必修**：指数阻尼对匀速目标的稳态滞后 = v/rate，`dist > TRANSITION_DIST(2 m)` 时 rate 只有 `RATE_FAR = 4` → 50 m/s 滞后 12.09 m、55 m/s 滞后 13.30 m。3D 面板距眼 0.85 m，滞后十几米会把面板缩到 1/14，「与 2D 簇重合」在数学上不可能。姿态仍走 slerp（旋转平滑是舒适度需要，与位置无关）。
+
+**代价（已定夺接受）**：按 C 进座舱是**硬切**（原 1.5 s / 16 m 的飞入动画取消），出座舱仍平滑。`flight_view_probe ④` 因此拆成两条：进 ≥90%（刚性）、出 <95%（非硬切）。
+
+### 7.10 抖动口径（D-065 定夺）
+
+`SHAKE_AMP = 0.05` 在 0.85 m 处 = **±20 px（巡航）/ ±36.6 px（满油门）**。判定：**3D 内装随相机抖、2D 簇不抖**是正确观感——座舱是「世界」，HUD 是「玻璃上的读数」；玩家可用设置里的「镜头抖动」关掉（关 = 对齐最准，开 = 生命感）。`SHAKE_AMP` 维持 0.05 不动；承托板靠「板顶沿藏进 2D dash 带」把峰值残余压到 ≤27 px 深色板沿呼吸（旧方案 48.3 px）。
 
 ---
 
@@ -743,8 +778,9 @@ bash tmp/run_regression.sh          # 日常：无头逻辑探针（快）
 bash tmp/run_regression.sh full     # 验收：无头 + 窗口截图（须目检截图）
 ```
 
-当前 **43 个探针**（33 无头 + 10 窗口截图），最近一次全量 **0 FAIL**、`[user://] RESTORED_OK`。
+当前 **49 个探针**（38 无头 + 11 窗口截图），最近一次全量 **0 FAIL**、`[user://] RESTORED_OK`。
 D-061 新增 `landing_quality_probe`（45 断言：A 评分边界 19 + B 任务改造 13 + C 呼号边沿 7 + D 端到端落地 6）。
+D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状态机 / L3 符号 / 微颤 / 净空 / 相机吸附）、`cockpit_align_probe`（16 断言：材质绑定四闸 / 2D dash 未变形 / 四角投影 ±12 px / 可见性反转）、`cockpit3d_shot`（窗口 10 图 + 白屏像素闸）。
 
 飞行相关探针：
 
@@ -754,6 +790,9 @@ D-061 新增 `landing_quality_probe`（45 断言：A 评分边界 19 + B 任务�
 | `flight_instruments_probe` | 12 项仪表读数与警告状态机 |
 | `cockpit_instruments_probe` | **129** 条：四档视口几何、比例恒定、拆字、俯仰钳制 |
 | `cockpit_instruments_shot` | 窗口截图取证（17 条） |
+| `cockpit_interior_probe` | **28** 条（D-065）：39 盒 / 9 共享材质 / 全不投影 / 可见性状态机 / L3 方向与微颤 / 杆不挡面板 / 相机刚性吸附 |
+| `cockpit_align_probe` | **16** 条（D-065）：材质绑定四闸 / 2D dash 未变形 / 3D 面板四角投影 ±12 px / 可见性反转 |
+| `cockpit3d_shot` | 窗口 10 图 + 白屏像素闸（四角最亮通道 < 0.62）+ 蓝图机零几何 |
 | `flight_director_probe` | **51** 条：导引律、模式判据、不出屏、标签动作词 |
 | `flight_director_shot` | 三态截图取证（对准 / 偏航+偏高 / 起飞） |
 | `flight_hud_shot` | 真实飞行链路 HUD（39 条） |

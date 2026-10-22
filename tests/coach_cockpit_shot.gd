@@ -40,6 +40,14 @@ func _wait_physics(n: int) -> void:
 		await get_tree().physics_frame
 
 
+## 墙钟等待（秒）。**不要用 `_wait(帧数)` 等「视角阻尼收敛」这类真实时间过程**：
+## 引擎 0.3 油门一直在推，而全量回归下流式队列一忙单帧可达 100~200 ms，
+## 90 帧可能横跨十几秒 —— 飞机早已滑出探针平台摔成残骸，D-056 自动归位把
+## 玩家弹回出生点，于是「仪表簇不可见」这种假失败（2026-10-22 全量回归实测）。
+func _wait_sec(t: float) -> void:
+	await get_tree().create_timer(t).timeout
+
+
 func _ready() -> void:
 	await _run()
 
@@ -114,7 +122,7 @@ func _run() -> void:
 	_check(_craft.is_interior_view(),
 		"座舱视角隐藏 3D 外部机模（D-050，不再看见机翼）")
 	cam.toggle_first_third()   # → 追尾
-	await _wait(90)   # 视角阻尼收敛，与 flight_view_probe 同等待时长
+	await _wait_sec(1.5)   # 视角阻尼收敛（墙钟，不用帧数：见 _wait_sec 注释）
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE,
 		"C 键切到追尾（② 追尾几何取证的起点）")
 	_check(not _craft.is_interior_view(),
@@ -149,10 +157,19 @@ func _run() -> void:
 
 	# ── 切座舱 ──
 	cam.toggle_first_third()   # → 第一人称座舱
-	await _wait(90)   # 视角阻尼收敛，与 flight_view_probe 同等待时长
+	await _wait_sec(0.4)   # 进座舱是刚性吸附（D-065），只等 HUD 完成一次重布局
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
 		"C 键切回第一人称座舱")
 	await _wait_physics(2)
+	# 前置守卫：这一段的三条断言全依赖「人还在座舱里」。少了这条，一次
+	# 意外坠机（自动归位 → 步行 HUD）会被报成「仪表簇不可见」这种误导性失败。
+	var on_board := _player.is_riding() and is_instance_valid(_craft) and not _craft.is_wrecked()
+	_check(on_board, "座舱段前置：玩家仍在座舱内（riding=%s）" % str(_player.is_riding()))
+	if not on_board:
+		SaveGuard.restore()
+		print("COACH_COCKPIT_DONE fails=%d" % _fails)
+		get_tree().quit(1)
+		return
 
 	# ── ③ 座舱：卡片与座舱仪表簇（D-047）零重叠 ──
 	# D-047 起玻璃 HUD 底部三行文字带被 CockpitInstruments 仪表簇（地平仪 +

@@ -96,12 +96,14 @@ func _run() -> void:
 	# 座舱，无需按键；本断言是 D-049 的窗口侧回归闸。
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
 		"③ 登机默认第一人称座舱（D-049）")
-	# D-050：座舱内视——3D 外部机模与 3D 仪表盘都隐藏：座舱眼位在机身盒
-	# 内部，不隐藏的话机翼横贯全屏（用户实测）；读数由 2D 像素座舱框 +
-	# 仪表簇接管，3D 面板悬在半空只会突兀。
+	# D-050：座舱内视——3D 外部机模隐藏：座舱眼位在机身盒内部，不隐藏的话
+	# 机翼横贯全屏（用户实测）。
 	_check(craft.is_interior_view(), "③ 座舱内视：3D 外部机模隐藏（D-050）")
-	_check(main_scene._cockpit_panel != null and not main_scene._cockpit_panel.visible,
-		"③ 座舱 3D 仪表盘在座舱视角隐藏（读数交给 2D 仪表簇）")
+	# L2 反转（feature_cockpit_3d §6）：座舱 3D 仪表台**不再**随内视隐藏——它就
+	# 装在仪表台位置，正视时与不透明的 2D 簇完全重合（被 2D 遮住），环顾/低头时
+	# 2D 簇自动让位、由它接管画面。这里断言它「在」而不是「藏」，与反转前相反。
+	_check(main_scene._cockpit_panel != null and main_scene._cockpit_panel.visible,
+		"③ 座舱 3D 仪表台在座舱视角显示（L2 反转：与 2D 簇重合）")
 	await _frames(60)
 	await _shot("flight_panel_cockpit.png")
 

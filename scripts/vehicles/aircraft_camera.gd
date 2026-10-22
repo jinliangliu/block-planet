@@ -112,24 +112,37 @@ func setup(craft: Aircraft, player: Node3D) -> void:
 ## 看到的先是自己的机翼再是世界（用户实测截图：机翼横贯全屏）。座舱内饰
 ## 由 2D 像素座舱框 + 仪表簇提供（cockpit_instruments.gd 的 _draw）。
 ## 所有模式切换都经 set_mode；装配/激活各同步一次，覆盖登机与下机旁路。
-## 公开：main 在「相机激活后才挂上机体的晚到者」（座舱 3D 面板）装载后
+## 公开：main 在「相机激活后才挂上机体的晚到者」（座舱 3D 面板/内装）装载后
 ## 补调一次，把晚到者纳入同一份规则。
 func apply_cockpit_interior() -> void:
-	var fp := _mode == ViewMode.FIRST_PERSON or (
+	_set_exterior_hidden(is_cockpit_view())
+
+
+## 当前是否「座舱内视」：第一人称，或以第一人称为底层的自由观察。
+## 提成公开谓词是为了一处定义两处用——机体外观显隐与座舱相机前馈（L2 对齐）
+## 必须基于同一个事实，否则「面板藏着但相机已经按座舱处理」这类错配查不出来。
+func is_cockpit_view() -> bool:
+	return _mode == ViewMode.FIRST_PERSON or (
 		_mode == ViewMode.FREE_LOOK and _base_mode == ViewMode.FIRST_PERSON)
-	_set_exterior_hidden(fp)
 
 
-## 按「是否座舱内视」同步机体外观与座舱 3D 面板可见性。只切 visible：
-## 碰撞、气动、录制、逻辑不受影响。3D 面板（D-034）经 set_interior_view
-## 切换——它自带蓝图机「无座舱罩」契约，直接写 visible 会把契约掀掉。
+## 按「是否座舱内视」同步机体外观与座舱 3D 内装。只切 visible：碰撞、气动、
+## 录制、逻辑不受影响。
+## 座舱 3D 面板（D-034）**不再经这里**：L2 反转后它在第一人称也要显示（正视时
+## 与 2D 簇重合），只剩「蓝图机无座舱罩」这一个闸门，由面板自己的 setup 收敛。
+## 3D 内装（L1/L3）则在这里驱动，且**极性相反**（内视=true 时显示）——差异写在
+## CockpitInterior.set_interior_view 里，这一层只管把「是否座舱内视」发下去。
 func _set_exterior_hidden(hidden: bool) -> void:
 	if not is_instance_valid(_craft):
 		return
 	_craft.set_cockpit_interior(hidden)
 	for child: Node in _craft.get_children():
-		if child is CockpitPanel:
-			(child as CockpitPanel).set_interior_view(hidden)
+		# 鸭子型而非 `is CockpitInterior`：新增 class_name 后若类缓存没重扫，
+		# 这里会在编译期报「标识符未声明」，把整条飞行相机链路一起带塌
+		# （项目踩过：新增 class_name 后 headless 报未声明，须重扫类缓存）。
+		# has_method + call 也不依赖装配顺序：内装是登机后才挂的晚到者。
+		if child.has_method("set_interior_view"):
+			child.call("set_interior_view", hidden)
 
 
 func set_active(active: bool) -> void:
@@ -273,9 +286,23 @@ func _process(delta: float) -> void:
 		_look_pitch = _damp(_look_pitch, 0.0, RECENTER_RATE, delta)
 	var target := _target_transform(_mode)
 	_update_occlusion(delta, target)
-	var dist := global_position.distance_to(target.origin)
-	var rate := lerpf(RATE_FAR, RATE_NEAR, clampf(1.0 - dist / TRANSITION_DIST, 0.0, 1.0))
-	global_position = global_position.lerp(target.origin, _damp_rate(rate, delta))
+	# 座舱内视：位置**直接吸附**到眼位，不走阻尼（L2 对齐的硬前提）。
+	# 阻尼对匀速目标有稳态滞后 = v/rate，`rate` 在距目标超过 TRANSITION_DIST 时
+	# 跌到 RATE_FAR=4 —— 实测 50 m/s 巡航稳定滞后 12.09 m、55 m/s 13.30 m
+	# （600 帧数值模拟）。3D 仪表台距眼只有 0.85 m，滞后十几米会把面板投影缩到
+	# 1/14 并甩到画面中部，「与 2D 簇重合」在数学上就不可能。
+	# 先试过「按机体速度前馈一帧位移」：不够——无头环境下 _process 只有约 20~30 Hz
+	# （物理 60 Hz），前馈按 process 帧补位移与物理帧错拍，残余仍有 4 m 量级的锯齿。
+	# 根子上就不该给座舱加位移阻尼：真人把头靠在头枕上，眼位与机体是**刚性**关系，
+	# 阻尼只会让座舱在世界里漂。姿态仍走 slerp（旋转平滑是舒适度需要，与位置无关）。
+	# 这个缺陷 D-050 起就存在：整机外观在座舱里被隐藏，玩家看不出自己其实是从座舱
+	# 后方十几米处看世界；2D 读数又是屏幕空间的，所以一直没暴露。
+	if is_cockpit_view():
+		global_position = target.origin
+	else:
+		var dist := global_position.distance_to(target.origin)
+		var rate := lerpf(RATE_FAR, RATE_NEAR, clampf(1.0 - dist / TRANSITION_DIST, 0.0, 1.0))
+		global_position = global_position.lerp(target.origin, _damp_rate(rate, delta))
 	global_transform.basis = Basis(
 		Quaternion(global_transform.basis).slerp(Quaternion(target.basis), _damp_rate(RATE_ROT, delta)))
 	fov = _damp(fov, _mode_fov(), RATE_FOV, delta)

@@ -24,6 +24,9 @@ var _replay: FlightReplay
 ## 飞行仪表 3D 视图（D-034）：座舱 3D 面板（挂飞机下）/ 世界标注（挂世界下），
 ## 随登机创建、下机释放；注册到屏幕仪表 HUD 以便每帧收到同一份读数。
 var _cockpit_panel: CockpitPanel = null
+## 第一人称 3D 座舱内装（L1 环绕框 + L2 仪表台底板 + L3 杆手）：登机时挂到机体下，
+## 下机释放。只显示不吃饭读数（读数仍由 2D 簇与 CockpitPanel 提供）。
+var _cockpit_interior: CockpitInterior = null
 var _flight_markers: FlightMarkers = null
 ## 飞行导航锚点（机场中心 / 出生点）：登机时同时注入 HSI/CDI 与 3D 标注。
 var _mission_anchor := Vector3.ZERO
@@ -237,10 +240,20 @@ func _on_flight_ride_changed(riding: bool) -> void:
 				_cockpit_panel = CockpitPanel.new()
 				craft.add_child(_cockpit_panel)
 				_cockpit_panel.setup(craft)
-				# D-050：面板是「相机激活后才挂上机体」的晚到者——内视规则
-				# （setup/reset_to_cockpit 时）应用时它还不存在，这里补一次，
-				# 座舱视角下隐藏 3D 面板（读数交给 2D 仪表簇）。
-				_flight_camera.apply_cockpit_interior()
+			# L1/L3 座舱内装（3D 环绕框 + 杆手）：与面板同一装配点。
+			# 必须是 Aircraft 的**直接子节点**——相机的 _set_exterior_hidden 只
+			# 遍历一层子节点来找 set_interior_view。顺序 add_child → setup →
+			# apply_cockpit_interior 不可颠倒：setup 末尾故意置 visible=false，
+			# 靠 apply 把首帧的显隐一次定下来，否则会闪一帧裸几何。
+			if _cockpit_interior == null:
+				_cockpit_interior = CockpitInterior.new()
+				craft.add_child(_cockpit_interior)
+				_cockpit_interior.setup(craft)
+			# D-050 / L2：面板与内装都是「相机激活后才挂上机体」的晚到者，内视
+			# 规则（setup/reset_to_cockpit 时）应用时它们还不存在，这里统一补一次。
+			# 必须放在两个装配块**之后**：L2 反转后面板在这一步不再被隐藏，而内装
+			# 要靠它从 visible=false 亮起来。
+			_flight_camera.apply_cockpit_interior()
 			if _flight_markers == null:
 				_flight_markers = FlightMarkers.new()
 				add_child(_flight_markers)
@@ -265,11 +278,16 @@ func _on_flight_ride_changed(riding: bool) -> void:
 	else:
 		_flight_camera.set_active(false)
 		_recorder.stop()
-		# 释放座舱面板与世界标注，并从其屏幕 HUD 注销。
+		# 释放座舱面板、3D 内装与世界标注，并从其屏幕 HUD 注销。
+		# 内装不需要 unregister_view——它不做读数刷新（register_view 只收有
+		# refresh_instruments 的视图）。
 		if _cockpit_panel != null:
 			_hud.instrument_hud().unregister_view(_cockpit_panel)
 			_cockpit_panel.queue_free()
 			_cockpit_panel = null
+		if _cockpit_interior != null:
+			_cockpit_interior.queue_free()
+			_cockpit_interior = null
 		if _flight_markers != null:
 			_hud.instrument_hud().unregister_view(_flight_markers)
 			_flight_markers.queue_free()

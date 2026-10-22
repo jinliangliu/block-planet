@@ -13,4 +13,9 @@ tmp/
 # WorkBuddy session data
 .workbuddy/
 
-
+# Terrain3D 实验资产与上海 DEM：用户定「留工作区、不入库」
+# addons/terrain_3d 是 52 MB 的 GDExtension（每个平台含二进制 + editor/ 双份），
+# 一旦误提交就是一次不可逆的大体积污染；data/ 是 14 MB 的 DEM 瓦片。
+addons/terrain_3d/
+demo/
+data/ASTER_GDEM_V2-Shanghai/

@@ -128,33 +128,51 @@ func _run() -> void:
 	_check(not craft.engine_running, "③ 再按 F 发动机熄火")
 	_check(craft.controls.throttle <= 0.0001, "③ 熄火后油门锁 0（当前 %.3f）" % craft.controls.throttle)
 
-	# ── ④ C视角切换：平滑过渡 + 落位正确 ──
-	# 「不瞬移」真正要防的是切换那一帧的硬切：AircraftCamera.set_active 在激活
-	# 时会直接吸附到目标位姿（global_transform = _target_transform），若这条
-	# 路径被绕过，第一帧就会跨完整程。故必须量「切换后第一帧」的位移。
-	# 阈值按**全程比例**给而非固定米数——固定米数会被任何参数改动打穿
-	# （历史：9m 追尾距标定的 3.0m 被 D-035 的 13m 击穿；D-055 世界抬高 4 倍
-	# 后全程变大，固定 5m 又被 6.51m 击穿）。比例判据与相机/地形参数无关。
+	# ── ④ C视角切换：进座舱刚性吸附 + 出座舱平滑 + 落位正确 ──
+	# D-065（L1/L2 座舱 3D 化）后这条判据必须劈成两半，两侧语义相反：
+	#  · chase → 座舱 = **刚性硬切**（一帧到位）。这是 R1 修复的必然结果：
+	#    指数阻尼对匀速目标的稳态滞后 = v/rate，dist > TRANSITION_DIST 时 rate
+	#    掉到 RATE_FAR=4 → 50 m/s 滞后 12.09 m、55 m/s 滞后 13.30 m。座舱里
+	#    3D 仪表台与 2D 簇要重合、仪表读数要跟机头，12 m 滞后等于全盘失准，
+	#    因此座舱两模式位置改为每帧吸附眼位（姿态仍走 slerp）。
+	#  · 座舱 → chase = 仍走位移阻尼，必须平滑。这才是「不瞬移」的原意：
+	#    防止退出座舱时相机从机身内部弹出去。
+	# 阈值仍按**全程比例**给（历史：9 m 追尾距标定的 3.0 m 被 D-035 的 13 m
+	# 击穿；D-055 世界抬高 4 倍后固定 5 m 又被 6.51 m 击穿）。
 	var pre_toggle := cam.global_position
 	cam.toggle_first_third()   # → 座舱
-	await _frames(1)
+	await _frames(2)   # 必须 ≥2：`process_frame` 在节点 `_process` **之前**发出，
+	# 只等 1 帧读到的是切换前的旧位姿（实测首帧位移 0.00 m，判据恒红）。
+	# 2 帧 = 相机 _process 至少跑过一次，量到的才是「一帧之内走了多远」。
 	var first_frame := cam.global_position.distance_to(pre_toggle)
-	await _frames(120)
+	await _frames(30)
 	var span := pre_toggle.distance_to(cam.global_position)
-	# 首帧位移必须远小于全程（<40%），否则就是硬切。实测全程 ~16.9 m、
-	# 首帧数米（~20%）；真硬切会是 100%。
-	_check(span > 0.5 and first_frame < span * 0.4,
-		"④ 视角切换平滑不瞬移（首帧位移 %.2f m，全程 %.2f m，%.0f%% < 40%%）"
+	_check(span > 0.5 and first_frame >= span * 0.9,
+		"④ 进座舱刚性吸附（首帧位移 %.2f m / 全程 %.2f m，%.0f%% ≥ 90%%）"
 			% [first_frame, span, 100.0 * first_frame / maxf(span, 0.001)])
-	await _frames(90)   # 阻尼收敛（RATE_FAR=4：90 帧 ≈ 1.5 s，残余 < 0.1 m）
+	await _frames(20)   # 座舱已一帧到位，这里只为让座舱内装/仪表簇完成首帧布局
 	var cockpit_expect: Vector3 = craft.global_transform * Vector3(0.0, 1.15, -3.4)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON, "④ C 切到第一人称座舱")
 	_check(cam.global_position.distance_to(cockpit_expect) < 1.5,
 		"④ 座舱相机落位正确（偏差 %.2f m）" % cam.global_position.distance_to(cockpit_expect))
 	await _shot("flight_view_cockpit.png")
 
+	var pre_out := cam.global_position
 	cam.toggle_first_third()   # → 追尾
+	# 采样窗口取 6 个 process_frame 而不是 1 帧：本探针窗口档实测单帧 delta
+	# ≈62 ms（Iris Xe + 全量世界约 16 fps），且协程恢复与相机 `_process` 并非
+	# 一一对应（实测前 3 次恢复读到同一坐标，第 4 次才跳 3.71 m）。1 帧采样
+	# 会读到「还没动」的 0.00 m，断言随之恒红/恒绿。
+	await _frames(6)
+	var out_first := cam.global_position.distance_to(pre_out)
 	await _frames(40)
+	var out_span := pre_out.distance_to(cam.global_position)
+	# 上限 95%（不是 40%）是刻意的：硬切会在**一次更新内**走完 100%，而位移
+	# 阻尼单步最多只走 1-exp(-4·delta)（60 fps 约 6%、62 ms 约 22%），6 次
+	# process_frame 实测约 38%。用 95% 卡「硬切 vs 平滑」这条本质差别。
+	_check(out_first > 0.01 and out_first < out_span * 0.95,
+		"④ 出座舱平滑不瞬移（首帧 %.2f m / 全程 %.2f m，%.0f%% < 95%%）"
+			% [out_first, out_span, 100.0 * out_first / maxf(out_span, 0.001)])
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE, "④ C 再切回第三人称追尾")
 	var chase_dist := cam.global_position.distance_to(craft.global_position)
 	_check(chase_dist > 9.0 and chase_dist < 18.0,

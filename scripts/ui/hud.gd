@@ -1171,6 +1171,12 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 	# 实测「发动机 运转」与「失速了！推杆低头」叠成一团。座舱里 SPD/ALT/
 	# 航向/油门/燃油已全部有表，卡片的数据行纯属重复。
 	var fp := _is_first_person()
+	# L1/L2（D-065）：自由观察（底层为座舱）时也要按座舱布局——不然卡片会从左上
+	# 跳回顶部居中，正好压在 3D 仪表台上（实测挡住两块盘），而且数据行会和 3D 盘面
+	# 重复。判据与相机／内装显隐用同一个谓词，避免「2D 让位而卡片不让位」的错配。
+	if not fp and _flight_camera != null and _flight_camera.has_method("is_cockpit_view") \
+			and _flight_camera.is_cockpit_view():
+		fp = true
 	_layout_flight_panel(fp)
 	_flight_title.visible = not fp
 	_flight_speed.visible = not fp
