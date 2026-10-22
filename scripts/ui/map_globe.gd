@@ -1,11 +1,15 @@
 class_name MapGlobe
 extends Node3D
 ## 3D 地球：按 RegionAtlas 的陆地掩码逐格生成球面网格（顶点色着色），
-## 支持拖动旋转与射线拾取区域。
+## 支持拖动旋转、射线拾取区域、射线拾取地标图钉。
 ##
 ## 网格顶点由 RegionAtlas.lat_lon_to_dir 生成，拾取时用其逆函数
 ## RegionAtlas.dir_to_lat_lon 还原经纬度，两者严格互逆——屏幕上看到的色块
-## 与点中的区域不会错位。
+## 与点中的区域不会错位。地标图钉同理：位置走同一对函数，
+## 因此「图钉钉在长江口」与「点长江口得到长江」必然一致。
+##
+## 球面标记分三类高度层（互不压字）：区域名标签 0.030 / 地标图钉 0.042 /
+## 小飞机 0.055；小飞机沿北向切向上移、小鱼下移。详见各自的 LIFT 常量注释。
 
 const RADIUS := 1.0
 ## 拖动灵敏度：像素 → 弧度。0.008 → 0.015 → 0.06（按手感逐步调快，当前为 4 倍速）。
@@ -25,6 +29,35 @@ const PLANE_MARKER_LIFT := 0.055
 const PLANE_MARKER_OFFSET := 0.115
 const FISH_MARKER_LIFT := 0.050
 const FISH_MARKER_OFFSET := 0.130
+## 地标图钉的抬升层：夹在区域名标签（0.030）与小飞机（0.055）之间。
+## ── 为什么另开一层 ──
+## 「区域名 / 小飞机 / 小鱼」三件套沿*北向切向*竖着排开（见 :20-29），
+## 那条通道必须给它们留着。地标图钉各自钉在自己的经纬度上（不是锚点），
+## 天然远离三件套；再给它一个独立抬升层，万一和某个锚点擦肩也不会压字。
+const LANDMARK_MARKER_LIFT := 0.042
+## 河流光带（代替设计文档的 UV 滚动 Shader）：沿河道采样点铺一串薄方块。
+const RIVER_SEGMENT_SIZE := Vector3(0.042, 0.006, 0.042)
+## 光带脉冲：速度与 alpha 区间。逐块错开相位，看上去就是水在往前推。
+const RIVER_PULSE_SPEED := 2.4
+const RIVER_ALPHA_MIN := 0.35
+const RIVER_ALPHA_MAX := 0.95
+## 河流方块比图钉本体再抬一点点，避免与同一地标上的其它方块共面 z-fighting。
+const RIVER_SEGMENT_LIFT := 0.002
+## 地标图钉的射线判定半径（单位球上的距离）。
+## 取值必须 < 最近两枚图钉的间距（华山↔嵩山 0.044），否则点山会点到邻居；
+## 又必须 > 图钉半宽（约 0.023），否则手机上点不中。0.040 是这两头的平衡点。
+const LANDMARK_PICK_RADIUS := 0.040
+## 各 kind 的图钉配色：山石褐、水湖蓝、珊瑚青、巨岩赭红，
+## 全部 unshaded 平涂（与球面网格同一策略，任何角度都不发黑）。
+const LANDMARK_COLORS := {
+	"mountain": Color(0.58, 0.52, 0.44),
+	"gorge": Color(0.46, 0.34, 0.26),
+	"plateau": Color(0.72, 0.66, 0.44),
+	"lake": Color(0.30, 0.60, 0.85),
+	"river": Color(0.35, 0.62, 0.88),
+	"reef": Color(0.30, 0.75, 0.66),
+	"monolith": Color(0.76, 0.42, 0.26),
+}
 
 var _yaw := -30.0
 var _pitch := 6.0
@@ -38,6 +71,11 @@ var _field_markers: Array[Node3D] = []
 ## 钓鱼标记：小鱼，钉在有钓点的海域（当前是四大洋）区域名旁的另一条切向。
 ## 判据走 FishingSystem 的钓点表，加新海域钓点无需改这里。
 var _fish_markers: Array[Node3D] = []
+## 地标图钉：每个地标一枚 Node3D（河流也算一枚，里面挂沿河的一串薄方块）。
+## 顺序与 GeoProjection.landmark_ref 的口径一致（区域优先逐区摊平）。
+var _landmark_markers: Array[Node3D] = []
+## 需要做脉冲动画的河流方块（只有 kind == "river" 的地标会往里塞）。
+var _river_segments: Array[MeshInstance3D] = []
 ## 标记动画累计时间（秒）：小飞机起伏+螺旋桨转、小鱼摆尾游动。
 var _anim_time := 0.0
 
@@ -132,6 +170,7 @@ func _add_pole_markers() -> void:
 	_pole_markers.append(_make_pole_marker("南极", Color(0.94, 0.96, 0.99), -(RADIUS + POLE_MARKER_LIFT)))
 	_add_region_labels()
 	_add_vehicle_markers()
+	_add_landmark_markers()
 
 
 ## 七大洲四大洋名称贴在球面对应位置：锚点经纬度经 lat_lon_to_dir 映射到球面
@@ -227,8 +266,199 @@ func field_marker_count() -> int:
 	return _field_markers.size()
 
 
+## 地标图钉（中国地标特性）：按 RegionAtlas.REGION_LANDMARKS 的真实经纬度，
+## 在每个地标的位置钉一枚由方块拼成的小标记，11 个区域全钉、可射线拾取。
+##
+## ── 为什么只做标记、不做设计文档里的「洲际浮雕 / 微缩沙盘」 ──
+## 文档要求放大后切换成体素浮雕模型与 10km 沙盘。不做的原因：
+##   ① 需要一整套地形高度数据与模型资产，本作没有、也无法临时生成到球面上；
+##   ② 三级缩放降级为「地球页 + 区域介绍页（含地标卡）」两级，
+##      球面上用图钉 + 河流光带已经足够传达「这里有什么」，
+##      微缩沙盘额外付出的成本远高于它带来的信息量。
+## 复用现有标记机制（Node3D + _add_box / _add_mesh + unshaded 材质），
+## 不另起一套渲染路径。可重复调用（幂等）。
+func _add_landmark_markers() -> void:
+	_clear_markers(_landmark_markers)
+	_river_segments.clear()
+	for region_id in RegionAtlas.COUNT:
+		var marks := RegionAtlas.landmarks_of(region_id)
+		for index in marks.size():
+			var mark: Dictionary = marks[index]
+			var pin := _build_landmark_pin(mark)
+			pin.set_meta("landmark_region", region_id)
+			pin.set_meta("landmark_index", index)
+			_landmark_markers.append(pin)
+
+
+## 一枚地标图钉：底图为 X=东向、Y=球面外法线、Z=北向 的正交基底（与小飞机同一套），
+## 位置钉在该地标自己的经纬度上。所有零件都是既有 _add_box/_add_mesh 的方块，
+## 保持本作「方块堆造型」的画风一致。
+func _build_landmark_pin(mark: Dictionary) -> Node3D:
+	var kind: String = String(mark.get("kind", "mountain"))
+	var lat: float = float(mark.get("lat", 0.0))
+	var lon: float = float(mark.get("lon", 0.0))
+	var up: Vector3 = RegionAtlas.lat_lon_to_dir(lat, lon)
+	var frame: Array = _tangent_frame(up)
+	var east: Vector3 = frame[0]
+	var north: Vector3 = frame[1]
+	var pin := Node3D.new()
+	pin.position = up * (RADIUS + LANDMARK_MARKER_LIFT)
+	pin.basis = Basis(east, up, north)
+	var color: Color = _landmark_color(mark, kind)
+	match kind:
+		"river":
+			_build_river_ribbon(pin, mark, color)
+		"mountain":
+			# 三层递减方块堆成的「阶梯山」：本作是方块世界，
+			# 用方块堆山的辨识度远高于一个圆锥。底宽收在 0.046 以内——
+			# 五岳彼此最近只差 0.044（华山↔嵩山），再宽就糊成一坨。
+			_add_box(pin, Vector3(0.046, 0.009, 0.046), color, Vector3.ZERO)
+			_add_box(pin, Vector3(0.032, 0.009, 0.032), color, Vector3(0.0, 0.009, 0.0))
+			_add_box(pin, Vector3(0.018, 0.009, 0.018), color, Vector3(0.0, 0.018, 0.0))
+		"gorge":
+			# 两块夹峙的窄高块，中间留出缝隙——马里亚纳海沟用同一套语义（海底的深谷）。
+			_add_box(pin, Vector3(0.056, 0.024, 0.016), color, Vector3(0.0, 0.012, 0.022))
+			_add_box(pin, Vector3(0.056, 0.024, 0.016), color, Vector3(0.0, 0.012, -0.022))
+		"plateau":
+			_add_box(pin, Vector3(0.062, 0.012, 0.062), color, Vector3.ZERO)
+		"lake":
+			var disc := CylinderMesh.new()
+			disc.top_radius = 0.030
+			disc.bottom_radius = 0.030
+			disc.height = 0.010
+			_add_mesh(pin, disc, color, Vector3(0.0, 0.005, 0.0))
+		"reef":
+			for i in 6:
+				var ang := TAU * float(i) / 6.0
+				_add_box(pin, Vector3(0.020, 0.008, 0.020), color,
+					Vector3(cos(ang) * 0.026, 0.004, sin(ang) * 0.026))
+		"monolith":
+			var dome := SphereMesh.new()
+			dome.radius = 0.026
+			dome.height = 0.038
+			var dome_mi := _add_mesh(pin, dome, color, Vector3(0.0, 0.004, 0.0))
+			dome_mi.scale = Vector3(1.0, 0.7, 1.0)
+		_:
+			_add_box(pin, Vector3(0.040, 0.014, 0.040), color, Vector3.ZERO)
+	add_child(pin)
+	return pin
+
+
+## 图钉配色：河流类优先取数据里的 tint（长江浅蓝 / 黄河土黄），
+## 其余按 kind 取表，未知 kind 退回山石褐（landmark_probe 会盯着这张表）。
+func _landmark_color(mark: Dictionary, kind: String) -> Color:
+	if kind == "river" and mark.has("tint"):
+		return mark["tint"]
+	return LANDMARK_COLORS.get(kind, LANDMARK_COLORS["mountain"])
+
+
+## 河流光带：沿 path 的采样点铺一串薄方块，逐块错开脉冲相位。
+## ── 为什么不用设计文档里的 UV 滚动 Shader ──
+## 本作全库零 .gdshader、renderer = Mobile、目标机型含中低端 Android；
+## 为了一条河引入一条从未验证过的渲染路径，收益/风险比不划算。
+## 既有「unshaded + 顶点色/材质色」是已验证路径，代码层脉冲 alpha 就够了。
+func _build_river_ribbon(pin: Node3D, mark: Dictionary, color: Color) -> void:
+	var path: Array = mark.get("path", [])
+	if path.is_empty():
+		return
+	# 图钉基底是正交矩阵，故 inverse() 就是转置，可直接把球坐标换算进图钉本地系。
+	var to_pin_local := pin.basis.inverse()
+	for i in path.size():
+		var at: Vector2 = path[i]
+		var seg_up: Vector3 = RegionAtlas.lat_lon_to_dir(at.x, at.y)
+		var seg_frame: Array = _tangent_frame(seg_up)
+		var seg_east: Vector3 = seg_frame[0]
+		var seg_north: Vector3 = seg_frame[1]
+		var target := seg_up * (RADIUS + LANDMARK_MARKER_LIFT + RIVER_SEGMENT_LIFT)
+		var seg_mesh := BoxMesh.new()
+		seg_mesh.size = RIVER_SEGMENT_SIZE
+		var seg := MeshInstance3D.new()
+		seg.mesh = seg_mesh
+		seg.material_override = _flow_mat(color)
+		seg.position = to_pin_local * (target - pin.position)
+		seg.basis = to_pin_local * Basis(seg_east, seg_up, seg_north)
+		seg.set_meta("pulse_phase", float(i) * 0.9)
+		pin.add_child(seg)
+		_river_segments.append(seg)
+
+
+## 半透明水材质：只是给既有 unshaded 材质加一条 alpha 通道，无新渲染路径。
+func _flow_mat(color: Color) -> StandardMaterial3D:
+	var mat := _unshaded_mat(color)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return mat
+
+
 func fish_marker_count() -> int:
 	return _fish_markers.size()
+
+
+## 地标图钉枚数（探针断言：应等于 REGION_LANDMARKS 的条数）。
+func landmark_marker_count() -> int:
+	return _landmark_markers.size()
+
+
+## 河流光带的方块枚数（探针断言：应大于 0，且随 path 采样点增加）。
+func river_segment_count() -> int:
+	return _river_segments.size()
+
+
+## 取第 index 枚地标图钉的数据 + 归属（空字典表示越界）。
+## 与 landmark_at_world_ray 的索引口径一致，选择器据此打开对应的知识卡。
+func landmark_entry(index: int) -> Dictionary:
+	if index < 0 or index >= _landmark_markers.size():
+		return {}
+	var pin := _landmark_markers[index]
+	if not is_instance_valid(pin):
+		return {}
+	var region_id: int = int(pin.get_meta("landmark_region", -1))
+	var local_index: int = int(pin.get_meta("landmark_index", -1))
+	var marks := RegionAtlas.landmarks_of(region_id)
+	if local_index < 0 or local_index >= marks.size():
+		return {}
+	var data: Dictionary = marks[local_index]
+	var out := data.duplicate()
+	out["region"] = region_id
+	out["index"] = local_index
+	return out
+
+
+## 地标图钉整体显隐（与飞行标记同一套开关写法，供将来「纯净地图」用）。
+func set_landmarks_visible(value: bool) -> void:
+	for pin in _landmark_markers:
+		pin.visible = value
+
+
+func landmarks_visible() -> bool:
+	for pin in _landmark_markers:
+		return pin.visible
+	return false
+
+
+## 射线命中的地标索引（写法与 region_at_world_ray 保持一致）；
+## 未命中返回 -1。索引是跨区域摊平的全局序号，交给 landmark_entry 还原数据。
+## 背面图钉一律不算命中——它们背对着射线起点（将被球面自身深度遮挡）。
+func landmark_at_world_ray(origin: Vector3, dir: Vector3) -> int:
+	var to_local := global_transform.affine_inverse()
+	var o := to_local * origin
+	var d := (to_local.basis * dir).normalized()
+	var best := -1
+	var best_along := INF
+	for i in range(_landmark_markers.size()):
+		var pin := _landmark_markers[i]
+		if not is_instance_valid(pin):
+			continue
+		var p := pin.position
+		if p.dot(o - p) <= 0.0:
+			continue
+		var along := (p - o).dot(d)
+		if along <= 0.0 or along >= best_along:
+			continue
+		if (o + d * along - p).length() > LANDMARK_PICK_RADIUS:
+			continue
+		best_along = along
+		best = i
+	return best
 
 
 ## 球面上一点的切平面基底：返回 [东向切向, 北向切向]，两者与外法线 dir
@@ -401,6 +631,19 @@ func _animate_markers() -> void:
 		_animate_plane(marker, t)
 	for marker in _fish_markers:
 		_animate_fish(marker, t)
+	_animate_rivers()
+
+
+## 河流光带的「流动」感：逐块按错开的相位做 alpha 脉冲。
+## 只改材质透明度，不动几何，因此不影响任何拾取（拾取走射线，与视觉无关）。
+func _animate_rivers() -> void:
+	for seg in _river_segments:
+		var mat: StandardMaterial3D = seg.material_override as StandardMaterial3D
+		if mat == null:
+			continue
+		var phase: float = seg.get_meta("pulse_phase", 0.0)
+		var wave := 0.5 + 0.5 * sin(_anim_time * RIVER_PULSE_SPEED - phase)
+		mat.albedo_color.a = RIVER_ALPHA_MIN + (RIVER_ALPHA_MAX - RIVER_ALPHA_MIN) * wave
 
 
 func _animate_plane(plane: Node3D, t: float) -> void:

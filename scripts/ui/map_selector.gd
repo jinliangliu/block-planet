@@ -3,7 +3,8 @@ extends Control
 ## 地图选择器（全屏覆盖，三页流程）：
 ##   地球页：拖动旋转地球、悬停显示区域名、点击进入该区域介绍；
 ##          右侧竖排提供「生存 / 创造 / 探索」模式三选一；
-##   介绍页：区域名 + 地理介绍 + 「进入」；
+##   介绍页：区域名 + 地理介绍 + 三张知识卡 + 本区地标（点开看科普一句话，
+##           「去这里」= 进入该地标所属区域，见 _go_to_landmark 的取舍说明）；
 ##   加载页：逐条揭示该区域的植被/生物/气候/风貌，进度满后可开始探索。
 ## 完成后发出 region_entered(region_id)，由 Main 记录并重载主场景生效。
 
@@ -44,6 +45,22 @@ const CLICK_SLOP := 6.0
 ## 加载页时长（秒）与各段落揭示进度。
 const LOAD_DURATION := 2.6
 const STEP_REVEAL := [0.12, 0.36, 0.6, 0.84]
+## 地标分区：按三列排，限高后交给竖向滚动（亚洲有 11 条，
+## 摊平会把介绍页挤爆，限高 + 滚动才是稳定的排法）。
+const LANDMARK_COLUMNS := 3
+const LANDMARK_SCROLL_HEIGHT := 130.0
+## 地标 kind 的中文名（介绍页详情卡里用一句话点出「这是什么地貌」）。
+## 取值必须与 RegionAtlas.REGION_LANDMARKS 的 kind 一一对应，
+## 漏一个就会在详情卡上显示成英文 key。
+const LANDMARK_KIND_NAMES := {
+	"mountain": "山",
+	"river": "江河 / 洋流",
+	"gorge": "峡谷 / 海沟",
+	"plateau": "高原 / 冰原",
+	"lake": "湖",
+	"reef": "珊瑚礁",
+	"monolith": "巨岩 / 石像",
+}
 
 const BACKDROP_COLOR := Color(0.03, 0.06, 0.14, 0.97)
 const PANEL_BG := Color(0.95, 0.92, 0.84)
@@ -80,6 +97,19 @@ var _selected := -1
 var _mode_buttons: Array[Button] = []
 var _mode_caption: Label
 var _fishing_button: Button
+## 介绍页地标分区与地标详情浮层（中国地标特性）。
+## _landmark_owner 记的是「正在看的那张卡属于哪个区域」，可能 ≠ _selected
+## （例如从地球上的图钉直接点开一张跨区域卡），决定是否要给「切换区域」提示。
+var _landmark_grid: GridContainer
+var _landmark_scroll: ScrollContainer
+var _landmark_detail: Control
+var _landmark_detail_title: Label
+var _landmark_detail_kind: Label
+var _landmark_detail_text: Label
+var _landmark_detail_note: Label
+var _landmark_detail_go: Button
+var _landmark_owner := -1
+var _landmark_index := -1
 ## 🏁 赛道竞速入口按钮：提为成员以便按模式显隐（D-041，仅探索模式显示）。
 var _race_button: Button
 var _dragging := false
@@ -147,9 +177,18 @@ func _gui_input(event: InputEvent) -> void:
 			_drag_distance = 0.0
 		else:
 			if _dragging and _drag_distance < CLICK_SLOP:
-				var region := _pick_region()
-				if region >= 0:
-					_show_intro(region)
+				# 先判地标图钉：它钉在球面上，目标小而明确，
+				# 命中了就打开该地标的科普卡（会顺带切到它所属区域的介绍页）；
+				# 没命中才退回「点区域进介绍」，既有行为一字未改。
+				var landmark := _pick_landmark()
+				if landmark >= 0:
+					var hit := _globe.landmark_entry(landmark)
+					if not hit.is_empty():
+						open_landmark(int(hit["region"]), int(hit["index"]))
+				else:
+					var region := _pick_region()
+					if region >= 0:
+						_show_intro(region)
 			_dragging = false
 	elif event is InputEventMouseMotion:
 		if _dragging:
@@ -210,6 +249,7 @@ func _show_intro(region_id: int) -> void:
 	# 有钓点的区域（当前是四大洋）补一句：看完介绍可以直接下竿。
 	if not FishingSystem.get_spots_for_atlas(region_id).is_empty():
 		_intro_body.text += "\n\n这片海域开放了钓点——带上钓具，看看能钓上什么。"
+	_intro_body.text += _bounds_sentence(region_id)
 	_fishing_button.visible = not FishingSystem.get_spots_for_atlas(region_id).is_empty()
 	_detail_cards = RegionAtlas.cards_of(region_id)
 	for child in _card_row.get_children():
@@ -217,7 +257,81 @@ func _show_intro(region_id: int) -> void:
 	for i in range(_detail_cards.size()):
 		_card_row.add_child(_make_card(_detail_cards[i], i))
 	_close_card_detail()
+	_populate_landmarks(region_id)
 	_show_page(Page.INTRO)
+
+
+## 一句「这里大致在地球的哪一片」：取 GeoProjection 近似包围盒的中心点，
+## 直接写带符号的度数并标注是近似值——
+## 掩码本身 5° 一格，拿它做精确判读会把小朋友带沟里。
+func _bounds_sentence(region_id: int) -> String:
+	var box := GeoProjection.region_bounds(region_id)
+	var lat_mid := (float(box["lat_min"]) + float(box["lat_max"])) * 0.5
+	var lon_mid := (float(box["lon_min"]) + float(box["lon_max"])) * 0.5
+	if lon_mid > 180.0:
+		lon_mid -= 360.0
+	return "\n\n地球上的大致位置：纬度 %.0f°，经度 %.0f°（游戏内的近似画法，北纬东经为正）" % [
+		lat_mid, lon_mid,
+	]
+
+
+## 介绍页地标分区：列在 3 张知识卡之后，是该区域的地标清单。
+## ── 为什么是「清单 + 详情卡」而不是设计文档的悬停全息面板 ──
+## 文档要求在球面上悬停弹出全息卡片（需要 camera.unproject_position 逐帧
+## 重算屏幕坐标 + 一套 CanvasLayer 绘制）。本作球面上已经挤了 11 条区域名、
+## 11 枚小飞机、4 条小鱼，再加悬浮面板会彻底糊成一团；而介绍页本来就是
+## 「讲清一个地方」的地方，把地标卡放在这里信息密度最合适，
+## 也无需引入逐帧 2D 覆盖层的第二条渲染/布局链路。
+func _populate_landmarks(region_id: int) -> void:
+	if _landmark_grid == null:
+		return
+	for child in _landmark_grid.get_children():
+		child.queue_free()
+	var marks := RegionAtlas.landmarks_of(region_id)
+	for i in range(marks.size()):
+		var entry: Dictionary = marks[i]
+		_landmark_grid.add_child(_make_landmark_chip(entry, i, region_id))
+	_landmark_scroll.visible = not marks.is_empty()
+	_close_landmark_detail()
+
+
+## 地标分区里的一枚：kind 色块 + 标题。点开弹出详情卡。
+## 用 PanelContainer + gui_input 而不是 Button——Button 不是容器，
+## 塞不进「色块 + 文字」两个子节点（与 _make_card 保持同一种写法）。
+func _make_landmark_chip(entry: Dictionary, index: int, region_id: int) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(150, 34)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.99, 0.97, 0.90)
+	style.border_color = PANEL_BORDER
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(4)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 6)
+	panel.add_child(hbox)
+
+	var kind: String = String(entry["kind"])
+	var chip := ColorRect.new()
+	chip.color = MapGlobe.LANDMARK_COLORS.get(kind, MapGlobe.LANDMARK_COLORS["mountain"])
+	chip.custom_minimum_size = Vector2(12, 12)
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hbox.add_child(chip)
+
+	var name_label := Label.new()
+	name_label.text = String(entry["title"])
+	name_label.add_theme_font_size_override("font_size", 13)
+	name_label.add_theme_color_override("font_color", TEXT_DARK)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hbox.add_child(name_label)
+
+	panel.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_open_landmark_detail(region_id, index)
+	)
+	return panel
 
 
 func _start_loading() -> void:
@@ -476,8 +590,8 @@ func _build_intro_panel() -> void:
 	_intro_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_intro_panel.offset_left = -260.0
 	_intro_panel.offset_right = 260.0
-	_intro_panel.offset_top = -250.0
-	_intro_panel.offset_bottom = 250.0
+	_intro_panel.offset_top = -290.0
+	_intro_panel.offset_bottom = 290.0
 	add_child(_intro_panel)
 
 	var vbox := VBoxContainer.new()
@@ -512,6 +626,8 @@ func _build_intro_panel() -> void:
 	_card_row = HBoxContainer.new()
 	_card_row.add_theme_constant_override("separation", 10)
 	scroll.add_child(_card_row)
+
+	_build_landmark_section(vbox)
 
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -558,6 +674,190 @@ func _build_intro_panel() -> void:
 	row.add_child(enter)
 
 	_build_card_detail()
+	_build_landmark_detail()
+
+
+## 介绍页地标分区：标题 + 三列网格（限高 + 竖向滚动）。
+## 放在知识卡之后、按钮之前：先了解这片地方，再看这里有什么著名的山川河流。
+func _build_landmark_section(parent: Node) -> void:
+	var caption := Label.new()
+	caption.text = "这里的地标"
+	caption.add_theme_font_size_override("font_size", 18)
+	caption.add_theme_color_override("font_color", TEXT_DARK)
+	parent.add_child(caption)
+
+	_landmark_scroll = ScrollContainer.new()
+	_landmark_scroll.custom_minimum_size = Vector2(0, LANDMARK_SCROLL_HEIGHT)
+	_landmark_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	parent.add_child(_landmark_scroll)
+	_landmark_grid = GridContainer.new()
+	_landmark_grid.columns = LANDMARK_COLUMNS
+	_landmark_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_landmark_grid.add_theme_constant_override("h_separation", 6)
+	_landmark_grid.add_theme_constant_override("v_separation", 6)
+	_landmark_scroll.add_child(_landmark_grid)
+
+
+## 地标详情浮层：标题 + 地貌类型 + 科普一句话 + 「去这里」/关闭。
+## 与知识卡详情浮层同款遮罩写法，z_index 更高一层以免两者叠着时被压住。
+func _build_landmark_detail() -> void:
+	_landmark_detail = Control.new()
+	_landmark_detail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_landmark_detail.mouse_filter = Control.MOUSE_FILTER_STOP
+	_landmark_detail.visible = false
+	_landmark_detail.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed:
+			_close_landmark_detail()
+	)
+	add_child(_landmark_detail)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.05, 0.10, 0.55)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_landmark_detail.add_child(dim)
+
+	var panel := _make_panel(Vector2(420, 0))
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.offset_left = -210.0
+	panel.offset_right = 210.0
+	panel.offset_top = -150.0
+	panel.offset_bottom = 150.0
+	_landmark_detail.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	panel.add_child(vbox)
+
+	_landmark_detail_title = Label.new()
+	_landmark_detail_title.add_theme_font_size_override("font_size", 22)
+	_landmark_detail_title.add_theme_color_override("font_color", TEXT_DARK)
+	vbox.add_child(_landmark_detail_title)
+
+	_landmark_detail_kind = Label.new()
+	_landmark_detail_kind.add_theme_font_size_override("font_size", 14)
+	_landmark_detail_kind.add_theme_color_override("font_color", Color(0.45, 0.36, 0.22))
+	vbox.add_child(_landmark_detail_kind)
+
+	_landmark_detail_text = Label.new()
+	_landmark_detail_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_landmark_detail_text.custom_minimum_size = Vector2(380, 0)
+	_landmark_detail_text.add_theme_font_size_override("font_size", 15)
+	_landmark_detail_text.add_theme_color_override("font_color", TEXT_BODY)
+	vbox.add_child(_landmark_detail_text)
+
+	# 跨区域时的提示行：正常情况下（点本区地标）不占位、不显示。
+	_landmark_detail_note = Label.new()
+	_landmark_detail_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_landmark_detail_note.add_theme_font_size_override("font_size", 13)
+	_landmark_detail_note.add_theme_color_override("font_color", Color(0.62, 0.38, 0.18))
+	_landmark_detail_note.visible = false
+	vbox.add_child(_landmark_detail_note)
+
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 12)
+	vbox.add_child(buttons)
+
+	_landmark_detail_go = Button.new()
+	_landmark_detail_go.custom_minimum_size = Vector2(140, 42)
+	_landmark_detail_go.focus_mode = Control.FOCUS_NONE
+	_landmark_detail_go.add_theme_font_size_override("font_size", 16)
+	_landmark_detail_go.pressed.connect(_go_to_landmark)
+	buttons.add_child(_landmark_detail_go)
+
+	var close := Button.new()
+	close.text = "关闭"
+	close.custom_minimum_size = Vector2(96, 42)
+	close.focus_mode = Control.FOCUS_NONE
+	close.pressed.connect(_close_landmark_detail)
+	buttons.add_child(close)
+
+
+## 打开某区域某张地标卡。地球页点图钉、介绍页点地标块都汇到这里。
+func open_landmark(region_id: int, index: int) -> void:
+	var marks := RegionAtlas.landmarks_of(region_id)
+	if index < 0 or index >= marks.size():
+		return
+	if _selected != region_id or get_page() != Page.INTRO:
+		_show_intro(region_id)
+	_open_landmark_detail(region_id, index)
+
+
+func _open_landmark_detail(region_id: int, index: int) -> void:
+	var marks := RegionAtlas.landmarks_of(region_id)
+	if index < 0 or index >= marks.size():
+		return
+	_landmark_owner = region_id
+	_landmark_index = index
+	var entry: Dictionary = marks[index]
+	var kind: String = String(entry["kind"])
+	var title: String = String(entry["title"])
+	var owner_name := RegionAtlas.title_of(region_id)
+	_landmark_detail_title.text = title
+	_landmark_detail_kind.text = "地貌：%s" % LANDMARK_KIND_NAMES.get(kind, kind)
+	_landmark_detail_text.text = String(entry["text"])
+	# 「去这里」必须诚实：本作世界里没有地标建筑，也不存在「降落在泰山」这条链路。
+	# 按钮文案一律写成「去<区域>看看」——点下去是进入该地标所属区域。
+	if region_id == _selected:
+		_landmark_detail_note.visible = false
+		_landmark_detail_go.text = "去%s看看" % owner_name
+	else:
+		_landmark_detail_note.visible = true
+		_landmark_detail_note.text = "%s在%s，要切换区域才能去。" % [title, owner_name]
+		_landmark_detail_go.text = "切换到%s" % owner_name
+	_landmark_detail.visible = true
+	_landmark_detail.z_index = 12
+
+
+func _close_landmark_detail() -> void:
+	if _landmark_detail != null:
+		_landmark_detail.visible = false
+	_landmark_index = -1
+
+
+## 当前打开的地标卡索引（-1 表示没打开），探针断言用。
+func open_landmark_index() -> int:
+	if _landmark_detail == null or not _landmark_detail.visible:
+		return -1
+	return _landmark_index
+
+
+## 当前打开的地标卡所属区域（-1 表示没打开），探针断言「跨区域切换」用。
+func open_landmark_region() -> int:
+	if _landmark_detail == null or not _landmark_detail.visible:
+		return -1
+	return _landmark_owner
+
+
+## 【去这里】：进入该地标所属区域（发既有 region_entered 链路，落在现成的
+## 机场/降落场），**不是**传送到地标精确坐标。
+## ── 为什么不做「传送到地标」 ──
+## 世界是程序化生成的方块平面，原点附近数百米才是玩家够得着的范围；
+## 按真实经纬度换算出的落点既没有地形（区块不加载）也没有建筑（全库零地标实现）。
+## 把泰山写成一个 128km 外的坐标只会让玩家进去发现一片空地，比不做更糟。
+## 因此「快速旅行」的语义收敛为：进入地标所属区域。
+func _go_to_landmark() -> void:
+	if _landmark_owner < 0:
+		return
+	var target := _landmark_owner
+	_close_landmark_detail()
+	_selected = target
+	region_entered.emit(target)
+
+
+## 鼠标位置 → 球面地标索引（-1 为未命中）。换算方式与 _pick_region 完全一致，
+## 只是把最后一步换成 MapGlobe.landmark_at_world_ray。
+func _pick_landmark() -> int:
+	if _globe == null or _viewport == null or _camera == null or _stage == null:
+		return -1
+	var vp_pos := _viewport_pos_from_global(get_global_mouse_position())
+	var view := Vector2(_viewport.size)
+	if vp_pos.x < 0.0 or vp_pos.y < 0.0 or vp_pos.x > view.x or vp_pos.y > view.y:
+		return -1
+	var origin := _camera.project_ray_origin(vp_pos)
+	var dir := _camera.project_ray_normal(vp_pos)
+	return _globe.landmark_at_world_ray(origin, dir)
 
 
 ## 知识卡详情浮层：全屏半透明遮罩 + 居中大图面板，点遮罩或按钮关闭。
