@@ -76,6 +76,11 @@ const COLOR_SPD := Color(0.62, 0.86, 1.0)
 const COLOR_THR := Color(1.0, 0.83, 0.42)
 const COLOR_DST := Color(0.58, 0.90, 0.55)
 const TARGET_COLOR := Color(1.0, 0.80, 0.30)
+const ROUTE_COLOR := Color(0.45, 0.82, 1.0, 0.86)
+const ROUTE_ACTIVE_COLOR := Color(1.0, 0.84, 0.28, 0.98)
+const ROUTE_PASSED_COLOR := Color(0.70, 0.76, 0.82, 0.35)
+const ROUTE_START_COLOR := Color(0.42, 0.92, 0.54, 0.98)
+const ROUTE_DEST_COLOR := Color(1.0, 0.55, 0.28, 0.98)
 const OWN_INK := Color(0.04, 0.06, 0.10, 0.95)
 const RUNWAY_INK := Color(0.16, 0.17, 0.20, 0.88)
 const BLOCK_FALLBACK := Color(0.52, 0.52, 0.55)
@@ -134,6 +139,9 @@ var _waypoints: Array[Vector3] = []
 var _target_sig := ""
 var _target_dist_shown := -1
 var _target_label_text := "目标"
+## 外部规划航线使用世界坐标；Dictionary 可带 passed/current 标记供航段分层。
+var _route_points: Array[Vector3] = []
+var _route_current_index := -1
 
 ## 帧间状态。
 var _readings_timer := 0.0
@@ -259,6 +267,54 @@ func set_zoom(value: float) -> void:
 ## 滚轮 / 按钮缩放入口：up=true 放大。
 func zoom_step(up: bool) -> void:
 	set_zoom(_zoom * (ZOOM_WHEEL_RATIO if up else 1.0 / ZOOM_WHEEL_RATIO))
+
+
+## 注入完整航线（世界坐标）。元素可为 Vector3，或 Dictionary：
+## {pos: Vector3, passed: bool, current: bool}；current 表示当前目标航点。
+## 未提供进度标记时首点视为起点，默认高亮“起点→第二点”航段。
+func set_route(points: Array) -> void:
+	_route_points.clear()
+	_route_current_index = -1
+	var first_unpassed := -1
+	var has_progress := false
+	for item: Variant in points:
+		var pos: Variant = Vector3.ZERO
+		var passed := false
+		var current := false
+		if item is Vector3:
+			pos = item
+		elif item is Dictionary:
+			var data := item as Dictionary
+			pos = data.get("pos", Vector3.ZERO)
+			passed = bool(data.get("passed", false))
+			current = bool(data.get("current", false))
+			has_progress = has_progress or data.has("passed") or data.has("current")
+		else:
+			continue
+		if not pos is Vector3:
+			continue
+		var point_index := _route_points.size()
+		_route_points.append(pos)
+		if current and _route_current_index < 0:
+			_route_current_index = point_index
+		if not passed and first_unpassed < 0:
+			first_unpassed = point_index
+	if _route_current_index < 0:
+		if has_progress:
+			_route_current_index = first_unpassed if first_unpassed >= 0 else _route_points.size()
+		else:
+			_route_current_index = mini(1, _route_points.size())
+	_dirty = true
+	if _map_canvas != null:
+		_map_canvas.queue_redraw()
+
+
+func clear_route() -> void:
+	_route_points.clear()
+	_route_current_index = -1
+	_dirty = true
+	if _map_canvas != null:
+		_map_canvas.queue_redraw()
 
 
 ## 键盘：M / ESC 关闭。飞行键（W/S 油门等）不拦——地图打开期间飞机
@@ -835,6 +891,7 @@ func _draw_map(canvas: Control) -> void:
 	_ppm = minf(size.x, size.y) / (2.0 * RANGE_M) * _zoom
 	_draw_terrain(canvas)
 	_draw_target(canvas)
+	_draw_route(canvas)
 	_draw_runways(canvas)
 	_draw_own(canvas)
 	canvas.draw_rect(
@@ -902,6 +959,49 @@ func _draw_target(canvas: Control) -> void:
 	else:
 		var at := _draw_edge_arrow(canvas, tp, TARGET_COLOR)
 		_draw_text(canvas, at + Vector2(12.0, 24.0), _target_label_text, 14, TARGET_COLOR)
+
+
+## 规划航线层：普通航段蓝色、当前航段加粗黄色、已飞航段淡化；
+## 只经 _world_to_screen 映射并用 _on_screen 裁剪，不引入额外相机或视口。
+func _draw_route(canvas: Control) -> void:
+	if _route_points.size() < 2:
+		return
+	for segment_index in range(_route_points.size() - 1):
+		var from_world: Vector3 = _route_points[segment_index]
+		var to_world: Vector3 = _route_points[segment_index + 1]
+		if _world != null:
+			from_world = _world.to_render(from_world)
+			to_world = _world.to_render(to_world)
+		var from_screen := _world_to_screen(from_world.x, from_world.z)
+		var to_screen := _world_to_screen(to_world.x, to_world.z)
+		if not _on_screen(from_screen) and not _on_screen(to_screen):
+			continue
+		var color := ROUTE_COLOR
+		var width := 2.5
+		if _route_current_index > 0 and segment_index == _route_current_index - 1:
+			color = ROUTE_ACTIVE_COLOR
+			width = 5.0
+		elif _route_current_index >= _route_points.size() \
+				or (_route_current_index > 0 and segment_index < _route_current_index - 1):
+			color = ROUTE_PASSED_COLOR
+			width = 2.0
+		canvas.draw_line(from_screen, to_screen, OWN_INK, width + 2.0)
+		canvas.draw_line(from_screen, to_screen, color, width)
+
+	var start_world: Vector3 = _route_points[0]
+	var dest_world: Vector3 = _route_points[_route_points.size() - 1]
+	if _world != null:
+		start_world = _world.to_render(start_world)
+		dest_world = _world.to_render(dest_world)
+	var start_screen := _world_to_screen(start_world.x, start_world.z)
+	var dest_screen := _world_to_screen(dest_world.x, dest_world.z)
+	if _on_screen(start_screen):
+		canvas.draw_circle(start_screen, 7.0, OWN_INK)
+		canvas.draw_circle(start_screen, 5.0, ROUTE_START_COLOR)
+	if _on_screen(dest_screen):
+		canvas.draw_rect(Rect2(dest_screen - Vector2(7.0, 7.0), Vector2(14.0, 14.0)), OWN_INK)
+		canvas.draw_rect(Rect2(dest_screen - Vector2(5.0, 5.0), Vector2(10.0, 10.0)),
+			ROUTE_DEST_COLOR)
 
 
 ## 机场 / 降落场层：按长轴画跑道条带（俯视长条 + 中线虚线，起降朝向一眼

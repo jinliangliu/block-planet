@@ -22,6 +22,8 @@ extends RefCounted
 ##   block_under  : 机身下方地面方块类型（降落区要求跑道面时判定；缺省 -1）
 
 signal mission_result(success: bool, result: Dictionary)
+## index 是推进后的当前航点索引；全部通过时等于航点数，pos 返回 Vector3.ZERO。
+signal waypoint_advanced(index: int, pos: Vector3)
 
 enum Status { IDLE, RUNNING, SUCCEEDED, FAILED }
 
@@ -100,6 +102,18 @@ func elapsed() -> float:
 	return _elapsed
 
 
+## 当前待飞航点索引；完成后等于航点总数，外部可据此同步导航状态。
+func current_waypoint_index() -> int:
+	return _next_waypoint
+
+
+## 当前待飞航点；无任务、无航点或已完成时返回零向量。
+func current_waypoint() -> Vector3:
+	if mission == null or _next_waypoint < 0 or _next_waypoint >= mission.waypoints.size():
+		return Vector3.ZERO
+	return mission.waypoints[_next_waypoint]
+
+
 func _step_takeoff(agl: float, speed: float, on_ground: bool) -> void:
 	if on_ground:
 		return
@@ -115,6 +129,7 @@ func _step_circuit(pos: Vector3) -> void:
 	_min_dist_per_wp[_next_waypoint] = minf(_min_dist_per_wp[_next_waypoint], d)
 	if d <= mission.radius():
 		_next_waypoint += 1
+		waypoint_advanced.emit(_next_waypoint, current_waypoint())
 		if _next_waypoint >= mission.waypoints.size():
 			_finish(true, "绕点成功")
 
