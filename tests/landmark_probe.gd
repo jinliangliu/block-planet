@@ -260,7 +260,9 @@ func _check_c_globe() -> void:
 	var pins: Array = globe._landmark_markers
 	var outside_ok := true
 	var handed_ok := true
-	for pin in pins:
+	# 循环变量必须显式标注类型：pins 是 untyped Array，取出的元素是 Variant，
+	# 用 := 让引擎推断会因「值没有固定类型」直接 parse error（本项目警告即错误）。
+	for pin: Node3D in pins:
 		if not is_instance_valid(pin):
 			outside_ok = false
 			continue
@@ -282,7 +284,7 @@ func _check_c_globe() -> void:
 	for pin in pins:
 		if not is_instance_valid(pin):
 			continue
-		for old_node in old_markers:
+		for old_node: Node3D in old_markers:
 			if not is_instance_valid(old_node):
 				continue
 			if pin.position.distance_to(old_node.position) < 0.05:
@@ -304,8 +306,9 @@ func _check_c_globe() -> void:
 	var flowed := false
 	var segments: Array = globe._river_segments
 	if not segments.is_empty():
-		var sample := segments[0]
-		var flow_mat := sample.material_override as StandardMaterial3D
+		var sample: MeshInstance3D = segments[0] as MeshInstance3D
+		var flow_mat: StandardMaterial3D = \
+			(sample.material_override as StandardMaterial3D) if sample != null else null
 		if flow_mat != null:
 			var before := flow_mat.albedo_color.a
 			for i in range(20):

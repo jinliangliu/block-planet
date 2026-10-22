@@ -30,6 +30,13 @@ var _cockpit_interior: CockpitInterior = null
 var _flight_markers: FlightMarkers = null
 ## 飞行导航锚点（机场中心 / 出生点）：登机时同时注入 HSI/CDI 与 3D 标注。
 var _mission_anchor := Vector3.ZERO
+## 当前航线（D-066）：任务绕点的导航目标容器。**飞越判定真相在 MissionManager**
+## （用任务自带的 radius()），这里只对齐 index 并对外回答「当前该飞哪」——
+## 若再按 RoutePlan 自己的 40 m 推进一次，就会出现两个互不一致的当前点。
+var _route: RoutePlan = null
+## 航线同步去重键：避免逐帧重复注入仪表、重复 queue_redraw 战术地图。
+## 值变化才真正注入一次（绕点任务里绝大多数帧都应当命中这个短路）。
+var _nav_sync_key := ""
 ## 飞行重置归位点（D-039）：_flight_spawn = 本次进图的初始出生点（跑道南段），
 ## _craft_park = 初始停机位（出生点以北、机头朝北）。坠机/卡住时按 Y 把玩家
 ## 与飞机送回这两点。无机场/降落场的区域 _craft_park 为零，飞机就地摆正。
@@ -218,6 +225,49 @@ func _physics_process(delta: float) -> void:
 		"block_under": block_under,
 	}
 	_hud.feed_mission(delta, telemetry)
+	_sync_mission_navigation()
+
+
+## 航线 → 导航同步（D-066）：把「MissionManager 判定的当前航点」同步进 HSI/CDI、
+## 飞行指引十字、世界标注与战术地图航线图层。
+##
+## 修的缺陷：登机时只注入一次任务锚点，绕点任务推进到下一个航点之后，仪表与
+## 指引仍指着老目标——玩家不知道下一个点在哪。
+##
+## 坐标口径：任务航点是**世界坐标**（浮动原点搬迁后不变），仪表按渲染坐标与
+## 机体做差，故统一在这里 to_render 一次再注入，与登机分支的锚点注入同口径。
+## 目标无变化时整体短路，避免逐帧重绘战术地图。
+func _sync_mission_navigation() -> void:
+	if _hud == null:
+		return
+	var pts: Array = _hud.current_mission_waypoints()
+	if pts.is_empty():
+		if _nav_sync_key != "":
+			_nav_sync_key = ""
+			if _route != null:
+				_route.clear()
+			_hud.set_tactical_route([], -1)
+		return
+	if _route == null:
+		_route = RoutePlan.new()
+	var idx := maxi(_hud.current_mission_waypoint_index(), 0)
+	if _route.total() != pts.size():
+		var packed: Array = []
+		for wp: Vector3 in pts:
+			packed.append({"pos": wp, "name": ""})
+		_route.set_route(packed)
+	_route.set_current_index(idx)
+	var target := _route.current_target()
+	var key := "%d/%d/%s" % [idx, pts.size(), str(target.round())]
+	if key == _nav_sync_key:
+		return
+	_nav_sync_key = key
+	var render_target := _world.to_render(target)
+	var label := "航点 %d/%d" % [_route.current_index() + 1, _route.total()]
+	_hud.set_flight_navigation(render_target, label)
+	if _flight_markers != null:
+		_flight_markers.set_target(render_target, label)
+	_hud.set_tactical_route(pts, idx)
 
 
 ## 登机 / 下机 → 飞行相机激活、轨迹录制起止、座舱 3D 面板与世界标注增删（D-033/D-034）。
@@ -293,6 +343,12 @@ func _on_flight_ride_changed(riding: bool) -> void:
 			_flight_markers.queue_free()
 			_flight_markers = null
 		_hud.instrument_hud().clear_navigation()
+		# 航线同步状态一并归零：否则下次登机时去重键仍等于上次的 key，
+		# 首个航点会被误判为「无变化」而不注入（仪表停在旧目标）。
+		_nav_sync_key = ""
+		if _route != null:
+			_route.clear()
+		_hud.set_tactical_route([], -1)
 
 
 ## 浮动原点搬迁（D-062）：World.request_shift_origin 已把 World 节点移到

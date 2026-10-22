@@ -52,6 +52,20 @@ func advance(pos: Vector3) -> bool:
 	return true
 
 
+## 由**外部判定**直接指定当前航点（本作任务航点的飞越由 MissionManager 裁决，
+## 判定半径是任务自带的 radius()，与本类 WP_CAPTURE_R 不同）。
+##
+## 为什么还要这条而不是只用 advance()：任务绕点已经有一套判定真相，若这里再
+## 按 40 m 自己推进一次，就会出现「地图上已切下一个点、仪表还指着上一个」的
+## 双份真相。故任务链路统一走 set_current_index 对齐，advance() 留给无任务的
+## 自由航线（探针与未来 A→B 规划）。
+func set_current_index(index: int) -> void:
+	if _points.is_empty():
+		return
+	_active_index = clampi(index, 0, _points.size() - 1)
+	_complete = false
+
+
 func current_index() -> int:
 	return _active_index
 

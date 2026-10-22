@@ -266,10 +266,15 @@ static func cards_of(region_id: int) -> Array:
 
 ## 该区域的地标列表（带越界保护：越界返回空数组而不是崩溃）。
 static func landmarks_of(region_id: int) -> Array:
+	# 越界一律返回空，**不**做 clampi 夹取：夹取会把「调用方传错区域 id」这种
+	# bug 静默伪装成「取到另一个区域的地标」（-3 → 太平洋、999 → 南极洲），
+	# 出错时现象完全对不上原因。宁可返回空让上层立刻暴露。
+	# （与 cards_of 的 clampi 口径不同——那份是既有实现且有探针依赖，不动。）
+	if region_id < 0 or region_id >= COUNT:
+		return []
 	if REGION_LANDMARKS.size() != COUNT:
 		return []
-	var clamped := clampi(region_id, 0, COUNT - 1)
-	var marks: Array = REGION_LANDMARKS[clamped]
+	var marks: Array = REGION_LANDMARKS[region_id]
 	return marks
 
 ## 四大洋归属判据（仅用于掩码中的海洋格）。

@@ -2855,6 +2855,56 @@ func set_flight_navigation(target: Vector3, name: String = "") -> void:
 		_instrument_hud.set_navigation(target, name)
 
 
+## 当前任务的航点序列（**世界坐标**）。非 CIRCUIT 任务 / 无任务 / 未在运行
+## 一律返回空数组。
+##
+## 为什么由 Main 而不是本类去做 to_render：任务数据按世界空间锚定（浮动原点
+## 搬迁时渲染坐标会变、世界坐标不变），而坐标转换必须只做一次——多处各自转会
+## 出现「仪表指 new、地图画 old」的错配。故本类只提供真相，转换交给 Main。
+func current_mission_waypoints() -> Array:
+	if _mission_panel == null:
+		return []
+	var mm := _mission_panel.mission_manager()
+	if mm == null or mm.status != MissionManager.Status.RUNNING or mm.mission == null:
+		return []
+	if mm.mission.type != MissionData.Type.CIRCUIT:
+		return []
+	var out: Array[Vector3] = []
+	for wp: Vector3 in mm.mission.waypoints:
+		out.append(wp)
+	return out
+
+
+## 当前任务航点序号（0 起，-1 表示无）。飞越判定真相在 MissionManager，
+## 本函数只是把它暴露出来给导航层对齐，**不要**在这里另算一套距离判定。
+func current_mission_waypoint_index() -> int:
+	if _mission_panel == null:
+		return -1
+	var mm := _mission_panel.mission_manager()
+	if mm == null or mm.status != MissionManager.Status.RUNNING:
+		return -1
+	return mm.current_waypoint_index()
+
+
+## 战术地图航线图层：注入完整航点，并标出「已飞过 / 当前航段」。
+## 传空数组即清空图层（任务结束或下机）。
+func set_tactical_route(points: Array, current_index: int) -> void:
+	if _tactical_map == null:
+		return
+	if points.is_empty():
+		_tactical_map.clear_route()
+		return
+	var packed: Array = []
+	for i in points.size():
+		var p: Vector3 = points[i]
+		packed.append({
+			"pos": p,
+			"passed": i < current_index,
+			"current": i == current_index,
+		})
+	_tactical_map.set_route(packed)
+
+
 func open_mission_panel() -> void:
 	if _mission_panel == null:
 		return
