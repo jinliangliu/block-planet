@@ -20,19 +20,21 @@
 
 另注：`day_night.Weather` 只有 3 档且**只影响环境光与雨粒子**，不涉及飞行物理。本任务的核心是把气象**接到气动上**。
 
+另注 2：本任务书 §1 的尺度前提已按 D-063 订正（1 格 = 1 m）。初版曾写过一版 0.5 m 旧尺度，**那一版的数值（含 `icing_alt_band [90,150]`、风切变「约 90 格」）全部作废**，以 §1 现行值为准。
+
 ---
 
 ## 1. 尺度前提（决定所有数值，先读）
 
-初稿大量使用 km / 数百米高度，**与本作尺度不符，照抄会做出飞不到的东西**：
+初稿大量使用 km / 数百米高度，**与本作尺度不符，照抄会做出飞不到的东西**。且本任务书 §1 初版本身也写过一版旧尺度（1 格 = 0.5 m / 世界高 128 m / `LOAD_RADIUS=2`），**那一版已随 D-063 作废**，现行值如下：
 
-- **1 格 = 0.5 m**；世界总高 **256 格 = 128 m**（D-055）。
-- 分层地形最高 **188 格 ≈ 94 m**（青藏高原 / 喜马拉雅-昆仑雪脊，见 `features/feature_flight.md`）。
+- **1 格 = 1 m**（D-063 起，格与米数值直接相等，不要再乘 0.5）；世界总高 **256 格 = 256 m**（D-055）。
+- 分层地形最高 **188 m**（青藏高原 / 喜马拉雅-昆仑雪脊，见 `features/feature_flight.md`）——**不是 94 m**，旧值差一倍，所有避让/云带高度按旧值算会直接埋进山体。
 - 巡航高度典型 **50~90 m AGL**，不是「300 m」「1000 m」。
-- **风切变触发高度必须下调**：初稿写「低于 300 m」，在本作意味着全程都在切变层内。改为 **AGL < 45 m（约 90 格）**。
-- 流式加载半径 `LOAD_RADIUS = 2`（16 格/区），**世界是无限流式生成的**，没有「地图边界」概念。
-
-> 结论：本任务所有高度阈值按「格」给，换算 m 时记住 ×0.5。
+- **风切变触发高度**：初稿写「低于 300 m」在本作意味着全程都在切变层内。改为 **AGL < 45 m（即 45 格）**。
+- 流式加载：高模 `LOAD_RADIUS = 4` 区块（64 m）+ 低模环 `LOW_RADIUS = 16` 区块（256 m）。世界是无限流式生成的，没有「地图边界」；但**超过低模环 256 m 就只有高度图粗网格**，气象可视距离（雾）的设计上限就在此。
+- 战术地图视野 `RANGE_M = 180`，缩放 0.5~2× → 最远可视 **360 m**。
+- **积冰云带必须按 188 m 地形重定**：旧稿 `icing_alt_band: [90, 150] 格` 在 0.5 m 尺度下是 45~75 m；按现行 1 m 尺度该区间会埋进青藏高原山体，云带应抬高到约 **[120, 200] 格**（地形最高 188 m 之上留出可结冰空间，又低于世界顶 256 m）。
 
 ---
 
@@ -42,7 +44,7 @@
 
 ### 2.1 风：地面风 + 高空风梯度
 
-- **地面风（≥10 m AGL）**：直接叠加到 `_state.velocity` 的水平分量（`aircraft_flight.gd` 的积分段）。表现为飞机实际对地速度 = 空速 + 风。
+- **地面风（≥10 m AGL）**：直接叠加到 `_state.velocity` 的水平分量（`aircraft_flight.gd` 的积分段，state 结构体字段 `velocity` 在 `:177`）。表现为飞机实际对地速度 = 空速 + 风。注意叠加时机在**积分之前**（作为外力项进入本帧加速度），不要在积分后覆盖，否则气动自洽被破坏。
 - **顺/逆风影响**：起飞滑跑距离、爬升率随之变化。**不要另写「滑跑距离公式」**——气动积分天然会产生这个现象，重复实现反而两套数打架。
 - **侧风**：以偏流角体现——地速矢量与机头不一致。落地时机头对不齐会带着侧向速度接地，`_check_failure(impact)` 自然判解体。**蟹形进近因此是真实有效的技巧，不是脚本判定**。
 - **风梯度**：风速随 AGL 从 0 线性增到高空值（约 3 倍）。这让「低空风弱、高空风强」自然成立。
@@ -60,15 +62,16 @@
 
 - 暴露变量：`ice_level: float`（0..1）。
 - **接到气动**：`CL_MAX` 乘以 `(1 - 0.35 * ice_level)`（冰污染翼型，降低最大升力系数）；`CD0_BASE` 加上 `0.05 * ice_level`（粗糙度增加阻力）。**同时改这两个量**，才是真实的积冰后果（升力降 + 阻力增 → 失速速度上升）。
+  - ⚠️ 实施注意：`CL_MAX`（`aircraft_flight.gd:35`）与 `CD0_BASE`（`:42`）目前都是 **`const`**，且 `CL_MAX` 有 3 个直接调用点（`:217` 失速速度 / `:270` 与 `:410` 升力计算）、`CD0_BASE` 有 2 个（`:119`/`:137` 阻力聚合）。要么把二者改为可注入的气动参数，要么在各调用点统一乘冰系数——**只改定义不改调用点不会生效**。好消息：`lift_coefficient(alpha, cl_max)`（`:226`）本就支持传入 cl_max，接口是现成的。
 - 质量增加：可选，小幅（燃油占比很小，不做也能玩）。
 - 防冰（anti-ice）：`ice_level` 以 0.02/s 消退；开启防冰本身有耗电/燃油代价，避免「无脑开着」。
-- **进入结冰条件的判据**：云层高度带 + 气温低于冰点 + 有降水。三者缺一不可，否则大晴天结冰会显得莫名其妙。
+- **进入结冰条件的判据**：云层高度带 + 气温低于冰点 + 有降水。三者缺一不可，否则大晴天结冰会显得莫名其妙。注意 `day_night.gd` **没有云层高度概念**（只有三档天气外观），云带参数要随 `weather_profile.icing_alt_band` 新建。
 
 ### 2.4 能见度与 RVR
 
-- **白屏/雾**：`Environment.fog_density` 随能见度上升（已有 `Environment`，走 `day_night.setup_environment`）。
+- **白屏/雾**：`Environment.fog_density` 随能见度上升。路径走 `day_night.setup_environment(env)`（`day_night.gd:96`）——**注意该函数目前是空钩子**（只存 `_env` 引用，全库 `fog_` 零命中），`Environment` 资源挂在 `scenes/main.tscn:11` 的 `WorldEnvironment` 上且从未设置任何雾参数。本任务要在钩子里**新建**雾配置（`fog_enabled` / `fog_density` / `fog_light_color` 每帧回读 `_env.background_color`，与 D-065 拍摄口径同源）。**绝不开 `volumetric_fog_enabled`**——Mobile 渲染器直接拒绝（已实测）。雾密度参考值 **0.004~0.005**（256 m 低模环边界约 100 px 过渡带；判雾看地平线外缘，不看近处景物）。
 - **盲降**：RVR < 决断高度时，扩展 D-054 指引十字——命令十字接管为盲降引导（**不新增 UI**）。
-- 偏离过大触地 → 现有 `impact` 判解体。**不另写「偏离则坠毁」脚本判定**。
+- 偏离过大触地 → 现有 `CRASH_IMPACT_DV = 7.0`（`aircraft.gd:41`）判解体。**不另写「偏离则坠毁」脚本判定**。
 
 ### 2.5 密度高度
 
@@ -98,11 +101,17 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
     "fog_density_fog": 0.08,
     "surface_wind_mps": 3.0,
     "shear_probability": 0.0,     # 非洲/大洋高，山地低
-    "icing_alt_band": [90, 150]    # 格
+    "icing_alt_band": [120, 200]  # 格（D-063 尺度，详见 §1）
 }
 ```
 
-理由：气象要**按区域**不同（青藏高原易积冰、大洋易雷暴），这正是 region_atlas 已有职责；新建 json 会与它脱钩。
+理由：气象要**按区域**不同（青藏高原易积冰、大洋易雷暴），这正是 region_atlas 已有职责（现有字段只有 `climate` 文案与 `sky` 色调，物理参数是**新建**）；新建 json 会与它脱钩。
+
+> ⚠️ **与现状轮换机制的关系**：`day_night.gd` 现有一套 150 s 固定序列自动轮换（`WEATHER_CYCLE` 6 槽 + `WEATHER_SLOT`）+ `set_weather()` / `clear_weather_override()` 手动覆盖。本任务的「按区域 profile 概率触发」是**替换**自动轮换，不是平行新增。实施时必须：
+> 1. **保留 override 机制**——`cockpit3d_shot` 等多处取证探针依赖 `set_weather(CLEAR)` 钉住天气（防 150 s 槽边界换档让整屏像素漂移），删了会打穿窗口档。
+> 2. `set_weather()` 内的 `clampi(w, Weather.CLEAR, Weather.RAIN)` 上限**写死了 RAIN**：枚举扩到 8 档后不改这行，FOG/SNOW/THUNDERSTORM 会被静默夹成 RAIN（D-066 在 `landmarks_of` 踩过同类 `clampi` 伪装 bug）。
+> 3. 扩展后 `WEATHER_NAMES` / `WEATHER_AMBIENT_MUL` / `WEATHER_SUN_MUL` 三张字典要为每个新档补条目（字典缺键会直接崩）。
+> 4. 现有 `tests/weather_probe.gd`（10 条）覆盖三档枚举与 override，扩展后需同步补断言，不要打穿。
 
 ---
 
@@ -131,17 +140,20 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 ## 6. 开发 Checklist
 
 - [ ] 扩展 `day_night.Weather` 枚举到 8 档，各档配 `_apply_lighting` 与雨/雪粒子表现。
+- [ ] 同步三张字典 `WEATHER_NAMES` / `WEATHER_AMBIENT_MUL` / `WEATHER_SUN_MUL` 补全 8 档条目（缺键直接崩）；**`set_weather()` 的 `clampi` 上限从 `Weather.RAIN` 改为枚举末档**（否则新档被静默夹成 RAIN）。
+- [ ] 保留 `set_weather()` / `clear_weather_override()` 覆盖机制（`cockpit3d_shot` 等取证探针依赖）；按区域概率的状态机**替换** 150 s 固定轮换，不平行新增。
 - [ ] 气象状态机：随机剧本触发（按区域 profile 概率），对外暴露 `current_weather()` / `wind_at(agl)` / `visibility_m()`。
-- [ ] 风接入 `aircraft_flight.gd`：地面风 + 风梯度，只改速度不改升力。
+- [ ] 风接入 `aircraft_flight.gd`：地面风 + 风梯度，只改速度不改升力；叠加时机在积分前。
 - [ ] 风切变：只改风矢量（含 downdraft 分量），靠现有失速/impact 判解体。
-- [ ] 积冰：`ice_level` → `CL_MAX` 与 `CD0_BASE` 两个气动量；结冰判据 = 云带 ∩ 低温 ∩ 降水。
-- [ ] 雾/能见度 → `Environment.fog_density`；低 RVR 接管 D-054 指引十字为盲降。
-- [ ] 密度高度：把气温/气压喂进现有密度模型，不另写公式。
+- [ ] 积冰：先把 `CL_MAX` / `CD0_BASE` 从 const 参数化（3+2 个调用点），再接 `ice_level`；结冰判据 = 云带 ∩ 低温 ∩ 降水（云带高度参数新建）。
+- [ ] 雾/能见度 → `day_night.setup_environment()` 钩子内新建雾配置（当前为空钩子，全库无 `fog_` 设置；禁 `volumetric_fog`，密度 0.004~0.005）；低 RVR 接管 D-054 指引十字为盲降。
+- [ ] 密度高度：把气温/气压喂进现有密度模型（`air_density()` `:211`），不另写公式。
 - [ ] 雷暴禁区 + 颠簸扰动（只扰速度）。
 - [ ] 决策面板（强飞/返航/备降/迫降），返航备降走 `set_navigation` + 指引十字。
 - [ ] METAR 简报 UI：报文数值取自实际气象状态。
 - [ ] 科普卡片：每次特情后展示对应知识点（复用现有成就/教学弹层模式）。
 - [ ] **探针**：新增 `weather_flight_probe`，覆盖风切变触发/积冰改气动/低 RVR 接管十字/决策面板四态，且**必须 `SaveGuard.snapshot()/restore()`**（D-010）。
+- [ ] **回归保护**：不得打穿现有 `weather_probe`（10 条，三档枚举+覆盖）、`night_shot`（昼夜取证）与所有钉 `set_weather(CLEAR)` 的窗口截图探针。
 
 ## 7. 验收标准
 
@@ -151,3 +163,4 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 - [ ] 恶劣天气弹决策面板，选「返航」后指引十字指向机场且能飞回去。
 - [ ] 低能见度下靠指引十字完成盲降。
 - [ ] 全量回归 0 FAIL 0 SCRIPT ERROR，`user://` 零 DIFF（D-010）。
+- [ ] 既有 `weather_probe`（10 条）/ `night_shot` / 所有钉 `set_weather(CLEAR)` 的窗口截图探针不打穿；气象扩展后 `weather_probe` 断言数只增不减。
