@@ -361,6 +361,11 @@ const REGION_COLORS := [
 ##   tree_density              每列生成树的概率
 ##   sky                       天空与光线的色调
 ##   passive/hostile           白天动物 / 夜晚敌对的加权生成表（空表即无该生态）
+##   weather_profile           飞行气象参数（详见 weather_profile_of 上方注释）：
+##                             surface_wind_mps 地面基准风速（m/s，风梯度从此值升到约 3 倍）、
+##                             shear_probability 风切变触发概率（0..1）。
+##                             由 scripts/flight/wind_model.gd 的 WindModel 读取，
+##                             本文件只配数据，不在此实现风场。
 const REGIONS := [
 	{
 		"id": PACIFIC,
@@ -385,6 +390,12 @@ const REGIONS := [
 		"sky": Color(0.92, 0.97, 1.0),
 		"passive": {"COW": 3, "SHEEP": 2, "CHICKEN": 3, "BUTTERFLY": 3},
 		"hostile": {"ZOMBIE": 4, "SPIDER": 3},
+		# 远洋信风带：海面摩擦力小、基础风速全图前列；暖水面午后雷雨对流旺，
+		# 风切变概率高但仍在儿童可玩范围内（侧风约为巡航速度的一成多）。
+		"weather_profile": {
+			"surface_wind_mps": 7.0,
+			"shear_probability": 0.6,
+		},
 	},
 	{
 		"id": ATLANTIC,
@@ -409,6 +420,11 @@ const REGIONS := [
 		"sky": Color(0.94, 0.98, 1.0),
 		"passive": {"COW": 3, "SHEEP": 3, "CHICKEN": 2, "PIG": 2, "BUTTERFLY": 3},
 		"hostile": {"ZOMBIE": 4, "SKELETON": 2, "WOLF": 2},
+		# 第二大洋，风况略逊太平洋：湾流沿线多雾、温带气团交互频繁，切变概率次高。
+		"weather_profile": {
+			"surface_wind_mps": 6.5,
+			"shear_probability": 0.55,
+		},
 	},
 	{
 		"id": INDIAN,
@@ -433,6 +449,11 @@ const REGIONS := [
 		"sky": Color(1.0, 0.97, 0.92),
 		"passive": {"CHICKEN": 4, "PIG": 3, "COW": 2, "BUTTERFLY": 3},
 		"hostile": {"SPIDER": 4, "ZOMBIE": 3},
+		# 季风最典型的大洋：季风期风向风速反差极大、对流极旺，切变概率全图最高。
+		"weather_profile": {
+			"surface_wind_mps": 6.0,
+			"shear_probability": 0.7,
+		},
 	},
 	{
 		"id": ARCTIC,
@@ -457,6 +478,12 @@ const REGIONS := [
 		"sky": Color(0.88, 0.94, 1.0),
 		"passive": {"POLAR_BEAR": 3},
 		"hostile": {},
+		# 极地东风强劲、风雪不止；但冰海下垫面均匀、对流远弱于低纬洋面，
+		# 切变概率取中等（低于三大洋）。
+		"weather_profile": {
+			"surface_wind_mps": 8.0,
+			"shear_probability": 0.4,
+		},
 	},
 	{
 		"id": ASIA,
@@ -500,6 +527,12 @@ const REGIONS := [
 		"passive": {"COW": 4, "SHEEP": 3, "CHICKEN": 2, "PIG": 2, "BUTTERFLY": 3,
 			"PANDA": 1, "GOLDEN_MONKEY": 1, "CRESTED_IBIS": 1},
 		"hostile": {"ZOMBIE": 4, "SKELETON": 3, "SPIDER": 2, "WOLF": 1},
+		# 季风区中等地面风；青藏高原/喜马拉雅山口切变真实存在，但概率远低于洋面
+		# （本区是默认出发区，儿童玩家第一站，风切变宁少勿多）。
+		"weather_profile": {
+			"surface_wind_mps": 5.0,
+			"shear_probability": 0.2,
+		},
 	},
 	{
 		"id": EUROPE,
@@ -524,6 +557,11 @@ const REGIONS := [
 		"sky": Color(0.96, 0.98, 1.0),
 		"passive": {"COW": 4, "SHEEP": 4, "CHICKEN": 2, "BUTTERFLY": 3},
 		"hostile": {"ZOMBIE": 3, "WOLF": 4, "SKELETON": 3},
+		# 温带海洋性气候风力温和（全图最低一档）；阿尔卑斯山口有地形切变但不剧烈。
+		"weather_profile": {
+			"surface_wind_mps": 4.0,
+			"shear_probability": 0.25,
+		},
 	},
 	{
 		"id": AFRICA,
@@ -548,6 +586,12 @@ const REGIONS := [
 		"sky": Color(1.0, 0.95, 0.86),
 		"passive": {"COW": 3, "SHEEP": 4, "CHICKEN": 2, "PIG": 1, "BUTTERFLY": 2},
 		"hostile": {"SPIDER": 4, "ZOMBIE": 3, "SKELETON": 3},
+		# 热带雷雨旺（撒哈拉午后对流、昼夜温差助推），切变概率为各区最高一档；
+		# 地面风中等，不至于把沙丘 gameplay 吹乱。
+		"weather_profile": {
+			"surface_wind_mps": 5.0,
+			"shear_probability": 0.45,
+		},
 	},
 	{
 		"id": NORTH_AMERICA,
@@ -572,6 +616,12 @@ const REGIONS := [
 		"sky": Color(1.0, 1.0, 1.0),
 		"passive": {"COW": 4, "PIG": 3, "SHEEP": 3, "CHICKEN": 2, "BUTTERFLY": 3, "BALD_EAGLE": 2},
 		"hostile": {"ZOMBIE": 4, "SKELETON": 3, "SPIDER": 2, "WOLF": 3},
+		# 温带大陆性中等风；落基山背风坡颠簸与中部平原干线带来一定切变，
+		# 强度低于热带雷雨区。
+		"weather_profile": {
+			"surface_wind_mps": 4.5,
+			"shear_probability": 0.3,
+		},
 	},
 	{
 		"id": SOUTH_AMERICA,
@@ -596,6 +646,12 @@ const REGIONS := [
 		"sky": Color(0.97, 1.0, 0.96),
 		"passive": {"CHICKEN": 4, "PIG": 4, "COW": 3, "SHEEP": 2, "BUTTERFLY": 4},
 		"hostile": {"SPIDER": 4, "ZOMBIE": 2, "SKELETON": 2},
+		# 双来源切变：亚马逊雨林对流旺 + 安第斯山口地形风，地面风也偏高；
+		# 均在儿童可玩范围内。
+		"weather_profile": {
+			"surface_wind_mps": 5.5,
+			"shear_probability": 0.4,
+		},
 	},
 	{
 		"id": OCEANIA,
@@ -620,6 +676,11 @@ const REGIONS := [
 		"sky": Color(1.0, 0.97, 0.9),
 		"passive": {"SHEEP": 5, "COW": 3, "CHICKEN": 2, "KANGAROO": 3, "BUTTERFLY": 3},
 		"hostile": {"SPIDER": 3, "ZOMBIE": 3, "SKELETON": 2},
+		# 热带气旋与雷雨常经之路，午后对流强，切变概率偏高（任务书点名的大区之一）。
+		"weather_profile": {
+			"surface_wind_mps": 6.0,
+			"shear_probability": 0.45,
+		},
 	},
 	{
 		"id": ANTARCTICA,
@@ -644,8 +705,44 @@ const REGIONS := [
 		"sky": Color(0.9, 0.95, 1.0),
 		"passive": {},
 		"hostile": {},
+		# 极地下降风全球最强，地面风触 9 m/s 上限（儿童向硬顶）；冰面下垫面均匀、
+		# 对流弱，切变概率中等，不随风速一起封顶。
+		"weather_profile": {
+			"surface_wind_mps": 9.0,
+			"shear_probability": 0.5,
+		},
 	},
 ]
+
+## weather_profile 数据缺项时的保守默认值：陆地温和风 + 低切变。
+## 新区域忘配天气参数也能正常飞，只是风按最稳妥的一档算——缺数据退默认，不崩。
+const DEFAULT_WEATHER_PROFILE := {
+	"surface_wind_mps": 3.0,
+	"shear_probability": 0.15,
+}
+
+
+## 该区域的风物理参数（weather_profile），供 scripts/flight/wind_model.gd 的
+## WindModel 读取（主理人编写中；本文件只配数据，不在此实现风场）。字段语义：
+##   surface_wind_mps   地面基准风速（m/s）。风梯度从此值随高度升到约 3 倍；
+##                       儿童向硬顶 9 m/s（本作巡航约 50 m/s，侧风 9 已明显可感）。
+##   shear_probability  风切变触发概率（0..1）：洋面对流旺最高（0.5~0.7），
+##                       山地/高原有切变但概率低（0.15~0.25）。
+static func weather_profile_of(region_id: int) -> Dictionary:
+	# 越界一律返回空 Dictionary，**不**做 clampi 夹取：夹取会把「调用方传错区域 id」
+	# 这种 bug 静默伪装成「取到另一个区域的风参数」（-3 → 太平洋、999 → 南极洲），
+	# 出错时现象完全对不上原因（D-066 记录在案）。返回空让上层走默认值。
+	if region_id < 0 or region_id >= COUNT:
+		return {}
+	if REGIONS.size() != COUNT:
+		return {}
+	var region: Dictionary = REGIONS[region_id]
+	if not region.has("weather_profile"):
+		# 数据缺项时退默认而非崩：见 DEFAULT_WEATHER_PROFILE 注释。
+		return DEFAULT_WEATHER_PROFILE.duplicate()
+	# 返回副本：调用方即便误写，也不会污染 REGIONS 常量数据。
+	var profile: Dictionary = region["weather_profile"]
+	return profile.duplicate()
 
 
 ## 经纬度（度，北纬/东经为正）→ 单位方向向量。
