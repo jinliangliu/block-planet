@@ -68,6 +68,14 @@ func _run() -> void:
 	GameState.needs_region_pick = false
 	GameState.current_region = RegionAtlas.ASIA
 	FlightSettings.set_current(FlightSettings.for_difficulty(FlightSettings.Difficulty.NORMAL))
+	# 关风：本条是**静态几何**闸——量面板四角与 2D dash 矩形的重合，与气象无关。
+	# D-067 起默认有风：停放机在地面风的气动力矩下持续微转动（机轮支撑vs风扭矩），
+	# 而座舱相机姿态走 slerp 阻尼（D-065 刻意不做刚性——旋转平滑是舒适度需要），
+	# 机体微转动→相机基滞后→面板投影整体偏移数 px（实测 +3.8 px，BR 角 960.4
+	# 越过 dash 右缘 958.0，C2 零余量闸误红；且是否撞线看当次风向/切变，随运行
+	# 翻转——同代码两次运行一绿一红）。与 A0「熄火再量」同一方法论：量对齐前
+	# 先掐掉运动源。风的飞行影响由 wind_flight_probe 专责验证。
+	FlightSettings.current().wind_enabled = false
 
 	var main_scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main_scene)

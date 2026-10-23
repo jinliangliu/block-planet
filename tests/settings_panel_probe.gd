@@ -1,10 +1,11 @@
 extends Node
 
 ## 无头验证 SettingsPanel 与 FlightSettings 的 UI 闭环（不依赖世界）：
-## 三行分段按钮（难度/辅助/涂装）+ 五行开关（镜头抖动/松手回正/HUD 模式/
-## 双击改平/警告蜂鸣，D-057），难度→辅助预设重置、辅助单独覆盖、点击即落盘、
-## 选中态同步、模态开/关与 closed 信号、开关与三项互不污染；
-## D 段（D-058）：「恢复默认」按钮（8 键回初值 + 信号键名 + 落盘）+ HUD
+## 三行分段按钮（难度/辅助/涂装）+ 六行开关（镜头抖动/松手回正/HUD 模式/
+## 双击改平/警告蜂鸣/气象风场，D-057 补 5 行、D-067 补风行），难度→辅助预设
+## 重置、辅助单独覆盖、点击即落盘、选中态同步、模态开/关与 closed 信号、
+## 开关与三项互不污染；
+## D 段（D-058）：「恢复默认」按钮（9 键回初值 + 信号键名 + 落盘）+ HUD
 ## _toggle_settings_panel 开关语义（触屏入口函数本体；无头不建触控层，
 ## 按钮接线由代码评审保证）。
 ## 注意按钮点击用 pressed.emit() 触发（与真实点击同路）。
@@ -101,10 +102,11 @@ func _ready() -> void:
 	FlightSettings.current().set_livery(99)
 	_check(FlightSettings.current().livery_index == AircraftLivery.count() - 1, "涂装索引越界夹回")
 
-	# ── 开关行（D-057）：5 键全部有面板入口 ──
+	# ── 开关行（D-057 五行 + D-067 风行）：全部有面板入口 ──
 	_check(panel._shake_buttons.size() == 2 and panel._recenter_buttons.size() == 2
 		and panel._hud_buttons.size() == 2 and panel._level_buttons.size() == 2
-		and panel._beeper_buttons.size() == 2, "五个开关行各两格按钮")
+		and panel._beeper_buttons.size() == 2 and panel._wind_buttons.size() == 2,
+		"六个开关行各两格按钮")
 	_check(panel._shake_buttons[0].text == "开" and panel._shake_buttons[1].text == "关",
 		"镜头抖动开关文案")
 	_check(panel._hud_buttons[0].text == "简单" and panel._hud_buttons[1].text == "详细",
@@ -116,6 +118,9 @@ func _ready() -> void:
 	_check(panel._hud_buttons[0].button_pressed, "默认 HUD=简单")
 	_check(panel._level_buttons[0].button_pressed, "默认双击改平=开")
 	_check(panel._beeper_buttons[0].button_pressed, "默认警告蜂鸣=开")
+	_check(panel._wind_buttons[0].text == "开" and panel._wind_buttons[1].text == "关",
+		"气象风场开关文案")
+	_check(panel._wind_buttons[0].button_pressed, "默认气象风场=开")
 
 	# 逐个切换：单例值 + 信号键名（Dictionary 按引用捕获，可靠计数）。
 	var keys := {"n": 0, "last": ""}
@@ -135,17 +140,21 @@ func _ready() -> void:
 	_check(not FlightSettings.current().auto_level, "点关后双击改平=false")
 	panel._beeper_buttons[1].pressed.emit()
 	_check(not FlightSettings.current().beeper_enabled, "点关后警告蜂鸣=false")
-	_check(keys["n"] == 5, "五次开关各发一次信号（实际 %d）" % keys["n"])
+	panel._wind_buttons[1].pressed.emit()
+	_check(not FlightSettings.current().wind_enabled, "点关后气象风场=false")
+	_check(keys["last"] == "wind_enabled", "信号带变更键名 wind_enabled")
+	_check(keys["n"] == 6, "六次开关各发一次信号（实际 %d）" % keys["n"])
 	# 选中态同步（refresh 路径）：关/详细在 index 1。
 	_check(panel._shake_buttons[1].button_pressed and not panel._shake_buttons[0].button_pressed,
 		"镜头抖动选中态同步到关")
 	_check(panel._hud_buttons[1].button_pressed and not panel._hud_buttons[0].button_pressed,
 		"HUD 选中态同步到详细")
-	# 落盘读回：5 键 + 三项都在。
+	# 落盘读回：6 个开关 + 三项都在。
 	var read3 := FlightSettings.load_or_new()
 	_check(read3.camera_shake == false and read3.auto_recenter == false
 		and read3.hud_detail == true and read3.auto_level == false
-		and read3.beeper_enabled == false, "五个开关全部落盘，读回一致")
+		and read3.beeper_enabled == false and read3.wind_enabled == false,
+		"六个开关全部落盘，读回一致")
 	_check(read3.difficulty == FlightSettings.Difficulty.EXPERT
 		and read3.assist_level == FlightSettings.Assist.OFF,
 		"开关变更不动难度/辅助（隔离性）")
@@ -158,7 +167,7 @@ func _ready() -> void:
 		"难度变更不重置开关值")
 
 	# ── D 段（D-058）：「恢复默认」按钮 + 触屏开关入口 ──
-	# 先把 8 键全改成非默认值，再点「恢复默认」，逐一验回初值 + 落盘。
+	# 先把 9 键全改成非默认值，再点「恢复默认」，逐一验回初值 + 落盘。
 	var defaults := FlightSettings.default_settings().to_dict()
 	_check(panel._reset_button != null and panel._reset_button.text == "恢复默认",
 		"标题行有「恢复默认」按钮")
@@ -167,13 +176,14 @@ func _ready() -> void:
 	panel._hud_buttons[1].pressed.emit()        # hud_detail = true
 	panel._level_buttons[1].pressed.emit()      # auto_level = false
 	panel._beeper_buttons[1].pressed.emit()     # beeper_enabled = false
+	panel._wind_buttons[1].pressed.emit()       # wind_enabled = false
 	panel._livery_buttons[3].pressed.emit()     # livery_index = 3
 	var dirty := FlightSettings.current().to_dict()
 	var any_dirty := false
 	for k in defaults:
 		if dirty[k] != defaults[k]:
 			any_dirty = true
-	_check(any_dirty, "改乱后 8 键至少一项偏离默认（前提）")
+	_check(any_dirty, "改乱后 9 键至少一项偏离默认（前提）")
 	var reset_keys := {"n": 0, "last": ""}
 	panel.settings_changed.connect(func(_d: int, _a: int, _l: int, k: String) -> void:
 		reset_keys["n"] += 1
@@ -185,7 +195,7 @@ func _ready() -> void:
 		if after[k] != defaults[k]:
 			all_default = false
 			print("  恢复默认偏差: %s = %s（期望 %s）" % [k, str(after[k]), str(defaults[k])])
-	_check(all_default, "恢复默认后 8 键全部回到默认值")
+	_check(all_default, "恢复默认后 9 键全部回到默认值")
 	_check(reset_keys["n"] == 1 and reset_keys["last"] == "reset",
 		"恢复默认发一次信号且键名=reset（实际 n=%d last=%s）"
 			% [reset_keys["n"], reset_keys["last"]])
@@ -193,7 +203,7 @@ func _ready() -> void:
 		and panel._livery_buttons[0].button_pressed,
 		"恢复默认后三项选中态同步回默认")
 	_check(panel._shake_buttons[0].button_pressed and panel._hud_buttons[0].button_pressed
-		and panel._beeper_buttons[0].button_pressed,
+		and panel._beeper_buttons[0].button_pressed and panel._wind_buttons[0].button_pressed,
 		"恢复默认后开关选中态同步回默认")
 	var read4 := FlightSettings.load_or_new()
 	_check(read4.to_dict() == defaults, "恢复默认已落盘，读回一致")

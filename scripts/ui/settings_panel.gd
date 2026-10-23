@@ -6,16 +6,19 @@ extends Control
 ##   - 难度：休闲 / 标准 / 硬核（预设决定默认辅助等级）
 ##   - 辅助稳定：关闭 / 半开 / 全开（可单独覆盖难度的默认值）
 ##   - 涂装：四套 AircraftLivery
-## 一组「相机与提示」开关行（两格分段按钮，D-057 补齐入口）：
-##   - 镜头抖动 / 松手回正 / HUD 模式（简单|详细）/ 双击改平 / 警告蜂鸣
+## 两组开关行（两格分段按钮，D-057 补齐入口）：
+##   「相机与提示」- 镜头抖动 / 松手回正 / HUD 模式（简单|详细）/ 双击改平 / 警告蜂鸣
+##   「气象」- 风（D-067 的 wind_enabled：关掉后 State.wind 恒零，气动行为与
+##   无气象版逐字节一致）
 ## 改动即时生效（飞机每帧读 FlightSettings.current().gains()）并落盘
 ## user://settings.json；面板本身只做展示与改写，不直接碰飞行动力学。
-## 8 键全部有面板入口（D-057）；标题行带「恢复默认」一键回 8 键初值（D-058）；
+## 9 键全部有面板入口（D-057 补 5 开关、D-067 的风闸同款补行）；标题行带
+## 「恢复默认」一键回 9 键初值（D-058，reset_to_defaults 为默认值唯一定义处）；
 ## 触屏设备经 HUD 动作按钮簇的「设置」按钮打开本面板（D-058，hud.gd）。
 
 signal closed
 ## changed 为变更键名（camera_shake/auto_recenter/hud_detail/auto_level/
-## beeper_enabled）；难度/辅助/涂装变更时为空串，消费方按需分支。
+## beeper_enabled/wind_enabled）；难度/辅助/涂装变更时为空串，消费方按需分支。
 signal settings_changed(difficulty: int, assist_level: int, livery_index: int, changed: String)
 
 const PANEL_BG := Color(0.95, 0.92, 0.84)
@@ -33,6 +36,8 @@ var _recenter_buttons: Array[Button] = []
 var _hud_buttons: Array[Button] = []
 var _level_buttons: Array[Button] = []
 var _beeper_buttons: Array[Button] = []
+## 「气象」风开关行（D-067 的 wind_enabled，与 D-057 五行同款两格分段）。
+var _wind_buttons: Array[Button] = []
 ## 「恢复默认」按钮（D-058，标题行；探针经此点它）。
 var _reset_button: Button
 var _status_label: Label
@@ -82,7 +87,7 @@ func _ready() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	# 「恢复默认」（D-058）：放在标题行常驻可见——小屏面板内容可滚动，
-	# 放底部会被滚出视野；误点代价仅是重选三行 + 五个开关，不做二次确认。
+	# 放底部会被滚出视野；误点代价仅是重选三行 + 六个开关，不做二次确认。
 	var reset_btn := Button.new()
 	reset_btn.text = "恢复默认"
 	reset_btn.custom_minimum_size = Vector2(96, 36)
@@ -124,6 +129,12 @@ func _ready() -> void:
 		_settings.auto_level, _level_buttons))
 	vbox.add_child(_make_toggle_row("警告蜂鸣", "beeper_enabled", ["开", "关"],
 		_settings.beeper_enabled, _beeper_buttons))
+
+	# 「气象」开关区（D-067）：风场总闸。关掉后 State.wind 恒零，气动行为与
+	# 无气象版逐字节一致（探针 / 取证同用）；默认开。
+	vbox.add_child(_make_row_label("气象"))
+	vbox.add_child(_make_toggle_row("风", "wind_enabled", ["开", "关"],
+		_settings.wind_enabled, _wind_buttons))
 
 	var hint := Label.new()
 	hint.text = "辅助稳定只在松杆时接管：放手后自动摆平机翼、压住摆头；一压杆立刻让位。"
@@ -214,6 +225,7 @@ func refresh() -> void:
 	_sync(_hud_buttons, 1 if _settings.hud_detail else 0)
 	_sync(_level_buttons, 0 if _settings.auto_level else 1)
 	_sync(_beeper_buttons, 0 if _settings.beeper_enabled else 1)
+	_sync(_wind_buttons, 0 if _settings.wind_enabled else 1)
 	if _status_label != null:
 		_status_label.text = "当前：难度 %s · 辅助 %s · 涂装 %s" % [
 			_settings.difficulty_name(), _settings.assist_name(), _settings.livery_name()]
@@ -253,11 +265,13 @@ func _on_toggle(key: String, index: int) -> void:
 			_settings.auto_level = (index == 0)
 		"beeper_enabled":
 			_settings.beeper_enabled = (index == 0)
+		"wind_enabled":
+			_settings.wind_enabled = (index == 0)
 	_after_change(key)
 
 
-## 「恢复默认」（D-058）：8 键一次性回到默认值（默认值唯一定义在
-## FlightSettings.reset_to_defaults），随后走统一落盘 + Toast 通道
+## 「恢复默认」（D-058）：9 键一次性回到默认值（默认值唯一定义在
+## FlightSettings.reset_to_defaults，含 wind_enabled），随后走统一落盘 + Toast 通道
 ## （changed="reset"，HUD 文案「已恢复默认设置」）。
 func _on_reset() -> void:
 	_settings.reset_to_defaults()

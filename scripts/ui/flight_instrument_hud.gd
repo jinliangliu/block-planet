@@ -9,7 +9,7 @@ extends Control
 ##   地图(M)/回放(R) → 由战术地图/回放覆盖层接管，本 HUD 隐藏
 ##
 ## 简单/详细模式（FlightSettings.hud_detail，H 键切换落盘）：详细模式追加左侧
-## 12 仪表全清单 + 始终显示小地图。
+## 7 行增量清单（只放四角没有的读数，U-5）+ 始终显示小地图。
 ##
 ## 警告：六类警告按优先级取最高级，闪烁横幅 + 蜂鸣/语音呼号（AlertBeeper）。
 ## 注册的 3D 视图（座舱 3D 面板 / 世界标注）每帧也收到同一份 FlightInstruments。
@@ -181,12 +181,14 @@ func _apply_visibility(mode: int) -> void:
 	_cockpit.visible = fp
 	_minimap.visible = chase
 	var detail := FlightSettings.current().hud_detail
-	# D-049：座舱视角下隐藏 12 行详细清单——座舱仪表簇（地平仪/ALT/航向带/
+	# D-049：座舱视角下隐藏 7 行增量清单——座舱仪表簇（地平仪/ALT/航向带/
 	# SPD）就是座舱面板本身，文字清单与它大面积重复且抢注意力；追尾/后视/
-	# 环顾等「机体在屏外」的视角才需要文字全读数。地图/回放同样不显示。
+	# 环顾等「机体在屏外」的视角才需要文字增量读数。地图/回放同样不显示。
 	_panel.visible = detail and not map_like and not fp
 	# 警告横幅：有警告且非地图/回放时显示（_refresh_warn 再细化内容）。
-	var has_alerts := not _instruments.alerts().is_empty()
+	# U-6 / D-069：失速类走 banner_alerts() 排除——权威文字通道是 hud.gd 的
+	# 卡片失速行（带【↓】/U-8 状态机文案），本横幅对失速让位、只报其余警告。
+	var has_alerts := not _instruments.banner_alerts().is_empty()
 	_warn.visible = has_alerts and not map_like
 	# 横幅位置（D-052）：座舱视角卡片已挪到左上，横幅回到顶部中央（最醒目
 	# 且不挡视野）；追尾视角卡片占顶部中央 y16~221（含教练区），横幅必须
@@ -277,56 +279,63 @@ func _build_panel() -> void:
 	_panel.anchor_right = 0.0; _panel.anchor_bottom = 1.0
 	_panel.offset_left = 16.0
 	_panel.offset_right = 280.0
-	# 与 _c_tl 共用同一条让位线（120）：左上角生命/饥饿读数块（姓名 + 爱心 + 饥饿）
-	# 占 y16~100，飞行中不再隐藏，故左上角一切元素统一从 y120 起，留出 20 px 间隙。
-	# 本面板与读数块同为 offset_left=16，横向完全重合，间距不足会直接贴脸。
-	_panel.offset_top = 120.0
+	# U-5：面板顶边从 y120 下移到 y200——让出左上角空速/航向角（y120..184，
+	# 与本面板同一条 x16 左缘）。D-046 遗留①：_panel 是 _chase 的后置兄弟节点，
+	# 两处文字互相叠画；生命/饥饿读数块占 y16~100，本面板只在 H 详细模式出现，
+	# 非详细模式四角位置不受影响。
+	_panel.offset_top = 200.0
 	_panel.offset_bottom = -190.0
 	add_child(_panel)
 	var box := VBoxContainer.new()
 	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	box.add_theme_constant_override("separation", 2)
 	_panel.add_child(box)
+	# U-5：12 行全读数 → 7 行增量清单。空速/航向/MSL 高度/升降率/燃油与追尾
+	# 四角同文（_refresh_chase），雷达高度与离地本是同一个 altitude_agl 合并
+	# 为一行，警告行与全宽横幅同源同文（横幅是警告权威通道，U-6）。文案由静态
+	# 纯函数 panel_row_texts() 生成——无头探针直接断言，节点层只上屏。
 	var titles := [
-		"空速 / 失速余量", "姿态（俯仰/坡度）", "高度 MSL / 离地",
-		"转弯率 / 协调", "航向", "升降率", "HSI 方位 / CDI",
-		"雷达高度", "发动机转速", "燃油", "襟翼 / 起落架", "警告",
+		"失速余量", "姿态（俯仰/坡度）", "离地高度",
+		"转弯率 / 协调", "导航 CDI", "转速", "襟翼 / 起落架",
 	]
 	for t in titles:
-		var l := _mk_label(box, 14, COL_NORMAL)
+		var l := _mk_label(box, 15, COL_NORMAL)
 		l.text = t + "：—"
 		_panel_rows.append(l)
+
+
+## 详细清单 7 行文案（U-5）：静态纯函数——无头探针直接断言，节点层只上屏。
+## 定位「四角没有的增量信息」：空速/航向/MSL 高度/升降率/燃油已在追尾四角
+## （_refresh_chase）；雷达高度与离地本是同一个 altitude_agl，合并为一行；
+## 警告行与全宽横幅同源同文，整体撤掉（横幅是警告权威通道，见 U-6）。
+static func panel_row_texts(fi: FlightInstruments) -> Array[String]:
+	var out: Array[String] = []
+	out.append("失速余量：%+.0f km/h" % fi.airspeed_margin_kmh)
+	out.append("姿态：俯仰 %+.0f°  坡度 %+.0f°" % [fi.pitch_deg, fi.roll_deg])
+	out.append("离地：%d m" % int(fi.altitude_agl))
+	out.append("转弯率：%+.1f°/s（标准率 %s）" % [fi.turn_rate_deg_s,
+		"●" if fi.standard_rate else "○"])
+	if fi.nav_active:
+		out.append("CDI：%+.0f°（%s）" % [fi.nav_dev_deg,
+			"TO" if fi.nav_to_flag else "FROM"])
+	else:
+		out.append("CDI：—")
+	out.append("转速：%d rpm（%d%%）" % [int(fi.rpm), int(fi.rpm_pct * 100.0)])
+	out.append("襟翼：%d 档   起落架：%s" % [fi.flaps,
+		"放下↓" if fi.gear_down else "收起"])
+	return out
 
 
 func _refresh_panel() -> void:
 	if not _panel.visible:
 		return
-	var r := _panel_rows
 	var fi := _instruments
-	r[0].text = "空速 / 失速余量：%d km/h（余 %+.0f）" % [
-		int(fi.airspeed_kmh), fi.airspeed_margin_kmh]
-	r[0].add_theme_color_override("font_color",
+	var texts := panel_row_texts(fi)
+	for i in texts.size():
+		_panel_rows[i].text = texts[i]
+	# 第 0 行是清单里唯一的状态行：失速/超速时整行变红（原 r0 行为保留）。
+	_panel_rows[0].add_theme_color_override("font_color",
 		COL_WARN if (fi.overspeed or fi.stalled) else COL_NORMAL)
-	r[1].text = "姿态：俯仰 %+.0f°  坡度 %+.0f°" % [fi.pitch_deg, fi.roll_deg]
-	r[2].text = "高度：MSL %d m / 离地 %d m" % [int(fi.altitude_msl), int(fi.altitude_agl)]
-	r[3].text = "转弯率：%+.1f°/s（标准率 %s）" % [fi.turn_rate_deg_s,
-		"●" if fi.standard_rate else "○"]
-	r[4].text = "航向：%03d°" % int(fi.heading_deg)
-	r[5].text = "升降率：%+.1f m/s" % fi.vertical_speed
-	r[6].text = "HSI：方位 %03d°  CDI %+.0f°（%s）" % [
-		int(fi.nav_bearing_deg), fi.nav_dev_deg, "TO" if fi.nav_to_flag else "FROM"]
-	r[7].text = "雷达高度：%d m" % int(fi.altitude_agl)
-	r[8].text = "转速：%d rpm（%d%%）" % [int(fi.rpm), int(fi.rpm_pct * 100.0)]
-	r[9].text = "燃油：%d / %d L（%d%%）" % [
-		int(fi.fuel_liters), int(fi.fuel_capacity), int(fi.fuel_ratio * 100.0)]
-	r[9].add_theme_color_override("font_color",
-		COL_CAUTION if fi.fuel_low else (COL_WARN if fi.fuel_empty else COL_NORMAL))
-	r[10].text = "襟翼：%d 档   起落架：%s" % [fi.flaps, "放下↓" if fi.gear_down else "收起"]
-	var al := fi.alerts()
-	r[11].text = "警告：" + (al[0]["text"] if not al.is_empty() else "无")
-	r[11].add_theme_color_override("font_color",
-		COL_WARN if (not al.is_empty() and al[0]["level"] == FlightInstruments.AlertLevel.WARNING)
-		else (COL_CAUTION if not al.is_empty() else COL_GOOD))
 
 
 # ── 警告横幅 ──
@@ -346,7 +355,8 @@ func _build_warn() -> void:
 
 
 func _refresh_warn() -> void:
-	var al := _instruments.alerts()
+	# U-6 / D-069：banner_alerts() 已剔除失速类（卡片失速行是权威通道）。
+	var al := _instruments.banner_alerts()
 	if al.is_empty():
 		_warn.visible = false
 		return

@@ -2152,3 +2152,68 @@ D-063 起 **1 格 = 1 m**，世界高 256 m，分层地形实测最高 **188 m**
 1. **untyped Array 的循环变量会让 `:=` parse error**：`for pin in pins:`（pins 是 `Array`）里 `var d := pin.position.length()` 报「Cannot infer the type of "d" variable」——元素是 Variant，无类型可推断。必须写 `for pin: Node3D in pins:`，或用 `as` 强转。本项目 `enable_all_warnings=true`，**parse error 会让探针直接跑不起来**（上一批探针栽在这，且因为派工时不许跑 Godot，问题留到串行验证才暴露）。
 2. **`clampi` 式的越界保护会伪装 bug**：`landmarks_of(-3)` 原被夹成太平洋、`999` 夹成南极洲——「调用方传错 id」的现象会完全对不上原因。改为越界返回空数组。
 3. **派工并行写码时，务必约定「谁都不许跑探针」**：`user://` 竞态会污染结论；由主理人串行跑，才能顺带抓出上一条那种 parse error。
+
+---
+
+## D-067 气象第一批：风场接入飞行模型（feature_flight-aviation_weather.md §2.1/§2.2）
+
+**取舍**：气象六批清单中先做「风 + 风切变」两层——它们是唯一直接改写飞行动力学的一批，且不改升力模型，回归面可控；积冰/能见度/决策面板留待后续批次。
+
+### 风接入的核心设计：`velocity` 保持地速语义，空速只在气动函数内现算
+
+- `State.velocity` **不动**（仍是地速度）；新增 `State.wind`（默认 `Vector3.ZERO`）。
+- 所有气动入口改读 `air_velocity = velocity − wind`：`dynamic_pressure` / `angle_of_attack` / `sideslip` / `acceleration` / `_refresh_readings`。
+- 收益：位置积分与节点侧速度流**零改动**；`wind == ZERO` 时与 D-030~D-035 基线逐字节一致（探针守护）；切变 = 外部每帧填 `st.wind` 一个量。
+- **红线：切变只改风矢量，绝不动 `velocity`**（`wind_flight_probe` C3 钉死）——否则气动自洽被破坏，且节点每帧覆写会让模型级结论失真。
+- 代价：`State.airspeed` 读数由「地速大小」变为**真空速**。全量审查消费方后确认语义一致：仪表显示 TAS（正确）、座舱抖动用 `ground_speed`（正确）、襟翼 VFE 用空速（正确）、录像存读数不重算（正确）。
+
+### 风模型与数据
+
+`scripts/flight/wind_model.gd`（纯逻辑）：地表风随 AGL 爬升约 3×（80 m 处 ≈11~12 m/s），方向种子取自 `RegionAtlas.profile(region).seed`。切变剧本 = 风向急转 ±60~120° + 强度 ×2.5 + 下沉 ≤6 m/s，8 s 瞬态；AGL<45 m 低空门控 + 60 s 冷却 + 登机 20 s 静默。区域数据 `weather_profile`（`surface_wind_mps`/`shear_probability`）落 `RegionAtlas`；`weather_profile_of()` 越界**拒绝**（返空 Dictionary）而非 clamp——同 D-066 的 `landmarks_of` 教训，clamp 会伪装调用方 bug。
+
+### 抓到一个 D-030 时代的老 bug：风标稳定性符号写反
+
+`weathervane = beta × YAW_STABILITY`，注释自 D-030 起写的就是「侧滑**回中**」——但 beta<0（来流自左前）时目标偏航为正，把机头继续往右（顺风）掰，**放大**侧滑，行为与意图相反。无风时被辅助稳定 Mask；侧风一上线立即发散：实测机头转向顺风、横速 21 m/s、侧滑阻力把空速从 50 吃到 13。改正为 `-beta × YAW_STABILITY` 后：机头 2 s 内平滑修入风（-168.9° ≈ 西偏 11°，正是 `asin(w/V)` 的侧风角），beta 单调收敛无过冲，空速保住 49。属实现 bug 而非标定选择，故直接改正。
+
+曾同时加大侧滑偏航阻尼（PD 化风标）：实测 11.7 m/s 稳态侧风 / 20 m/s 突风 / 突风撤除三种场景下开与关响应几乎一致，**无收益，已删**——只留符号修正，少一个机制少一处维护面。
+
+### 连带修正：失速诱发路径（历史「满拉杆失速」是伪失速）
+
+风标符号修正后，满拉杆变成干净的内滚翻：俯仰率恒定 63°/s，40 m/s 时所需 CL 仅 0.78 < CL_MAX，alpha 恒 0.15 < 失速角 0.32——**永不失速**。即历史上 flight_probe E 段「持续满拉杆失速」的真实成因是错误风标放大侧滑 → 阻力吃光速度 → 伪失速。诚实机制是**能量耗尽**：怠速 + 满拉杆，速度掉到 20 m/s 以下时所需 CL 超 CL_MAX，alpha 自然越限。flight_probe E 段与 `flight_hud_shot` ③ 均已改走此路径（该截图探针注释里「直接满杆只是 zoom 爬升」的旧结论是在错误风标下测得的，一并作废）。
+
+另：flight_probe「无油门时保持静止」在地面有风时真实空速=风速，断言改为地速（「对地静止」语义等价）。
+
+### 验证
+
+- `tests/wind_flight_probe.gd` **40 PASS**：风梯度；顺/逆风地速分流（B1/B2，1 s 位移差可测）；侧风偏流；切变掉高度 + 推油门改出（C1/C2 同剧本同 15 s 窗口、唯一变量为油门：怠速侧掉高 68.9 m 且空速崩，满油门侧同窗口少掉 12.9 m、切变后下沉收敛）；C3 切变只改 wind 不动 velocity；区域数据完整性；`SaveGuard` 全路径（user:// 逐字节还原）。
+- 全套回归（含窗口取证档）FAIL=0。已加入 `tmp/run_regression.sh` 日常清单。
+
+### 踩坑
+
+1. **探针命令重发 = 并行污染**：连续两次把同一条探针命令重发成 3 连发，违反 D-010「探针严禁并行」，`progress.json`/`fishing_journal.json`/`boats.json` 被写花。纪律：每条探针命令只发一次；发现并行后先从 `tmp/user_backup` 还原再重跑。
+2. **先查符号、后补机制**：风标「发散」的第一反应是加阻尼（PD 化），但根因是比例项符号写反。顺序反了会得到一个「看起来修好了」的多余参数，掩盖真 bug。
+3. **满拉杆 ≠ 失速**：目标俯仰是角速度指令且 authority 随动压衰减，巡航态满杆只做 zoom 爬升（alpha 稳在平衡点）；要诱发失速必须先把能量耗尽。
+4. **静态几何闸必须掐掉气象变量**：`cockpit_align_probe` 量「3D 仪表台四角与 2D dash 矩形重合」（C2 零余量：BR 角必须 ≤ 板右缘）。D-067 默认开风后，停放机在地面风力矩下持续微转动，而座舱相机姿态走 slerp 阻尼（D-065 刻意不做刚性）——机体微转动 → 相机基滞后 → 面板投影整体偏移 +3.8 px，BR 960.4 越过 958.0；且是否撞线取决于当次风向/切变，同代码两次运行一绿一红。修法：该探针显式 `wind_enabled = false`（与 A0「熄火再量」同一方法论——量对齐前掐掉运动源），风的影响由 `wind_flight_probe` 专责。关风后四角投影与目标值逐位一致（BL 323.7 / BR 956.3）。
+5. **相机位移采样只能等 `process_frame`，不能等 `physics_frame`**：`flight_view_probe` ④ 用 `_frames()`（等的是 physics_frame，60 Hz）采样相机位移，而相机在 `_process`（窗口档 ~16 Hz）里更新——一帧渲染慢时可挤进 6~8 个物理 tick 且全部早于首次 `_process`，读到「还没动」的 0.00 m（误报「出座舱瞬移」）。且 fps 越高 12 个 process_frame 覆盖的墙钟越短（60 fps 仅 0.2 s，阻尼才走 55%，追尾距离 6.8 m 又误红）。修法：平滑/硬切判「单步最大占比」（硬切一步 100%，阻尼单步 ≤22%，与首步何时到来无关——时序免疫），终值判「等阻尼收敛」（45 个物理帧 ≈0.75 s，覆盖率 95%）。
+
+## D-068 文档审核收尾：风闸面板入口补齐 + 钓鱼回归探针 + 重复文档清理
+
+feature 文档全量审核（代码一致性 + 设计内部一致性）后「按建议实施」的一轮：前两轮回订了文档（feature_flight.md 全文按已废止的 0.5 m/格换算等系统性问题），本条记录第三轮的代码/探针/清理动作。
+
+### 一、`wind_enabled` 面板入口（D-067 的最后一块 UI）
+
+D-067 上线第 9 键时只做了数据层，面板无入口——「只能手改 JSON」与 D-057 以来「全部键可面板调整」的承诺相悖。本次按 D-057 同款 `_make_toggle_row` 在设置面板补「气象」区「风」开关行（默认开），`hud.gd` 的 Toast 映射补 `wind_enabled` 分支。探针同步：`settings_panel_probe` +4（58 → **62**：文案/默认态/切换与信号键名/恢复默认含该键）、`flight_settings_probe` +4（31 → **35**：to_dict 默认开、from_dict 还原 false、旧档缺键向前兼容、落盘往返）——此前第 9 键在数据层零覆盖。
+
+### 二、钓鱼回归探针（`tests/fishing_probe.gd`，87 PASS）
+
+钓鱼数值此前只有数据加载期自检 + boat_probe 间接覆盖，收线三败局无回归闸。新探针覆盖：四份数据自检（16 钓点/20 鱼/岸边钓点过滤/默认钓具）、纯计算（抛投距离公式与水层边界、饵适配度、铅坠惩罚、装配校验、咬钩门槛）、等咬钩超时（`NO_BITE_FACTOR` 单帧大步长分支）、完整钓获（单鱼种池确定性：等咬钩 → 收线 → 结算，验重量区间、日志 records/replay/stats、Progress 计数折算）、三败局（饵不对没鱼 / 卸力最大断线 / 卸力全松跑鱼）、放生与教学、状态机边界。已登记进 `tmp/run_regression.sh` 日常清单。
+
+**断线用例的确定性设计**：借任务锁装备 `heavy_reel`（drag_max=5）——卸力最大时逃逸速率 `max(0, fight×0.04 − drag×0.10)` 归零，断线必然先于跑鱼（basic_reel 卸力 2 时两者速率太接近，结论不确定）；发放走 `grant_gear()` 公有接口，不验解锁流。
+
+**D-010 新形态**：`SaveGuard` 不覆盖 `user://fishing_journal.json`，且 `FishingSystem._exit_tree` 会补写日志、`Progress._exit_tree` 会补写进度——探针除 SaveGuard 外单独快照钓鱼日志原文本，收尾还原文本 + 把 `journal_ok` 置否（启用 `_save_journal` 既有的拒写闸），退出期不再补写；实测 user:// 逐字节还原（RESTORED_OK）。
+
+### 三、陈旧注释与重复文档
+
+- `aircraft.gd` 头注三处仍按 D-030 的 0.5 m/格（D-063 的订正清单漏了该文件）：世界尺度、碰撞盒格数、世界高「256 格 = 128 m」全部订正为 1 m/格；`aircraft_flight.gd` 尺度注释的 ADR 引用「D-062 P1」订正为 **D-063**（D-062 是 P0 坐标地基，尺度切换是 D-063 本身）。
+- 根目录 `feature_fishing.md` / `feature_car_racing.md` 是被 `features/` 新版取代的旧任务书（仅历史日志引用、无现行引用），删除；git 历史可恢复。
+- 回归基数：日常无头 42 → **43** 探针、验收 53 → **54**（ fishing_probe 入日常清单）；`feature_flight.md` / `feature_settings_panel.md` / `feature_car_racing.md` 计数同步回订，`landing_quality_probe` 断言数统一为 45（46 行含 1 行函数定义）。

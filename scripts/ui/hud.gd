@@ -111,16 +111,16 @@ var _flight_panel: PanelContainer
 var _flight_speed: Label
 var _flight_altitude: Label
 var _flight_throttle: Label
-var _flight_stall: Label
 ## D-052：卡片标题与「座舱视角下卡片是否已靠左」的布防状态。
 ## 座舱视角卡片挪到左上并只留教练区（数据行让位给仪表），追尾视角维持
 ## 顶部居中的全读数——两套布局只在视角切换时重排一次。
 var _flight_title: Label
 var _panel_at_left := false
-## 飞行面板卡片内的起飞教练区（D-046）：原为屏幕底部独立横条，按用户要求
-## 「2区和3区合并按照2区风格展示」并进本卡片——分隔线 + 主句 + 副句 + 进度条，
-## 全部用卡片既有的 Label 行风格，不引入新的视觉语言。巡航/失速时整体隐藏，
-## 卡片缩回原高度。教练文案由 TakeoffCoach 纯逻辑算出（本类不画界面）。
+## 飞行面板卡片内的教练区（D-046 起飞教练 / U-8 失速改出教案共用）：原为屏幕
+## 底部独立横条，按用户要求「2区和3区合并按照2区风格展示」并进本卡片——分隔线
+## + 主句 + 副句 + 进度条，全部用卡片既有的 Label 行风格，不引入新的视觉语言。
+## 巡航/无教案时整体隐藏，卡片缩回原高度。文案由纯逻辑器算出（本类不画界面）；
+## 失速时 StallCoach 占用、TakeoffCoach 让位（D-069）。
 var _coach_sep: ColorRect
 var _coach_main: Label
 var _coach_sub: Label
@@ -158,6 +158,10 @@ var _instrument_hud: FlightInstrumentHUD
 ## 该做的一步算成 {text, sub, bar, color, flash}，由 _refresh_flight_panel
 ## 用飞行面板卡片的风格渲染（D-046 起不再自己画底部横条）。
 var _takeoff_coach: TakeoffCoach
+## 失速改出教学（U-8 / D-069）：纯逻辑状态机，与起飞教练共用卡片教练区
+## （同一块地两套教案不能同屏——失速教案非空即占用，起飞教练让位但内部
+## 计时照常推进，防「起飞成功」横幅在教案结束后复活）。
+var _stall_coach: StallCoach
 ## 警告蜂鸣码播放器（D-034）：程序生成音，落地儿童友好「语音提示」。
 var _alert_beeper: AlertBeeper
 
@@ -259,6 +263,8 @@ func _build() -> void:
 	add_child(_instrument_hud)
 	# 起飞教练（D-043 / D-046）：纯逻辑器，不挂场景树（界面合并进飞行面板）。
 	_takeoff_coach = TakeoffCoach.new()
+	# 失速改出教练（U-8 / D-069）：同上，纯逻辑器；登机时 bind 并重置。
+	_stall_coach = StallCoach.new()
 	# 警告蜂鸣码播放器（D-034）：程序生成音，无 TTS / 无语音资产依赖。
 	_alert_beeper = AlertBeeper.new()
 	add_child(_alert_beeper)
@@ -689,17 +695,17 @@ func _build_flight_panel(root: Control) -> void:
 	_flight_speed = _flight_line(box, Color(1.0, 1.0, 1.0, 0.95))
 	_flight_altitude = _flight_line(box, Color(1.0, 1.0, 1.0, 0.95))
 	_flight_throttle = _flight_line(box, Color(1.0, 0.84, 0.45))
-	_flight_stall = _flight_line(box, Color(1.0, 0.42, 0.36))
-	_flight_stall.visible = false
 	# D-033：视角模式 + 发动机状态两行新读数。
 	_flight_view = _flight_line(box, Color(0.80, 0.90, 1.0))
 	_flight_engine = _flight_line(box, Color(0.55, 0.95, 0.65))
 
-	# ── 起飞教练区（D-046）────────────────────────────────
+	# ── 教练区（D-046 起飞教练 / U-8 失速改出教案共用）──────────────────
 	# 原为屏幕底部独立横条（D-043），按用户要求「2区和3区合并按照2区风格展示」
 	# 并进本卡片：分隔线 + 主句 + 副句 + 进度条，全部沿用卡片既有的 Label 行
-	# 与 █/░ 进度字形，不引入新的视觉语言。文案由 TakeoffCoach（纯逻辑）算出，
-	# 这里只负责显隐与上色；巡航/失速时四个节点整体隐藏，卡片缩回原高度。
+	# 与 █/░ 进度字形，不引入新的视觉语言。文案由纯逻辑器算出（TakeoffCoach /
+	# StallCoach），这里只负责显隐与上色；巡航/无教案时四个节点整体隐藏，卡片
+	# 缩回原高度。U-8 起原卡片失速行（D-046「永远可见」）删除，失速文字由
+	# StallCoach 教案①起接管本区（D-069）。
 	var sep := ColorRect.new()
 	sep.color = Color(0.86, 0.91, 0.97, 0.22)
 	sep.custom_minimum_size = Vector2(0.0, 1.0)
@@ -1118,11 +1124,18 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 			_instrument_hud.setup(cr, _flight_camera)
 	# 起飞教练（D-043 / D-046）：登机绑定飞机（顺带把阶梯重置回第①步），
 	# 下机解绑。界面不在这里显隐——教练区是飞行面板卡片的子节点，随卡片走。
+	# 失速改出教案（U-8 / D-069）：同范式，bind 时整体重置（每次登机从干净
+	# 态开始；教案只在一段飞行内推进）。
 	if _takeoff_coach != null:
 		if _riding and _player != null:
 			_takeoff_coach.bind(_player.aircraft())
 		else:
 			_takeoff_coach.unbind()
+	if _stall_coach != null:
+		if _riding and _player != null:
+			_stall_coach.bind(_player.aircraft())
+		else:
+			_stall_coach.unbind()
 	_refresh_flight_panel()
 
 
@@ -1165,7 +1178,8 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 		_flight_panel.visible = false
 		return
 	_flight_panel.visible = true
-	# 座舱视角：卡片挪到左上、只留「失速行 + 教练区」（D-052）。
+	# 座舱视角：卡片挪到左上、只留教练区（D-052；U-8 起失速行删除，
+	# 「失速行 + 教练区」收敛为教练区一份）。
 	# 根因：卡片 236×~205 悬在屏幕顶部正中，正压在起飞滑跑时最需要看的
 	# 跑道朝向/地平线上；且顶部警告横幅（y150..190）会直接压在卡片下半部，
 	# 实测「发动机 运转」与「失速了！推杆低头」叠成一团。座舱里 SPD/ALT/
@@ -1197,12 +1211,6 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 	_flight_throttle.text = "油门  %s %d%%" % [
 		_throttle_bar(float(reading["throttle"])), int(float(reading["throttle"]) * 100.0)
 	]
-	_flight_stall.visible = warning
-	# 失速行的文案带上「按哪个键」：D-046 起失速不再由起飞教练插话（它的横幅
-	# 在顶部居中，会与教练区抢位），改由本行 + 仪表 HUD 全宽警告横幅分担，
-	# 本行写在卡片里、永远可见，比转瞬的横幅更稳。
-	_flight_stall.text = "⚠️ 失速！按【↓】低头，油门推满" \
-		if bool(reading["stalled"]) else "⚠️ 接近失速：轻点【↓】收杆"
 	# 视角模式 + 发动机状态（D-033）：视角随 C/V/R/M 实时切换，熄火时油门条置灰提示。
 	if _flight_view != null:
 		_flight_view.text = "视角  %s" % _view_mode_name()
@@ -1211,35 +1219,44 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 		_flight_engine.text = "发动机  %s" % ("运转" if engine_on else "熄火（按 F）")
 		_flight_engine.add_theme_color_override(
 			"font_color", Color(0.55, 0.95, 0.65) if engine_on else Color(1.0, 0.55, 0.45))
-	# 起飞教练区（D-046）：与数据行同卡片。step_for 推进教练内部计时（呼吸闪烁 /
-	# 成功停留）并返回当前这一步；空字典 = 此刻不需要教练（巡航中，或失速——
-	# 失速由上面的失速行与仪表 HUD 警告横幅负责），四个节点整体隐藏。
+	# 教练区（D-046 起飞 / U-8 失速改出教案共用）：与数据行同卡片。
+	# 双 coach 每帧**各调一次**（D-069 陷阱 2）：起飞教练的内部计时必须照常
+	# 推进——否则失速教案结束后它从冻结时刻续跑，「🎉 起飞成功」3.5 s 保持
+	# 横幅会在教案收尾后复活（与 StallCoach 成功横幅打架）。渲染取失速教案
+	# 优先：其非空即占用教练区，起飞教练让位（自身 _finished 不清，落回滑
+	# 跑道可继续起飞流程）。两套教案都空 → 教练区收起。
+	var stall_step: Dictionary = {}
+	var takeoff_step: Dictionary = {}
+	if _stall_coach != null:
+		stall_step = _stall_coach.step_for(reading, delta)
 	if _takeoff_coach != null and _coach_main != null:
-		var step := _takeoff_coach.step_for(reading, delta)
-		var active: bool = not step.is_empty()
-		_coach_sep.visible = active
-		_coach_main.visible = active
-		_coach_sub.visible = active
-		if active:
-			var col: Color = step.get("color", Color(1.0, 1.0, 1.0))
-			# 「要按键」的步骤用呼吸式闪烁抓住注意力（儿童向：低对比、不刺眼）。
-			var alpha := 1.0
-			if bool(step.get("flash", false)):
-				alpha = 0.70 + 0.30 * (0.5 + 0.5 * sin(_takeoff_coach.elapsed() * 6.0))
-			_coach_main.text = String(step.get("text", ""))
-			_coach_main.add_theme_color_override(
-				"font_color", Color(col.r, col.g, col.b, alpha))
-			_coach_sub.text = String(step.get("sub", ""))
-			var bar := String(step.get("bar", ""))
-			_coach_bar.visible = not bar.is_empty()
-			_coach_bar.text = bar
-			_coach_bar.add_theme_color_override(
-				"font_color", Color(col.r, col.g, col.b, 0.9))
-		else:
-			_coach_bar.visible = false
-	# 座舱视角：一行内容都没有（无失速、教练区收起）时整卡收起——否则
+		takeoff_step = _takeoff_coach.step_for(reading, delta)
+	var step: Dictionary = stall_step if not stall_step.is_empty() else takeoff_step
+	var active: bool = not step.is_empty()
+	_coach_sep.visible = active
+	_coach_main.visible = active
+	_coach_sub.visible = active
+	if active:
+		var col: Color = step.get("color", Color(1.0, 1.0, 1.0))
+		# 「要按键」的步骤用呼吸式闪烁抓住注意力（儿童向：低对比、不刺眼）。
+		var alpha := 1.0
+		if bool(step.get("flash", false)):
+			# 闪烁相位取自当前占用教练区的那个 coach（各自的 elapsed）。
+			var clock: float = _stall_coach.elapsed() if not stall_step.is_empty() \
+				else _takeoff_coach.elapsed()
+			alpha = 0.70 + 0.30 * (0.5 + 0.5 * sin(clock * 6.0))
+		_coach_main.text = String(step.get("text", ""))
+		_coach_main.add_theme_color_override(
+			"font_color", Color(col.r, col.g, col.b, alpha))
+		_coach_sub.text = String(step.get("sub", ""))
+		var bar := String(step.get("bar", ""))
+		_coach_bar.visible = not bar.is_empty()
+		_coach_bar.text = bar
+	# 座舱视角：一行内容都没有（教练区收起）时整卡收起——否则
 	# PanelContainer 只剩一条空面板边框悬在左上（实测像一条「神秘胶囊」）。
-	if fp and not _coach_main.visible and not _flight_stall.visible:
+	# U-8 / D-069：原失速行已删除，fp 下卡片只剩教练区——失速教案①起
+	# 教练区即非空，卡片自然保持可见（D-046「永远可见」职责移交）。
+	if fp and not _coach_main.visible:
 		_flight_panel.visible = false
 
 
@@ -2986,6 +3003,8 @@ func _on_settings_changed(_difficulty: int, _assist_level: int, _livery_index: i
 			msg = "双击改平：%s" % on_off.call(s.auto_level)
 		"beeper_enabled":
 			msg = "警告蜂鸣：%s" % on_off.call(s.beeper_enabled)
+		"wind_enabled":
+			msg = "气象风场：%s" % on_off.call(s.wind_enabled)
 	Events.notice.emit("飞行设置：" + msg)
 
 

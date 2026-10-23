@@ -141,15 +141,15 @@ func _run() -> void:
 	# 击穿；D-055 世界抬高 4 倍后固定 5 m 又被 6.51 m 击穿）。
 	var pre_toggle := cam.global_position
 	cam.toggle_first_third()   # → 座舱
-	await _frames(2)   # 必须 ≥2：`process_frame` 在节点 `_process` **之前**发出，
-	# 只等 1 帧读到的是切换前的旧位姿（实测首帧位移 0.00 m，判据恒红）。
-	# 2 帧 = 相机 _process 至少跑过一次，量到的才是「一帧之内走了多远」。
-	var first_frame := cam.global_position.distance_to(pre_toggle)
-	await _frames(30)
-	var span := pre_toggle.distance_to(cam.global_position)
-	_check(span > 0.5 and first_frame >= span * 0.9,
-		"④ 进座舱刚性吸附（首帧位移 %.2f m / 全程 %.2f m，%.0f%% ≥ 90%%）"
-			% [first_frame, span, 100.0 * first_frame / maxf(span, 0.001)])
+	# 采样走 process_frame（不是 _frames() 的 physics_frame），判据用「单步最大
+	# 占比」：硬切会在一次 `_process` 里走完 ~100%，位移阻尼单步最多
+	# 1-exp(-4·delta)（62 ms 约 22%）——与首步何时到来无关，时序免疫。
+	var enter := await _sample_steps(cam, pre_toggle, 8)
+	var enter_span: float = float(enter["span"])
+	var enter_max: float = float(enter["max_step"])
+	_check(enter_span > 0.5 and enter_max >= enter_span * 0.9,
+		"④ 进座舱刚性吸附（最大单步 %.2f m / 全程 %.2f m，%.0f%% ≥ 90%%）"
+			% [enter_max, enter_span, 100.0 * enter_max / maxf(enter_span, 0.001)])
 	await _frames(20)   # 座舱已一帧到位，这里只为让座舱内装/仪表簇完成首帧布局
 	var cockpit_expect: Vector3 = craft.global_transform * Vector3(0.0, 1.15, -3.4)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON, "④ C 切到第一人称座舱")
@@ -159,20 +159,20 @@ func _run() -> void:
 
 	var pre_out := cam.global_position
 	cam.toggle_first_third()   # → 追尾
-	# 采样窗口取 6 个 process_frame 而不是 1 帧：本探针窗口档实测单帧 delta
-	# ≈62 ms（Iris Xe + 全量世界约 16 fps），且协程恢复与相机 `_process` 并非
-	# 一一对应（实测前 3 次恢复读到同一坐标，第 4 次才跳 3.71 m）。1 帧采样
-	# 会读到「还没动」的 0.00 m，断言随之恒红/恒绿。
-	await _frames(6)
-	var out_first := cam.global_position.distance_to(pre_out)
-	await _frames(40)
-	var out_span := pre_out.distance_to(cam.global_position)
-	# 上限 95%（不是 40%）是刻意的：硬切会在**一次更新内**走完 100%，而位移
-	# 阻尼单步最多只走 1-exp(-4·delta)（60 fps 约 6%、62 ms 约 22%），6 次
-	# process_frame 实测约 38%。用 95% 卡「硬切 vs 平滑」这条本质差别。
-	_check(out_first > 0.01 and out_first < out_span * 0.95,
-		"④ 出座舱平滑不瞬移（首帧 %.2f m / 全程 %.2f m，%.0f%% < 95%%）"
-			% [out_first, out_span, 100.0 * out_first / maxf(out_span, 0.001)])
+	# 与进座舱同一套采样与判据（见上）：逐 process_frame 取 12 步，卡「单步
+	# 最大占比 < 95%」。硬切会在一次 `_process` 里走完全程（100%），位移阻尼
+	# 单步最多 1-exp(-4·delta)（62 ms 约 22%），12 步覆盖全程 ~94%。
+	var out := await _sample_steps(cam, pre_out, 12)
+	var out_span: float = float(out["span"])
+	var out_max: float = float(out["max_step"])
+	_check(out_span > 0.5 and out_max < out_span * 0.95,
+		"④ 出座舱平滑不瞬移（最大单步 %.2f m / 全程 %.2f m，%.0f%% < 95%%）"
+			% [out_max, out_span, 100.0 * out_max / maxf(out_span, 0.001)])
+	# 距离断言要等阻尼**收敛**：指数阻尼按墙钟推进（delta 制），60 fps 下
+	# 12 个 process_frame 只有 0.2 s（覆盖率 55%，实测距机 6.8 m 误红），
+	# 45 个物理帧 ≈0.75 s（覆盖率 95%）才稳。与平滑断言分工：前者卡「单步
+	# 占比」（时序免疫），后者卡「终值」（必须等收敛）。
+	await _frames(45)
 	_check(cam.current_mode() == AircraftCamera.ViewMode.CHASE, "④ C 再切回第三人称追尾")
 	var chase_dist := cam.global_position.distance_to(craft.global_position)
 	_check(chase_dist > 9.0 and chase_dist < 18.0,
@@ -367,6 +367,22 @@ func _shot(name: String) -> void:
 func _frames(count: int) -> void:
 	for i in range(count):
 		await get_tree().physics_frame
+
+
+## 逐 `process_frame` 采样相机位移，返回 {"span": 全程, "max_step": 单步最大}。
+## 必须在 process_frame 上等：相机位姿在节点 `_process` 里更新，与 physics_frame
+## 拍点无关——窗口档一帧可挤进 6~8 个物理 tick 且全部早于首次 `_process`，
+## 按物理帧采样会读到「还没动」的 0.00 m（④ 出座舱侧实测误红；同一点在
+## D-065 期还表现为「第 4 次才跳」，纯看当帧渲染快慢，时序敏感）。
+func _sample_steps(cam: Camera3D, from: Vector3, frames: int) -> Dictionary:
+	var max_step := 0.0
+	var prev := from
+	for i in range(frames):
+		await get_tree().process_frame
+		var now: Vector3 = cam.global_position
+		max_step = maxf(max_step, now.distance_to(prev))
+		prev = now
+	return {"span": prev.distance_to(from), "max_step": max_step}
 
 
 func _finish() -> void:

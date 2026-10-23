@@ -7,7 +7,7 @@ extends RefCounted
 ## 升力随攻角线性上升、越过临界攻角失速掉升力、诱导阻力随升力平方增长、
 ## 空气密度随高度衰减、操纵权限随动压下降（低速时杆变软）。
 ##
-## 世界尺度：1 格 = 1 m（D-062 P1）。模型内部一律用「米」，且直接作用于世界单位——
+## 世界尺度：1 格 = 1 m（D-063）。模型内部一律用「米」，且直接作用于世界单位——
 ## 即 1 格视作 1 m，故 D-030 的 0.5 m/格 换算对该模型从未存在，常数无需改动
 ## （这也使定夺项 ①「保持现行速度」自动成立：巡航 50.4 格/s = 50.4 m/s）。
 ##
@@ -84,6 +84,11 @@ const RATE_RESPONSE := 4.5
 const CONTROL_Q_REF := 250.0
 const CONTROL_AUTHORITY_MIN := 0.12
 ## 侧滑回中的风标稳定性（每弧度侧滑角的偏航角速度）。
+## 符号约定：beta<0 = 左滑（来流自左前方）→ 目标偏航为负 → 机头向左向来流回中。
+## D-067 风场接线时抓到此项曾写反（旧值 `beta * YAW_STABILITY` 且无负号），
+## 行为与本注释自 D-030 声明的「回中」意图相反：无风时被辅助稳定 Mask，侧风
+## 一上线即发散（机头转向顺风被风吹走）。改正后稳态侧风/20 m/s 突风/突风
+## 撤除三种瞬态均单调收敛无过冲（诊断脚本实测，见 D-067）。
 const YAW_STABILITY := 1.1
 ## 转弯协调：坡度自然带出偏航角速度，不踩舵也能转出协调转弯。
 const TURN_COORDINATION_RATE := 0.5
@@ -174,7 +179,14 @@ static func default_airframe() -> Airframe:
 ## 飞行状态：位置/速度/姿态 + 机体三轴角速度 + 聚合气动框。纯数据，不持有节点。
 class State extends RefCounted:
 	var position := Vector3.ZERO
+	## 质心**地速度**（m/s，对地）。语义关键：气动读的空速 = velocity − wind
+	## （见 air_velocity），位置积分用的就是 velocity 本身（地速输送）。
 	var velocity := Vector3.ZERO
+	## 风矢量（地速系，m/s）：由 Aircraft 的 WindModel 每帧填入（D-067 气象 §2.1）。
+	## 默认零矢量 → 仅靠本字段不改变任何行为；D-067 另修正了风标符号（见
+	## _update_rates），无风时的侧滑回中动力学因此有（意图内的）变化。
+	## 风切变通过改这个量制造空速突变（§2.2）。
+	var wind := Vector3.ZERO
 	## 机体基：+X 右翼、+Y 机背、-Z 机头（Godot 约定）。
 	var basis := Basis.IDENTITY
 	var roll_rate := 0.0
@@ -188,6 +200,9 @@ class State extends RefCounted:
 	var airframe: Airframe
 	## 结算读数（HUD 与探针共用同一份来源）。
 	var airspeed := 0.0
+	## 地速读数（m/s）：velocity.length()，与空速并排（METAR 简报/特情面板用；
+	## 顺风时地速 > 空速，这是玩家能直接感知的气象效应）。
+	var ground_speed := 0.0
 	var alpha := 0.0
 	var load_factor := 1.0
 	var stalled := false
@@ -204,6 +219,15 @@ static func make_state(at: Vector3, heading: float = 0.0) -> State:
 	state.position = at
 	state.basis = Basis.from_euler(Vector3(0.0, heading, 0.0))
 	return state
+
+
+## 空速矢量（相对气流，m/s）：气动的**唯一**速度入口。velocity 存的是地速度
+## （质心对地），升力/阻力/失速/操纵权限全部由相对气流的空速决定，故每个读速度
+## 的气动函数都从这里取数——风的影响因此表现为「只改变空速、不改气动公式」，
+## 正是任务书 §2.1/§2.2 的核心要求（直接改 velocity 会破坏气动自洽）。无风时
+## air_velocity ≡ velocity，行为与无气象版逐字节一致。
+static func air_velocity(state: State) -> Vector3:
+	return state.velocity - state.wind
 
 
 ## 空气密度（kg/m³）：等温指数大气，够用且单调。
@@ -234,28 +258,31 @@ static func lift_coefficient(alpha: float, cl_max: float = CL_MAX) -> float:
 	return signf(alpha) * maxf(cl_max * 0.35, cl_max - over * 2.4)
 
 
-## 动压 q = ½ρV²（Pa）。
+## 动压 q = ½ρV²（Pa）。V 取**空速**（air_velocity）。
 static func dynamic_pressure(state: State) -> float:
-	var speed := state.velocity.length()
+	var speed := air_velocity(state).length()
 	return 0.5 * air_density(state.position.y) * speed * speed
 
 
-## 攻角（rad）：机体速度矢量与机头方向在对称面内的夹角，机头高于航迹为正。
+## 攻角（rad）：机体**空速**矢量与机头方向在对称面内的夹角，机头高于航迹为正。
 static func angle_of_attack(state: State) -> float:
-	var speed := state.velocity.length()
+	var v_air := air_velocity(state)
+	var speed := v_air.length()
 	if speed < 1.0:
 		return 0.0
-	var v_b := state.basis.inverse() * state.velocity
+	var v_b := state.basis.inverse() * v_air
 	var forward_speed := maxf(-v_b.z, 0.5)
 	return clampf(atan2(-v_b.y, forward_speed), -0.6, 0.6)
 
 
-## 侧滑角（rad）：机体横向速度分量，右滑为正。
+## 侧滑角（rad）：机体横向**空速**分量，右滑为正。侧风灌进这里——风标稳定性
+## 会朝向来流，蟹形进近的偏流角因此是算出来的，不是脚本演的。
 static func sideslip(state: State) -> float:
-	var speed := state.velocity.length()
+	var v_air := air_velocity(state)
+	var speed := v_air.length()
 	if speed < 1.0:
 		return 0.0
-	var v_b := state.basis.inverse() * state.velocity
+	var v_b := state.basis.inverse() * v_air
 	return asin(clampf(v_b.x / speed, -1.0, 1.0))
 
 
@@ -263,7 +290,8 @@ static func sideslip(state: State) -> float:
 ## 各系数取自本机的 Airframe（零件聚合结果）。
 static func acceleration(state: State, controls: Controls) -> Vector3:
 	var af := state.airframe
-	var speed := state.velocity.length()
+	var v_air := air_velocity(state)
+	var speed := v_air.length()
 	var q_dyn := dynamic_pressure(state)
 	var alpha := angle_of_attack(state)
 	var beta := sideslip(state)
@@ -275,7 +303,7 @@ static func acceleration(state: State, controls: Controls) -> Vector3:
 	# 升力垂直于速度、位于机体的对称面内（机背方向去掉速度分量）。
 	# 该式同时给出两种效果：攻角产生的升力，以及滚转时机翼倾斜把升力掰向侧向
 	# ——这正是「压坡度就会转弯」的来源，不需要额外转弯公式。
-	var velocity_dir := state.velocity / speed if speed > 0.001 else -state.basis.z
+	var velocity_dir := v_air / speed if speed > 0.001 else -state.basis.z
 	var lift_dir := state.basis.y - velocity_dir * state.basis.y.dot(velocity_dir)
 	if lift_dir.length_squared() < 0.0001:
 		lift_dir = state.basis.y
@@ -320,7 +348,12 @@ static func _update_rates(
 	var blend := clampf(RATE_RESPONSE * delta, 0.0, 1.0)
 	var beta := sideslip(state)
 	# 风标稳定性：机头自动朝向来流（侧滑越大气越强）。地面由机轮主导，抑制之。
-	var weathervane := beta * YAW_STABILITY * authority if not on_ground else 0.0
+	# 符号：beta<0（左滑，来流自左前来）→ 目标偏航为负 → 机头向左（向来流）回中。
+	# D-067 接线风场时发现原符号写反（`beta × YAW_STABILITY`）：来流自左时反而把
+	# 机头继续往右掰、放大侧滑——无风时被辅助稳定与短暂侧滑 Mask，侧风一上线即
+	# 发散（机头转向顺风、被风吹走）。本行注释自 D-030 起就写着「回中」，行为却
+	# 与意图相反，属实现 bug 而非标定选择，故直接改正（非门控在无风分支）。
+	var weathervane := -beta * YAW_STABILITY * authority if not on_ground else 0.0
 	# 转弯协调：坡度带出偏航。机翼右翼抬高（左坡度）对应左转。
 	var bank_sin := clampf(state.basis.x.y, -1.0, 1.0)
 	var coordination := -bank_sin * TURN_COORDINATION_RATE * authority \
@@ -399,9 +432,11 @@ static func _integrate_attitude(state: State, delta: float, on_ground: bool) -> 
 
 static func _refresh_readings(state: State) -> void:
 	var af := state.airframe
-	var speed := state.velocity.length()
+	var v_air := air_velocity(state)
+	var speed := v_air.length()
 	var alpha := angle_of_attack(state)
 	state.airspeed = speed
+	state.ground_speed = state.velocity.length()
 	state.alpha = alpha
 	state.stalled = absf(alpha) > STALL_ALPHA and speed > 3.0
 	state.stall_warning = absf(alpha) > STALL_WARN_ALPHA and speed > 3.0
@@ -423,6 +458,7 @@ static func snapshot(state: State) -> Dictionary:
 	var nose := -state.basis.z
 	return {
 		"airspeed": state.airspeed,
+		"ground_speed": state.ground_speed,
 		"kmh": state.airspeed * MPS_TO_KMH,
 		"stall_speed": stall_speed(air_density(state.position.y), state.airframe, state.flaps),
 		"altitude": state.position.y,

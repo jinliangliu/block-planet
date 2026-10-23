@@ -13,6 +13,8 @@ extends Node
 ##   ⑩ 姿态（pitch/roll 符号）+ 航向（+Z 北 / +X 东）实证
 ##   ⑪ HSI/CDI 直飞导航（bearing / dev / dots / distance）
 ##   ⑫ HUD 默认简单模式 + 蜂鸣默认开 + 标准难度辅助半开
+##   ⑬ U-5 详细清单纯函数：7 行增量 + 去重闸 + CDI 空态（契约 = panel_row_texts）
+##   ⑭ U-6 横幅排除：失速类走 banner_alerts() 让位，alerts()/蜂鸣零变化
 ##
 ## 纯逻辑（不建场景、不渲染），可直接 headless 跑：
 ## Godot_v4.6.3-stable_win64.exe --headless --path . res://tests/flight_instruments_probe.tscn
@@ -39,6 +41,8 @@ func _run() -> void:
 	_run_attitude_checks()
 	_run_nav_checks()
 	_run_hud_default_checks()
+	_run_panel_row_checks()
+	_run_banner_exclusion_checks()
 	_finish()
 
 
@@ -272,6 +276,76 @@ func _run_hud_default_checks() -> void:
 		"⑫ 警告蜂鸣码默认开")
 	_check(FlightSettings.for_difficulty(FlightSettings.Difficulty.NORMAL).assist_level
 		== FlightSettings.Assist.PARTIAL, "⑫ 标准难度辅助 = 半开")
+
+
+## ⑬ U-5 详细清单纯函数（D-069）：契约本体 = FlightInstrumentHUD.panel_row_texts()
+## （静态纯函数）。「按索引取行」的断言一律走它；节点层 _panel_rows 只上屏、
+## 不构成契约。7 行 = 四角没有的增量读数；四角已有的（空速/航向/MSL/升降率/
+## 燃油）不得复现——那正是 U-5 的去重闸。
+func _run_panel_row_checks() -> void:
+	var fi := FlightInstruments.new()
+	fi.update({"kmh": 120.0, "stall_speed": 13.1, "altitude_agl": 300.0,
+		"rpm": 2400.0, "flaps": 1, "gear_down": true}, _ID, 0.1)
+	var rows: Array = FlightInstrumentHUD.panel_row_texts(fi)
+	_check(rows.size() == 7, "⑬ 清单 7 行（实际 %d）" % rows.size())
+	if rows.size() != 7:
+		return  # 行数不对时后续索引断言必越界——SCRIPT ERROR 即污染，直接收尾
+	_check(String(rows[0]).begins_with("失速余量："), "⑬ 行0 = 失速余量")
+	_check(String(rows[1]).begins_with("姿态：俯仰"), "⑬ 行1 = 姿态")
+	_check(String(rows[2]).begins_with("离地："), "⑬ 行2 = 离地")
+	_check(String(rows[3]).begins_with("转弯率："), "⑬ 行3 = 转弯率")
+	_check(String(rows[4]).begins_with("CDI："), "⑬ 行4 = 导航 CDI")
+	_check(String(rows[5]).begins_with("转速："), "⑬ 行5 = 转速")
+	_check(String(rows[6]).begins_with("襟翼："), "⑬ 行6 = 襟翼/起落架")
+	# 去重闸：四角已有的读数不得在清单复现（合并全文检索）。
+	var merged := ""
+	for r in rows:
+		merged += String(r)
+	for banned in ["航向", "升降率", "燃油", "MSL", "空速"]:
+		_check(not merged.contains(banned),
+			"⑬ 去重闸：清单不含「%s」（四角已有）" % banned)
+	# 无导航目标 → CDI 行显示占位符。
+	_check(String(rows[4]) == "CDI：—", "⑬ 无导航目标时 CDI = —")
+	# 失速余量数值：120 km/h − 13.1 m/s × 3.6 ≈ +72.8 km/h。
+	_check(String(rows[0]).contains("+72") or String(rows[0]).contains("+73"),
+		"⑬ 失速余量数值正确（%s）" % String(rows[0]))
+	# 有导航目标 → CDI 行带 TO/FROM 旗。
+	var nav := FlightInstruments.new()
+	nav.set_navigation(Vector3(0.0, 0.0, 100.0), "机场")
+	nav.update({"kmh": 120.0, "stall_speed": 13.1, "position": Vector3.ZERO},
+		Basis.from_euler(Vector3(0.0, PI, 0.0)), 0.1)
+	var nrows: Array = FlightInstrumentHUD.panel_row_texts(nav)
+	_check(String(nrows[4]).contains("TO") or String(nrows[4]).contains("FROM"),
+		"⑬ 有导航目标时 CDI 带 TO/FROM（%s）" % String(nrows[4]))
+
+
+## ⑭ U-6 横幅排除（D-069）：失速类的权威文字通道是 hud.gd 卡片失速行
+##（带【↓】/ U-8 状态机文案），全宽闪烁横幅对它们让位；蜂鸣路径
+## （take_voice_cues / alerts()）零变化——⑧⑨ 段语义不变。
+func _run_banner_exclusion_checks() -> void:
+	_check(FlightInstruments.BANNER_EXCLUDED.has("stall_full")
+		and FlightInstruments.BANNER_EXCLUDED.has("stall"),
+		"⑭ 排除集含 stall / stall_full")
+	# 纯失速 → 横幅空（卡片失速行 + 蜂鸣照常报）。
+	var a := FlightInstruments.new()
+	_feed(a, {"stalled": true}, 25)
+	_check(a.banner_alerts().is_empty(), "⑭ 纯失速 → 横幅列表空")
+	_check(a.alerts()[0]["id"] == "stall_full", "⑭ 纯失速时 alerts() 仍以失速居首（蜂鸣不受影响）")
+	# 失速 + 低油 → 横幅改显低油（让位前会被失速霸占，次级警告不可见）。
+	var b := FlightInstruments.new()
+	_feed(b, {"stalled": true, "fuel_ratio": 0.1}, 25)
+	var lb := b.banner_alerts()
+	_check(lb.size() == 1 and lb[0]["id"] == "low_fuel",
+		"⑭ 失速+低油 → 横幅显低油（次级警告不再被霸占）")
+	# 仅超速 → 横幅原样显超速。
+	var c := FlightInstruments.new()
+	_feed(c, {"overspeed": true}, 25)
+	var lc := c.banner_alerts()
+	_check(lc.size() == 1 and lc[0]["id"] == "overspeed", "⑭ 仅超速 → 横幅显超速")
+	# 接近失速（非完全失速）同样让位。
+	var d := FlightInstruments.new()
+	_feed(d, {"stall_warning": true}, 25)
+	_check(d.banner_alerts().is_empty(), "⑭ 接近失速 → 横幅列表空")
 
 
 func _finish() -> void:

@@ -125,8 +125,12 @@ MapSelector（地球页，RegionAtlas 掩码判定区域）
 
 | 探针 | 断言 | 覆盖 |
 |---|---|---|
-| `life_probe` | 421（地图段 18） | 经纬度往返、拾取旋转、三页切换、知识卡 |
-| `globe_marker_probe` | 20 | 机场/降落场/钓点标记 |
+| `life_probe` | 419（地图段 18） | 经纬度往返、拾取旋转、三页切换、知识卡 |
+| `globe_marker_probe` | 19 | 机场/降落场/钓点标记 |
 | `landmark_probe`（D-066） | 44 | 投影互逆、地标数据、图钉、河流光带、拾取 |
-| `flight_view_probe` | 48 | 战术地图开关与网格缓存 |
-| `crash_recover_probe` | 42 | 战术地图开关与鼠标模式还原 |
+| `flight_view_probe` | 47 | 战术地图开关与网格缓存 |
+| `crash_recover_probe` | 40 | 战术地图开关与鼠标模式还原 |
+
+> 断言数为 2026-10-23 **全量回归实测 PASS 数**（`tmp/run_regression.sh` 日常档 +
+> `flight_view_probe` 窗口档单独运行）；曾按静态 `_check` 调用数统计，与实测有
+> ±1 偏差（条件分支未执行的调用会被静态计数计入），**以实测为准**。

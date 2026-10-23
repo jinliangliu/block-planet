@@ -324,6 +324,24 @@ func alerts() -> Array[Dictionary]:
 	return list
 
 
+## 横幅排除集（U-6 / D-069）：失速类警告的权威文字通道是 hud.gd 的卡片失速行
+##（带【↓】按键提示、D-046 起永远可见；U-8 起由 StallCoach 状态机驱动文案），
+## 全宽闪烁横幅对它们让位——两处近似文案同屏即冗余。蜂鸣不走本排除集：
+## 音频是独立感官通道（见 D-069 裁定），take_voice_cues 仍吃完整 alerts()。
+const BANNER_EXCLUDED := {"stall": true, "stall_full": true}
+
+## 全宽警告横幅该显示的警告（U-6 / D-069）：alerts() 剔除失速类后的剩余列表，
+## 顺序不变。纯失速 → 空数组（横幅整体隐藏，卡片失速行 + 蜂鸣照常报）；
+## 失速叠加其他警告 → 显示其余最高级那条——让位前它会被失速霸占，次级警告
+## 反而不可见，这是顺带修正。take_voice_cues 仍吃完整 alerts()，声音零变化。
+func banner_alerts() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for a in alerts():
+		if not BANNER_EXCLUDED.has(String(a["id"])):
+			out.append(a)
+	return out
+
+
 ## 取「本次该响」的语音/蜂鸣提示：与 alerts() 同构的列表，取一次即消费。
 ## 规则（Phase A §5 优先级 + 重播 cadence）：
 ##   1. 只播最高优先级那条（list[0]）——其余警告留灯光，防声音叠加；

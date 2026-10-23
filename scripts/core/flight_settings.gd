@@ -1,8 +1,9 @@
 class_name FlightSettings
 extends RefCounted
 ## 飞行设置：难度、辅助稳定、涂装、镜头抖动、松手回正、HUD 详细、双击改平、
-## 警告蜂鸣共 8 键，全部可在 O 键「飞行设置」面板调整（D-057 补齐此前 5 个
-## 仅靠快捷键/手改 JSON 的开关），持久化 user://settings.json。
+## 警告蜂鸣、气象风场共 9 键，全部可在 O 键「飞行设置」面板调整（D-057 补齐
+## 此前 5 个仅靠快捷键/手改 JSON 的开关；D-067 的风闸同款补行），持久化
+## user://settings.json。
 ##
 ## 设计（D-032 打磨 Phase 5-a）：MVP 的「飞行（简化气动 + 辅助稳定）」要求儿童向
 ## 的温和手感，故把「辅助稳定」坐实为一个可调等级；难度预设只决定辅助等级的
@@ -47,7 +48,7 @@ const ASSIST_NAMES := {
 }
 
 
-## 8 键字段只声明不赋初值；默认值唯一定义在 reset_to_defaults()，由 _init
+## 9 键字段只声明不赋初值；默认值唯一定义在 reset_to_defaults()，由 _init
 ## 落地——「恢复默认」按钮（D-058）与探针都以它为准，杜绝两处漂移。
 var difficulty: int
 var assist_level: int
@@ -64,6 +65,9 @@ var hud_detail: bool
 var auto_level: bool
 ## 警告蜂鸣码开关（D-034）：默认开（听到也能玩）；飞行设置面板可关。
 var beeper_enabled: bool
+## 气象风场开关（D-067）：默认开。地面风 + 风梯度 + 低空风切变随机剧本；
+## 关掉后 State.wind 恒零，气动行为与无气象版逐字节一致（探针/取证同用）。
+var wind_enabled: bool
 
 static var _current: FlightSettings = null
 
@@ -72,7 +76,7 @@ func _init() -> void:
 	reset_to_defaults()
 
 
-## 恢复 8 键默认值（D-058「恢复默认」按钮入口；默认值唯一定义处，
+## 恢复 9 键默认值（D-058「恢复默认」按钮入口；默认值唯一定义处，
 ## 面板探针 D 段逐键钉住，防漂移）。
 func reset_to_defaults() -> void:
 	difficulty = Difficulty.NORMAL
@@ -83,6 +87,7 @@ func reset_to_defaults() -> void:
 	hud_detail = false
 	auto_level = true
 	beeper_enabled = true
+	wind_enabled = true
 
 
 ## 全局生效实例：首次访问时从 SAVE_PATH 读档（无则默认）。
@@ -150,6 +155,7 @@ func to_dict() -> Dictionary:
 		"hud_detail": hud_detail,
 		"auto_level": auto_level,
 		"beeper_enabled": beeper_enabled,
+		"wind_enabled": wind_enabled,
 	}
 
 
@@ -165,6 +171,7 @@ static func from_dict(d: Dictionary) -> FlightSettings:
 	s.hud_detail = bool(d.get("hud_detail", false))
 	s.auto_level = bool(d.get("auto_level", true))
 	s.beeper_enabled = bool(d.get("beeper_enabled", true))
+	s.wind_enabled = bool(d.get("wind_enabled", true))
 	return s
 
 

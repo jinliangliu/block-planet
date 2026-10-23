@@ -6,9 +6,9 @@ extends CharacterBody3D
 ## 机身碰撞与地面支撑、轮胎抓地、撞击解体、乘员座位、信号广播。
 ## 机型表现见 AircraftModel（纯代码生成的机模）。
 ##
-## 世界尺度：1 格 = 0.5 m（D-030）。机身长约 10.2 m（约 20 格）、翼展 24 m
-## （48 格）的轻型单发机，比村庄民居（12×12 格 = 6×6 m）大一圈，起飞需要
-## 一段平地或跑道。
+## 世界尺度：1 格 = 1 m（D-063 起；D-030 的 0.5 m/格已废止）。机身长约
+## 10.2 m（约 10 格）、翼展 24 m（24 格）的轻型单发机，比村庄民居
+## （12×12 格 = 12×12 m）大一圈，起飞需要一段平地或跑道。
 ##
 ## 驾驶输入（use_player_input = true 且 piloted 时）：
 ##   鼠标 → 操纵杆（俯仰 / 滚转，松手缓慢回中）
@@ -28,7 +28,7 @@ signal crashed(reason: String)
 
 ## 机身原点（重心）距地面的高度：与 AircraftModel.GROUND_CLEARANCE 一致。
 const GROUND_CLEARANCE := AircraftModel.GROUND_CLEARANCE
-## 碰撞盒：横向只包住机身（6.6 × 4.8 × 15.6 m，即 13.2 × 9.6 × 31.2 格），
+## 碰撞盒：横向只包住机身（6.6 × 4.8 × 15.6 m，即 6.6 × 4.8 × 15.6 格），
 ## 翼展（24 m）不参与碰撞，否则机身会一路刮蹭树冠与屋檐。
 ## 底面必须恰在 −GROUND_CLEARANCE：中心 y = −0.15 × 3，半高 2.4。
 const COLLIDER_SIZE := Vector3(2.2, 1.6, 5.2) * AircraftModel.MODEL_SCALE
@@ -64,8 +64,8 @@ const BOOST_RATE := 1.4
 const CRASH_DAMAGE := 6
 
 # ── 飞行里程统计（探索模式成就的数据源） ─────────────────────
-## 离地高度测量：向下射线长度（m）。世界高度上限 256 格 = 128 m（D-055），
-## 400 m 仍足够覆盖整个世界高度。
+## 离地高度测量：向下射线长度（m）。世界高度上限 256 格 = 256 m（D-055；
+## D-063 起 1 格 = 1 m），400 m 仍足够覆盖整个世界高度。
 const AGL_RAY_LENGTH := 400.0
 ## 测高刷新间隔（秒）：射线不必每帧打，5 Hz 够仪表与里程碑用。
 const AGL_INTERVAL := 0.2
@@ -149,6 +149,11 @@ var _collider: CollisionShape3D
 ## HUD「离地」读数与高度里程碑共用；无命中（飞出世界边缘）时退回 position.y。
 var _altitude_agl := 0.0
 var _agl_timer := 0.0
+## 风场（D-067 气象 §2.1/§2.2）：每帧给 State 填 wind 矢量，气动内部以
+## velocity − wind 取空速——风只改变空速，不改任何气动公式。区域参数由
+## setup_wind()（place() 统一入口）从 RegionAtlas.weather_profile_of 配置，
+## 风向种子取区域地形 seed（同一个世界的风与地形同源、同区域可复现）。
+var _wind: WindModel = WindModel.new()
 ## 上一帧是否着地（起飞边沿检测）。
 var _was_on_floor := true
 ## 首物理帧地面态是否已同步。新 add_child 的 CharacterBody3D 首帧 is_on_floor()
@@ -224,12 +229,24 @@ func place(at: Vector3, heading: float = 0.0) -> void:
 		at + Vector3(0.0, GROUND_CLEARANCE + 0.05, 0.0), heading)
 	global_transform = Transform3D(_state.basis, _state.position)
 	velocity = Vector3.ZERO
+	# 风场按当前区域重配（登机 / 试飞搬机 / D-039 归位都走 place，一处即全入口）。
+	setup_wind(GameState.current_region)
 	_refuel_full()
 	# 重落位作废未结算的落地评分（D-039 归位 / 试飞搬机都走这里）。
 	_landing_pending = false
 	_landing_vs = 0.0
 	_landing_timer = 0.0
 	_landing_roll_dist = 0.0
+
+
+## 配置本机风场（D-067）：按区域 weather_profile 配参数、区域地形 seed 派风向。
+## place() 统一入口调用；探针也可在落位后直接调它换区域风。
+func setup_wind(region_id: int) -> void:
+	var profile := RegionAtlas.weather_profile_of(region_id)
+	if profile.is_empty():
+		profile = RegionAtlas.DEFAULT_WEATHER_PROFILE
+	var region := RegionAtlas.profile(region_id)
+	_wind.configure(profile, int(region.get("seed", region_id)))
 
 
 ## 按蓝图零件生成体素块外观。纯视觉、无碰撞，不改变飞行。
@@ -573,6 +590,13 @@ func _physics_process(delta: float) -> void:
 	if _level_timer > 0.0:
 		_level_timer = maxf(_level_timer - delta, 0.0)
 	var on_ground := is_on_floor()
+	# 风（D-067）：把当前风矢量填进 State，随后 integrate 的气动以 velocity−wind
+	# 取空速。update() 每物理帧调——内部触发概率按「每秒」计，帧长无关；agl 传
+	# 测高缓存值（_altitude_agl 自己 5 Hz 射线节流），射线不因此多打。
+	# wind_at() 每帧 O(1)。玩家可用 FlightSettings.wind_enabled 一键关风。
+	_wind.update(delta, _altitude_agl)
+	_state.wind = _wind.wind_at() if FlightSettings.current().wind_enabled \
+		else Vector3.ZERO
 	# 辅助稳定增益（FlightSettings 单例）；无设置/关闭档即纯气动模型。
 	var assist := FlightSettings.current().gains()
 	AircraftFlight.integrate(_state, controls, delta, on_ground, assist, _level_timer)

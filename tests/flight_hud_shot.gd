@@ -181,26 +181,29 @@ func _run() -> void:
 	_check(float(snap["altitude_agl"]) > 20.0,
 		"巡航离地高度达标（%.1f m）" % snap["altitude_agl"])
 	_check(not bool(snap["stall_warning"]), "巡航态无失速告警")
-	_check(not _hud._flight_stall.visible, "巡航态告警行隐藏")
+	# U-8 / D-069：卡片失速行已删除，失速文字通道收敛为教练区一份。巡航态
+	# 教练区可能是「起飞成功」保持（3.5 s）或已收起，两者都可能出现，故只
+	# 断言「不含失速教案内容」——这与起飞教练同屏时也一样成立。
+	_check(not _hud._coach_main.text.contains("失速") \
+		and not _hud._coach_main.text.contains("低头"),
+		"巡航态教练区无失速教案内容（「%s」）" % _hud._coach_main.text)
 	await _shoot("flight_hud_cruise.png")
 
-	# ── ③ 满拉杆逼出失速告警 ─────────────────────────────
-	# 手法对齐 flight_probe E 段（该段历次回归全绿）：先 6 s 中度拉杆爬升
-	# （pitch 0.6 + 满油门）把飞机送进「机头高、速度衰」状态，再持续满杆
-	# （pitch 1.0）——几何攻角（机头姿态 − 航迹角）随爬升累积，稳定越过
-	# STALL_WARN_ALPHA 0.27。
-	# 早期版本从巡航态直接满杆：巡航速度下航迹角速度 ≥ 俯仰角速度（升力把
-	# 航迹掰向机头，target_pitch 是角速度指令且 authority 随动压衰减），攻角
-	# 稳在 ≈0.2 rad 平衡点，12 s 只是 zoom 爬升（实测 176 m / 20 m/s 不入
-	# 告警）——满杆时长与入口能量态稍差就逐 run 翻转，故加爬升预热并放宽到
-	# 25 s（E 段同款 1500 帧量级）。
+	# ── ③ 怠速拉杆逼出失速告警 ─────────────────────────────
+	# 手法对齐 flight_probe E 段（D-067 后同款）：6 s 中度拉杆爬升预热后
+	# （pitch 0.6 + 满油门）**收怠速 + 持续满杆**——能量耗尽路径。满油门拉杆
+	# 只会滚出持续内筋斗：40 m/s 时维持 63°/s 俯仰率只需 CL 0.78（升力线在
+	# 失速角前线性到 CL_MAX 1.6），alpha 稳在 ≈0.15 rad 永不失速（D-067 修正
+	# 风标符号后拉杆路径不再诱发侧滑发散，历史上的「满拉杆失速」随之消失）。
+	# 怠速下速度衰减到所需 CL 超过 CL_MAX 时，攻角自然越过 STALL_WARN_ALPHA。
 	_craft.controls.throttle = 1.0
 	_craft.controls.pitch = 0.6
 	for i in range(360):
 		await get_tree().physics_frame
+	_craft.controls.throttle = 0.0
 	_craft.controls.pitch = 1.0
 	elapsed = 0.0
-	while not bool(_craft.snapshot()["stall_warning"]) and elapsed < 25.0 \
+	while not bool(_craft.snapshot()["stall_warning"]) and elapsed < 30.0 \
 			and not _craft.is_wrecked():
 		await get_tree().physics_frame
 		elapsed += get_physics_process_delta_time()
@@ -210,11 +213,16 @@ func _run() -> void:
 		float(stall_snap["alpha_deg"]), float(stall_snap["airspeed"]),
 		float(stall_snap["altitude_agl"]), _craft.is_wrecked()])
 	snap = _verify_panel("失速态")
-	_check(bool(snap["stall_warning"]), "满拉杆后出现失速告警")
-	_check(_hud._flight_stall.visible, "告警态告警行显示")
+	_check(bool(snap["stall_warning"]), "怠速满拉杆后出现失速告警")
+	# U-8 / D-069：失速文字归 StallCoach 全权负责——告警出现后同帧刷新面板，
+	# 教练区应显示改出教案第①步（「低头」）。此处不断言具体是「失速了！」还是
+	# 「要失速了！」：告警上升沿进入①，两种文案随 stalled 与否自适应。
+	_check(_hud._coach_main.visible and _hud._coach_main.text.contains("低头"),
+		"失速态教练区显示改出教案第①步（「%s」）" % _hud._coach_main.text)
 	await _shoot("flight_hud_stall.png")
 
-	# 改出：推杆低头，等告警消失后下机。
+	# 改出：推杆低头 + 满油门补能，等告警消失后下机。
+	_craft.controls.throttle = 1.0
 	_craft.controls.pitch = -0.6
 	elapsed = 0.0
 	while bool(_craft.snapshot()["stall_warning"]) and elapsed < PHASE_TIMEOUT:

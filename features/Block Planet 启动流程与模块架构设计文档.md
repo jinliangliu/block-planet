@@ -3,6 +3,19 @@ Block Planet 启动流程与模块架构设计文档
 模块：启动流程、World Selector、城市选择、无缝加载
 目标：明确从打开游戏到角色出生在具体城市的完整链路，划分各模块的职责与层级归属。
 
+> **⚠️ 本文档性质：早期概念稿（已被后续文档取代，勿按本文施工）**
+> 本文写于架构定型前，其中的模块命名与数据流**大多未按此实现**：现行事实来源是
+> `features/feature_Map System Architecture.md`（D-066 已回订，含「文档术语 ↔
+> 代码实体」对照表）与代码本身。主要偏差：① 不存 GameManager / DataManager /
+> AudioManager / SaveManager 四个 Autoload（实际 Autoload 只有 Events /
+> GameState / Progress / BestiaryData / FishingSystem / RaceSystem /
+> BoatSystem）；② 无 regions.json 与「上海」城市坐标——出生区域由
+> `GameState.current_region`（区域 id，非坐标）+ `RegionAtlas` 承担，落点由
+> `main` 在运行时按机场/降落场/村庄空场计算；③ 无 BriefingUI / METAR /
+> 穿云动画——现状是区域介绍页 + 出生加载屏（`SpawnLoading`）；④ 地球是
+> `MapGlobe`（顶点色球面网格，只转不缩放），不是写实贴图球。
+> 本文保留价值：启动五步流程的**形态描述**与 §5 checklist 的模块划分思路。
+
 一、 核心流程时序图
 text
 启动游戏

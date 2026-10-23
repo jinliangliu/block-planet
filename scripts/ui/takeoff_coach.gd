@@ -22,6 +22,9 @@ extends RefCounted
 ## （HUD 见空字典即隐藏教练区），巡航不占屏；再次落回地面自动重新接管。
 ## 失速不归教练管：卡片自带失速行 + 仪表 HUD 全宽警告横幅都在报它，
 ## 教练再插一条只会和横幅抢顶部居中（见 _step_of 注释）。
+## （U-8 / D-069 起改由 StallCoach 全权负责失速，本教练失速时让位；
+## 熄火导致的失速也先让位——重启点火后的失速由 StallCoach 持续带，
+## 见 scripts/ui/stall_coach.gd 头注释「熄火交圈」。）
 
 ## 数据行主色（与卡片数据行一致的白）。
 const TEXT_MAIN := Color(0.94, 0.97, 1.0)
@@ -71,7 +74,7 @@ func elapsed() -> float:
 
 ## 每帧由 HUD 的 _refresh_flight_panel 调用：推进内部计时并算出当前这一步。
 ## 返回 {text, sub, bar, color, flash}；bar 为空串表示不画进度条。
-## 空字典表示此刻不需要教练（巡航中，或失速——交给卡片失速行与警告横幅）。
+## 空字典表示此刻不需要教练（巡航中，或失速——U-8 起交给 StallCoach）。
 func step_for(snap: Dictionary, delta: float) -> Dictionary:
 	if _craft == null:
 		return {}
@@ -80,10 +83,16 @@ func step_for(snap: Dictionary, delta: float) -> Dictionary:
 
 
 ## 当前该做的一步。优先级：熄火点火 > 地面四步 / 空中爬升成功。
-## 失速（stalled / stall_warning）故意不返回步骤：仪表 HUD 的全宽警告横幅
-## （y 150…190，闪烁 22px 大字）与飞行卡片自带失速行已经在报，且都在卡片
-## 上半部；教练区若再插一条失速提示，会和横幅在顶部居中互相压字。
+## 失速（stalled / stall_warning）故意不返回步骤：U-8 / D-069 起失速改出
+## 教案（StallCoach）全权负责，本教练让位——教练区同一块地，两套教案
+## 不能同屏。让位只停显示，_finished / 阶梯不清：改出失速落回滑行道
+## 可继续起飞流程。地面怠速发脾气的边角由 snapshot 的 stall_warning 边沿
+## 触发，不依赖本让位。
 func _step_of(snap: Dictionary) -> Dictionary:
+	# 失速让位（U-8 / D-069）：含熄火导致的失速——点火是起飞教练的领域，
+	# 但重启后的失速跟住由 StallCoach 持续带（其头注释「熄火交圈」）。
+	if bool(snap.get("stalled", false)) or bool(snap.get("stall_warning", false)):
+		return {}
 	var on_ground := bool(snap.get("on_ground", false))
 	var kmh := float(snap.get("kmh", 0.0))
 	var alt_agl := float(snap.get("altitude_agl", 0.0))

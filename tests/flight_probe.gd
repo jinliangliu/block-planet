@@ -115,7 +115,9 @@ func _run() -> void:
 			< Aircraft.GROUND_CLEARANCE * 0.5,
 		"机轮贴地停放（离地高度 %.2f，期望 %.2f）"
 			% [parked_y - surface, Aircraft.GROUND_CLEARANCE])
-	_check(craft.snapshot()["airspeed"] < 0.5, "无油门时保持静止")
+	# 有风时「静止」是**对地**概念：停放机真实空速 = 风速（D-067 起 airspeed 为
+	# 真空速），故此处钉地速而非空速——语义与无风版一致（飞机没被风吹走）。
+	_check(craft.snapshot()["ground_speed"] < 0.5, "无油门时保持静止")
 
 	# ── C 段：满油门滑跑 → 到抬轮速度拉杆离地 ─────────────
 	# 地面姿态被机轮限在 12°，静止时机翼攻角近零、升力为零——必须像真飞行员
@@ -172,7 +174,12 @@ func _run() -> void:
 	_check(cruiser.global_transform.basis.is_equal_approx(cruiser._state.basis),
 		"巡航中节点位姿跟随飞行模型（basis 逐列一致）")
 
-	# ── E 段：爬升 → 持续拉杆失速 → 推杆改出 ─────────────
+	# ── E 段：爬升 → 怠速拉杆失速 → 推杆满油门改出 ─────────────
+	# 失速诱发音速：**怠速 + 满拉杆**（能量耗尽路径）。满油门拉杆只会滚出持续
+	# 内筋斗——40 m/s 时维持 63°/s 俯仰率只需 CL 0.78（本模型升力线在失速角前
+	# 线性到 CL_MAX 1.6），alpha 稳在 0.15 不失速。D-067 修正风标符号后拉杆路径
+	# 不再诱发侧滑发散，历史上的「拉杆失速」随之消失——失速改由速度掉到所需 CL
+	# 超过 CL_MAX 时自然触发（alpha 越过 STALL_ALPHA），这才是真实失速机制。
 	var climb_start_y: float = cruiser.global_position.y
 	cruiser.controls.throttle = 1.0
 	cruiser.controls.pitch = 0.6
@@ -182,6 +189,7 @@ func _run() -> void:
 	_check(climbed > 30.0 and climbed < 110.0,
 		"满油门爬升率落在 5~18 m/s 量级（6 s 爬升 +%.1f m，D-031 目标 ≈10 m/s）" % climbed)
 
+	cruiser.controls.throttle = 0.0
 	cruiser.controls.pitch = 1.0
 	var stalled := false
 	for i in range(1500):
@@ -189,12 +197,13 @@ func _run() -> void:
 		if cruiser.snapshot()["stalled"]:
 			stalled = true
 			break
-	_check(stalled, "持续拉杆后进入失速")
+	_check(stalled, "怠速满拉杆后进入失速（能量耗尽路径）")
 	_check(_stall_event, "失速翻转广播了 stall_changed")
 	var stalled_speed: float = cruiser.snapshot()["airspeed"]
 	_check(stalled_speed < cruise["airspeed"],
 		"失速时空速低于巡航（%.1f < %.1f m/s）" % [stalled_speed, cruise["airspeed"]])
-	# 改出：推杆减小攻角 + 保持油门。
+	# 改出：推杆减小攻角 + 满油门补能。
+	cruiser.controls.throttle = 1.0
 	cruiser.controls.pitch = -0.6
 	var recovered := false
 	for i in range(1200):

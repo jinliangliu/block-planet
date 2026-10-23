@@ -723,7 +723,7 @@ const DEFAULT_WEATHER_PROFILE := {
 
 
 ## 该区域的风物理参数（weather_profile），供 scripts/flight/wind_model.gd 的
-## WindModel 读取（主理人编写中；本文件只配数据，不在此实现风场）。字段语义：
+## WindModel 读取（D-067 已实现；本文件只配数据，不在此实现风场）。字段语义：
 ##   surface_wind_mps   地面基准风速（m/s）。风梯度从此值随高度升到约 3 倍；
 ##                       儿童向硬顶 9 m/s（本作巡航约 50 m/s，侧风 9 已明显可感）。
 ##   shear_probability  风切变触发概率（0..1）：洋面对流旺最高（0.5~0.7），

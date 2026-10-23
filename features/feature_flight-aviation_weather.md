@@ -44,7 +44,7 @@
 
 ### 2.1 风：地面风 + 高空风梯度
 
-- **地面风（≥10 m AGL）**：直接叠加到 `_state.velocity` 的水平分量（`aircraft_flight.gd` 的积分段，state 结构体字段 `velocity` 在 `:177`）。表现为飞机实际对地速度 = 空速 + 风。注意叠加时机在**积分之前**（作为外力项进入本帧加速度），不要在积分后覆盖，否则气动自洽被破坏。
+- **地面风（≥10 m AGL）**：**不改 `velocity`**。风作为独立矢量 `State.wind` 由 `WindModel` 每帧填入（D-067），气动唯一速度入口是 `air_velocity(state) = velocity − wind`（`aircraft_flight.gd:229`）。`velocity` 保持**地速**语义（质心对地），位置积分用 `velocity` 本身；升力/阻力/失速/操纵权限全部由相对气流的**空速**决定，故风只改变空速、不改任何气动公式——这正是 §2.2 的核心要求（直接改 `velocity` 会破坏气动自洽，定为红线，`wind_flight_probe` C3 钉死）。表现为：对地速度 = 空速 + 风；顺风地速 > 空速。
 - **顺/逆风影响**：起飞滑跑距离、爬升率随之变化。**不要另写「滑跑距离公式」**——气动积分天然会产生这个现象，重复实现反而两套数打架。
 - **侧风**：以偏流角体现——地速矢量与机头不一致。落地时机头对不齐会带着侧向速度接地，`_check_failure(impact)` 自然判解体。**蟹形进近因此是真实有效的技巧，不是脚本判定**。
 - **风梯度**：风速随 AGL 从 0 线性增到高空值（约 3 倍）。这让「低空风弱、高空风强」自然成立。
@@ -62,7 +62,7 @@
 
 - 暴露变量：`ice_level: float`（0..1）。
 - **接到气动**：`CL_MAX` 乘以 `(1 - 0.35 * ice_level)`（冰污染翼型，降低最大升力系数）；`CD0_BASE` 加上 `0.05 * ice_level`（粗糙度增加阻力）。**同时改这两个量**，才是真实的积冰后果（升力降 + 阻力增 → 失速速度上升）。
-  - ⚠️ 实施注意：`CL_MAX`（`aircraft_flight.gd:35`）与 `CD0_BASE`（`:42`）目前都是 **`const`**，且 `CL_MAX` 有 3 个直接调用点（`:217` 失速速度 / `:270` 与 `:410` 升力计算）、`CD0_BASE` 有 2 个（`:119`/`:137` 阻力聚合）。要么把二者改为可注入的气动参数，要么在各调用点统一乘冰系数——**只改定义不改调用点不会生效**。好消息：`lift_coefficient(alpha, cl_max)`（`:226`）本就支持传入 cl_max，接口是现成的。
+  - ⚠️ 实施注意：`CL_MAX`（`aircraft_flight.gd:35`）与 `CD0_BASE`（`:42`）目前都是 **`const`**，且 `CL_MAX` 有 3 个直接调用点（`:240` 失速速度 / `:250` 与 `:298` 升力计算）、`CD0_BASE` 有 2 个（`:142` 聚合初值 / `:299` 阻力结算）。要么把二者改为可注入的气动参数，要么在各调用点统一乘冰系数——**只改定义不改调用点不会生效**。好消息：`lift_coefficient(alpha, cl_max)`（`:250`）本就支持传入 cl_max，接口是现成的。
 - 质量增加：可选，小幅（燃油占比很小，不做也能玩）。
 - 防冰（anti-ice）：`ice_level` 以 0.02/s 消退；开启防冰本身有耗电/燃油代价，避免「无脑开着」。
 - **进入结冰条件的判据**：云层高度带 + 气温低于冰点 + 有降水。三者缺一不可，否则大晴天结冰会显得莫名其妙。注意 `day_night.gd` **没有云层高度概念**（只有三档天气外观），云带参数要随 `weather_profile.icing_alt_band` 新建。
@@ -143,24 +143,24 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 - [ ] 同步三张字典 `WEATHER_NAMES` / `WEATHER_AMBIENT_MUL` / `WEATHER_SUN_MUL` 补全 8 档条目（缺键直接崩）；**`set_weather()` 的 `clampi` 上限从 `Weather.RAIN` 改为枚举末档**（否则新档被静默夹成 RAIN）。
 - [ ] 保留 `set_weather()` / `clear_weather_override()` 覆盖机制（`cockpit3d_shot` 等取证探针依赖）；按区域概率的状态机**替换** 150 s 固定轮换，不平行新增。
 - [ ] 气象状态机：随机剧本触发（按区域 profile 概率），对外暴露 `current_weather()` / `wind_at(agl)` / `visibility_m()`。
-- [ ] 风接入 `aircraft_flight.gd`：地面风 + 风梯度，只改速度不改升力；叠加时机在积分前。
-- [ ] 风切变：只改风矢量（含 downdraft 分量），靠现有失速/impact 判解体。
+- [x] 风接入 `aircraft_flight.gd`：地面风 + 风梯度，只改速度不改升力；叠加时机在积分前。**（D-067 已实施：`State.velocity` 保持地速度语义，新增 `State.wind`，`air_velocity() = velocity − wind` 为气动唯一速度入口——动压/攻角/侧滑/升力/阻力/失速判定全部改读空速；位置积分仍用 `velocity`。风模型 `scripts/flight/wind_model.gd`，区域数据在 `RegionAtlas.weather_profile`。）**
+- [x] 风切变：只改风矢量（含 downdraft 分量），靠现有失速/impact 判解体。**（D-067 已实施：8 s 瞬态剧本 = 风向急转 ±60~120° + 强度 ×2.5 + 下沉 ≤6 m/s；AGL < 45 m 低空门控 + 60 s 冷却 + 登机 20 s 静默；种子可复现。**不改 `velocity`** 是红线——`wind_flight_probe` C3 钉死。）**
 - [ ] 积冰：先把 `CL_MAX` / `CD0_BASE` 从 const 参数化（3+2 个调用点），再接 `ice_level`；结冰判据 = 云带 ∩ 低温 ∩ 降水（云带高度参数新建）。
 - [ ] 雾/能见度 → `day_night.setup_environment()` 钩子内新建雾配置（当前为空钩子，全库无 `fog_` 设置；禁 `volumetric_fog`，密度 0.004~0.005）；低 RVR 接管 D-054 指引十字为盲降。
-- [ ] 密度高度：把气温/气压喂进现有密度模型（`air_density()` `:211`），不另写公式。
+- [ ] 密度高度：把气温/气压喂进现有密度模型（`air_density()` `:234`），不另写公式。
 - [ ] 雷暴禁区 + 颠簸扰动（只扰速度）。
 - [ ] 决策面板（强飞/返航/备降/迫降），返航备降走 `set_navigation` + 指引十字。
 - [ ] METAR 简报 UI：报文数值取自实际气象状态。
 - [ ] 科普卡片：每次特情后展示对应知识点（复用现有成就/教学弹层模式）。
-- [ ] **探针**：新增 `weather_flight_probe`，覆盖风切变触发/积冰改气动/低 RVR 接管十字/决策面板四态，且**必须 `SaveGuard.snapshot()/restore()`**（D-010）。
-- [ ] **回归保护**：不得打穿现有 `weather_probe`（10 条，三档枚举+覆盖）、`night_shot`（昼夜取证）与所有钉 `set_weather(CLEAR)` 的窗口截图探针。
+- [x] **探针（第一批：风两层）**：新增 `wind_flight_probe`，40 条覆盖风梯度/侧风偏流/空速地速分流/切变掉高度与推油门改出/区域数据与接线/设置开关，`SaveGuard.snapshot()/restore()` 全路径（D-010）。**（后续批次：积冰改气动/低 RVR 接管十字/决策面板四态并入同一探针或扩展，命名以代码为准。）**
+- [ ] **回归保护**：不得打穿现有 `weather_probe`（9 条，三档枚举+覆盖；源码 10 个 `_check` 减去函数定义行）、`night_shot`（昼夜取证）与所有钉 `set_weather(CLEAR)` 的窗口截图探针。
 
 ## 7. 验收标准
 
-- [ ] 起降能感到逆风/顺风的差别（滑跑距离肉眼可见不同）。
-- [ ] 风切变触发时飞机掉高度，**推油门能改出**，不推则解体。
+- [x] 起降能感到逆风/顺风的差别（滑跑距离肉眼可见不同）。**（模型级已验证：同空速下顺风地速大、逆风地速小，1 s 位移差可测——`wind_flight_probe` B1/B2。窗口级目检随 full 档取证。）**
+- [x] 风切变触发时飞机掉高度，**推油门能改出**，不推则解体。**（模型级已验证：`wind_flight_probe` C1/C2——同剧本同 15 s 窗口唯一变量为油门，怠速侧掉高 68.9 m 且空速崩，满油门侧空速改出、切变后下沉收敛、同窗口少掉 12.9 m。「不推则解体」= 低空掉高度坠地触发现有 impact 判定，随窗口取证确认。）**
 - [ ] 积冰后仪表能看出速度异常/失速告警，防冰开启后恢复。
 - [ ] 恶劣天气弹决策面板，选「返航」后指引十字指向机场且能飞回去。
 - [ ] 低能见度下靠指引十字完成盲降。
 - [ ] 全量回归 0 FAIL 0 SCRIPT ERROR，`user://` 零 DIFF（D-010）。
-- [ ] 既有 `weather_probe`（10 条）/ `night_shot` / 所有钉 `set_weather(CLEAR)` 的窗口截图探针不打穿；气象扩展后 `weather_probe` 断言数只增不减。
+- [ ] 既有 `weather_probe`（9 条）/ `night_shot` / 所有钉 `set_weather(CLEAR)` 的窗口截图探针不打穿；气象扩展后 `weather_probe` 断言数只增不减。

@@ -1,687 +1,264 @@
+# Block Planet 赛道竞速玩法实现文档
 
-# Block Planet 赛道竞速玩法设计文档（开发任务书）
-
-> 项目：Block Planet  
-> 引擎：Godot 4.6 / GDScript  
-> 目标：在载具玩法基础上增加赛道竞速。包含赛道选择器、地形材质、机器人玩家、圈速与完赛记录统计。  
-> 文档用途：交给 AI 智能体按此实现，人类负责审查与试玩。
-
----
-
-## 1. 概述
-
-玩家在载具装配台搭建好摩托车、三轮车或汽车后，可进入“赛道选择器”，选择不同主题的赛道进行单机竞速。赛道包含沙石、湿地、铺装路面、山坡、森林等元素，不同地形影响载具的抓地力、速度与操控。由于是单机游戏，系统会根据赛道难度生成机器人玩家，与玩家同场竞赛。比赛结束后统计最快圈速、最短完赛时间、排名与胜场，并保存到本地记录。
+> 项目：Block Planet
+> 引擎：Godot 4.6.3 / GDScript（Mobile 渲染器）
+> 文档性质：**已实现现状说明书**（不是开发任务书）
+> 事实来源：**代码**。本文与代码冲突时以代码为准，并应回头修订本文。
+> 相关决策：`docs/decisions.md` D-036（竞速玩法）；载具蓝图见 `features/feature_flight.md` 载具章节与 `scripts/vehicles/`。
 
 ---
 
-## 2. 玩家流程
+## 0. 文档定位与改版说明
+
+本文件初稿是一份 **AI 生成的开发任务书**。该功能**已完整实现并合入 main**
+（Autoload `RaceSystem` 已接线，`data/racing/` 五份 JSON 在位，独立竞速场景
+`scenes/racing/race_scene.tscn`）。任务书的地形参数表、AI 难度四档、记录字段
+几乎被原样实现；但**赛道解锁方式、记录存档位置、检查点实现、回放格式**等
+处与任务书不同。本文按代码现状重写为**现状说明书**，任务书中有价值且仍成立
+的设计已并入对应章节。**不要按任务书原文施工**——它假设的 `shop_1000` 商店
+解锁、把 best_lap 写进 tracks.json、Area3D 检查点均未按此实现。
+
+现状一句话：**竞速 = 地图选择器「🏁 赛道竞速」→ 赛道选择器（选赛道/赛车/
+机器人数量与难度）→ 独立竞速场景：3 秒倒计时 → 门平面检查点 + 圈数 + 排名 →
+结算写 `user://race_records.json` + 回放 JSONL + 任务计数；6 条赛道、4 辆玩家
+赛车、AI 四档难度，赛道几何由形状公式程序化生成（不铺体素）。**
+
+---
+
+## 1. 概述与入口
 
 ```text
-探索模式
-→ 地图选择器
-→ 进入“赛道选择器”
-→ 选择赛道主题（沙漠 / 森林 / 湿地 / 山地 / 城市 / 混合）
-→ 选择载具（已保存蓝图）
-→ 选择机器人数量与难度
-→ 进入赛道
-→ 倒计时起跑
-→ 驾驶载具比赛
-→ 经过检查点 / 完成圈数
-→ 冲过终点
-→ 结算界面：排名、圈速、完赛时间、是否破纪录
-→ 保存记录到 user://race_records.json
-→ 写入回放日志与任务进度
-```text
+探索模式 → 地图选择器「🏁 赛道竞速」（hud.gd:3146）→ 赛道选择器（模态）
+  → 选赛道 / 赛车（已拥有）/ 机器人数量 0-5 / 难度
+  → RaceSystem.select_race(...) 寄存选择 → 切到竞速场景（独立场景）
+  → 3-2-1 倒计时 → 比赛 → 结算界面 → 写记录 / 回放 / 任务
+```
+
+- 竞速是**独立 3D 场景**（平整竞技场 + 程序化赛道几何），不在体素大世界里
+  跑——世界是流式加载的，一条 1200 m 赛道要跨约 150 个区块，远超加载窗口
+  （`track_layout.gd` 头注释）。
+- 从赛道返回主场景时可选直接重开赛道选择器（`RaceSystem.open_selector_on_return`）。
 
 ---
 
-3. 目录结构
----
+## 2. 架构与数据流
+
 ```text
-res://
-├── data/
-│   ├── bestiary/                # 已有
-│   ├── fishing/                 # 已有
-│   ├── vehicles/                # 已有载具数据
-│   └── racing/
-│       ├── tracks.json          # 赛道定义
-│       ├── terrain.json         # 地形材质
-│       ├── ai_racers.json       # 机器人配置
-│       └── teaching.json        # 竞速教学
-├── scenes/
-│   ├── racing/
-│   │   ├── track_base.tscn      # 赛道基类场景
-│   │   ├── checkpoint.tscn      # 检查点
-│   │   ├── start_line.tscn      # 起跑线
-│   │   └── finish_line.tscn     # 终点线
-│   └── ui/
-│       ├── track_selector_ui.tscn
-│       ├── race_hud.tscn
-│       ├── race_result_ui.tscn
-│       └── race_teaching_ui.tscn
-└── scripts/
-    ├── systems/
-    │   ├── bestiary_data.gd     # 已有
-    │   ├── fishing_system.gd    # 已有
-    │   ├── vehicle_system.gd    # 已有
-    │   ├── race_system.gd       # 竞速核心逻辑（Autoload）
-    │   ├── track_loader.gd      # 赛道加载
-    │   └── race_records.gd      # 记录管理
-    ├── racing/
-    │   ├── ai_racer.gd          # 机器人玩家
-    │   ├── checkpoint.gd        # 检查点逻辑
-    │   └── race_manager.gd      # 单场比赛管理
-    └── ui/
-        ├── track_selector_ui.gd
-        ├── race_hud.gd
-        ├── race_result_ui.gd
-        └── race_teaching_ui.gd
-4. 赛道地形与材质
-4.1 地形类型
-地形	抓地力	速度影响	特点	视觉
-铺装路面	高	+10%	稳定，刹车距离短	灰色沥青
-沙石	中低	-15%	扬尘，易打滑	黄褐色
-湿地	低	-25%	打滑，刹车距离长	深色反光
-山坡	中	上坡 -30%，下坡 +20%	需要扭矩，可能溜车	倾斜草地/岩石
-森林	中	-10%	有树根、障碍，视线差	泥土 + 树木
-草地	中	-5%	较平稳，略慢	绿色
-4.2 terrain.json
-json
-{
-  "terrains": [
-    {
-      "id": "asphalt",
-      "name_zh": "铺装路面",
-      "name_en": "Asphalt",
-      "grip": 1.0,
-      "rolling_resistance": 0.02,
-      "speed_factor": 1.1,
-      "brake_factor": 1.0,
-      "dust": false,
-      "wet": false,
-      "color": "#4A4A4A"
-    },
-    {
-      "id": "gravel",
-      "name_zh": "沙石",
-      "name_en": "Gravel",
-      "grip": 0.7,
-      "rolling_resistance": 0.08,
-      "speed_factor": 0.85,
-      "brake_factor": 0.7,
-      "dust": true,
-      "wet": false,
-      "color": "#B89B72"
-    },
-    {
-      "id": "wetland",
-      "name_zh": "湿地",
-      "name_en": "Wetland",
-      "grip": 0.4,
-      "rolling_resistance": 0.12,
-      "speed_factor": 0.75,
-      "brake_factor": 0.5,
-      "dust": false,
-      "wet": true,
-      "color": "#3B5E4A"
-    },
-    {
-      "id": "hill",
-      "name_zh": "山坡",
-      "name_en": "Hill",
-      "grip": 0.8,
-      "rolling_resistance": 0.1,
-      "speed_factor": 0.7,
-      "brake_factor": 0.8,
-      "dust": false,
-      "wet": false,
-      "slope": true,
-      "color": "#6B8E4E"
-    },
-    {
-      "id": "forest",
-      "name_zh": "森林",
-      "name_en": "Forest",
-      "grip": 0.75,
-      "rolling_resistance": 0.1,
-      "speed_factor": 0.9,
-      "brake_factor": 0.8,
-      "dust": false,
-      "wet": false,
-      "obstacles": true,
-      "color": "#2E5B2E"
-    },
-    {
-      "id": "grass",
-      "name_zh": "草地",
-      "name_en": "Grass",
-      "grip": 0.8,
-      "rolling_resistance": 0.06,
-      "speed_factor": 0.95,
-      "brake_factor": 0.9,
-      "dust": false,
-      "wet": false,
-      "color": "#5C8A3C"
-    }
-  ]
-}
-4.3 地形影响实现
-载具进入不同地形区域时，RaceManager 或 VehicleController 读取 terrain_id，调整：
-
-轮胎摩擦力 wheel.friction_slip
-
-发动机功率输出系数
-
-刹车力度
-
-视觉粒子（沙尘、水花）
-
-可用 Area3D 标记地形区域，或使用高度图/材质图层。
-
-5. 赛道定义与选择器
-5.1 赛道主题
-主题	主要地形	难度	示例赛道
-沙漠	沙石、沙丘	★★	沙丘环线
-森林	森林、泥土、草地	★★★	林间小径
-湿地	湿地、草地、木桥	★★★★	沼泽穿越
-山地	山坡、岩石、铺装	★★★★★	盘山公路
-城市	铺装路面、隧道	★★	城市街道
-混合	全部地形	★★★★	全地形挑战
-5.2 tracks.json
-json
-{
-  "tracks": [
-    {
-      "id": "desert_ring",
-      "name_zh": "沙丘环线",
-      "name_en": "Desert Ring",
-      "theme": "desert",
-      "difficulty": 2,
-      "laps": 3,
-      "length_m": 1200,
-      "terrain_segments": [
-        { "terrain_id": "gravel", "start": 0.0, "end": 0.6 },
-        { "terrain_id": "grass", "start": 0.6, "end": 0.8 },
-        { "terrain_id": "gravel", "start": 0.8, "end": 1.0 }
-      ],
-      "ai_count": 3,
-      "ai_difficulty": "easy",
-      "unlock": "default",
-      "best_lap": null,
-      "best_time": null
-    },
-    {
-      "id": "forest_trail",
-      "name_zh": "林间小径",
-      "name_en": "Forest Trail",
-      "theme": "forest",
-      "difficulty": 3,
-      "laps": 3,
-      "length_m": 1500,
-      "terrain_segments": [
-        { "terrain_id": "forest", "start": 0.0, "end": 0.5 },
-        { "terrain_id": "grass", "start": 0.5, "end": 0.7 },
-        { "terrain_id": "gravel", "start": 0.7, "end": 1.0 }
-      ],
-      "ai_count": 4,
-      "ai_difficulty": "normal",
-      "unlock": "default",
-      "best_lap": null,
-      "best_time": null
-    },
-    {
-      "id": "wetland_cross",
-      "name_zh": "沼泽穿越",
-      "name_en": "Wetland Cross",
-      "theme": "wetland",
-      "difficulty": 4,
-      "laps": 2,
-      "length_m": 1800,
-      "terrain_segments": [
-        { "terrain_id": "wetland", "start": 0.0, "end": 0.4 },
-        { "terrain_id": "grass", "start": 0.4, "end": 0.6 },
-        { "terrain_id": "wetland", "start": 0.6, "end": 0.9 },
-        { "terrain_id": "gravel", "start": 0.9, "end": 1.0 }
-      ],
-      "ai_count": 4,
-      "ai_difficulty": "hard",
-      "unlock": "quest_wetland",
-      "best_lap": null,
-      "best_time": null
-    },
-    {
-      "id": "mountain_road",
-      "name_zh": "盘山公路",
-      "name_en": "Mountain Road",
-      "theme": "mountain",
-      "difficulty": 5,
-      "laps": 2,
-      "length_m": 2200,
-      "terrain_segments": [
-        { "terrain_id": "asphalt", "start": 0.0, "end": 0.3 },
-        { "terrain_id": "hill", "start": 0.3, "end": 0.7 },
-        { "terrain_id": "asphalt", "start": 0.7, "end": 1.0 }
-      ],
-      "ai_count": 5,
-      "ai_difficulty": "expert",
-      "unlock": "shop_1000",
-      "best_lap": null,
-      "best_time": null
-    },
-    {
-      "id": "city_circuit",
-      "name_zh": "城市街道",
-      "name_en": "City Circuit",
-      "theme": "city",
-      "difficulty": 2,
-      "laps": 4,
-      "length_m": 1000,
-      "terrain_segments": [
-        { "terrain_id": "asphalt", "start": 0.0, "end": 1.0 }
-      ],
-      "ai_count": 3,
-      "ai_difficulty": "easy",
-      "unlock": "default",
-      "best_lap": null,
-      "best_time": null
-    },
-    {
-      "id": "all_terrain",
-      "name_zh": "全地形挑战",
-      "name_en": "All-Terrain Challenge",
-      "theme": "mixed",
-      "difficulty": 4,
-      "laps": 3,
-      "length_m": 2500,
-      "terrain_segments": [
-        { "terrain_id": "asphalt", "start": 0.0, "end": 0.2 },
-        { "terrain_id": "gravel", "start": 0.2, "end": 0.4 },
-        { "terrain_id": "forest", "start": 0.4, "end": 0.6 },
-        { "terrain_id": "wetland", "start": 0.6, "end": 0.75 },
-        { "terrain_id": "hill", "start": 0.75, "end": 0.9 },
-        { "terrain_id": "asphalt", "start": 0.9, "end": 1.0 }
-      ],
-      "ai_count": 5,
-      "ai_difficulty": "hard",
-      "unlock": "quest_mixed",
-      "best_lap": null,
-      "best_time": null
-    }
-  ]
-}
-5.3 赛道选择器 UI
-显示赛道卡片：主题图标、名称、难度星级、长度、圈数、最佳记录。
-
-可选机器人数量：0–5。
-
-可选机器人难度：简单 / 普通 / 困难 / 专家。
-
-显示“开始比赛”按钮。
-
-未解锁赛道显示锁图标与解锁条件。
-
-6. 机器人玩家（AI 赛车手）
-6.1 AI 控制方式
-沿预设路径点（Path3D 或 waypoints 数组）行驶。
-
-根据难度调整：
-
-最高速度百分比
-
-转向精度
-
-反应时间
-
-犯错概率（偏离路线、刹车过晚）
-
-AI 也受地形影响，但可做简化。
-
-6.2 ai_racers.json
-json
-{
-  "difficulties": [
-    {
-      "id": "easy",
-      "name_zh": "简单",
-      "name_en": "Easy",
-      "speed_factor": 0.7,
-      "steering_accuracy": 0.6,
-      "reaction_time": 0.5,
-      "mistake_chance": 0.15
-    },
-    {
-      "id": "normal",
-      "name_zh": "普通",
-      "name_en": "Normal",
-      "speed_factor": 0.85,
-      "steering_accuracy": 0.8,
-      "reaction_time": 0.3,
-      "mistake_chance": 0.08
-    },
-    {
-      "id": "hard",
-      "name_zh": "困难",
-      "name_en": "Hard",
-      "speed_factor": 0.95,
-      "steering_accuracy": 0.9,
-      "reaction_time": 0.15,
-      "mistake_chance": 0.03
-    },
-    {
-      "id": "expert",
-      "name_zh": "专家",
-      "name_en": "Expert",
-      "speed_factor": 1.0,
-      "steering_accuracy": 1.0,
-      "reaction_time": 0.05,
-      "mistake_chance": 0.0
-    }
-  ],
-  "ai_names": [
-    "闪电兔", "岩石龟", "风之子", "小星尘", "铁皮狗", "彩虹狐"
-  ],
-  "ai_vehicle_blueprints": [
-    "ai_tricycle_red",
-    "ai_car_blue",
-    "ai_car_green"
-  ]
-}
-6.3 AI 生成规则
-根据赛道 ai_count 生成对应数量机器人。
-
-根据 ai_difficulty 读取难度参数。
-
-机器人使用预设蓝图或随机组合零件，外观与玩家不同。
-
-机器人不消耗真实燃料，但速度受地形影响。
-
-7. 竞赛模式与规则
-7.1 比赛流程
-text
-加载赛道
-→ 玩家与 AI 出现在起跑线
-→ 倒计时 3-2-1-GO
-→ 比赛开始
-→ 每经过一个检查点记录进度
-→ 完成规定圈数
-→ 冲过终点
-→ 结算排名
-→ 保存记录
-7.2 检查点
-每条赛道设置多个检查点，防止抄近道。
-
-玩家必须依次经过检查点，否则该圈无效。
-
-检查点用 Area3D 实现，进入时触发。
-
-7.3 排名判定
-先完成规定圈数者排名靠前。
-
-若同圈，则比较通过检查点顺序与距离。
-
-未完赛者按完成圈数与检查点数量排名。
-
-7.4 圈速与完赛时间
-单圈时间：从起跑到完成一圈的时间。
-
-最快圈速：所有圈中最短的单圈时间。
-
-完赛时间：从起跑到冲过终点总时间。
-
-最短完赛记录：该赛道历史最短完赛时间。
-
-8. 统计与记录
-8.1 记录内容
-每条赛道独立保存：
-
-json
-{
-  "track_id": "forest_trail",
-  "best_lap_time": 45.32,
-  "best_lap_at": "2026-10-14T16:30:00",
-  "best_race_time": 142.18,
-  "best_race_at": "2026-10-14T16:32:00",
-  "total_races": 5,
-  "wins": 2,
-  "best_rank": 1,
-  "last_rank": 2,
-  "best_lap_vehicle": "my_tricycle"
-}
-8.2 保存路径
-text
-user://race_records.json
-8.3 记录面板
-在赛道选择器或主菜单增加“竞速记录”页面。
-
-显示每条赛道的最佳圈速、最短完赛、胜场、总场次。
-
-可清空记录。
-
-8.4 回放日志
-text
-tick, action, track_id, vehicle_id, position, player
-2000, race_start, forest_trail, my_tricycle, [0,0,0], daughter
-2100, checkpoint, forest_trail, my_tricycle, [10,0,5], daughter
-2200, lap_complete, forest_trail, my_tricycle, [0,0,0], daughter
-2300, race_finish, forest_trail, my_tricycle, [0,0,0], daughter
-9. UI 设计
-9.1 赛道选择器
-text
-┌─────────────────────────────────────┐
-│  选择赛道                            │
-│  [沙漠] [森林] [湿地] [山地] [城市]  │
-│                                     │
-│  ┌─────────┐  ┌─────────┐          │
-│  │ 沙丘环线 │  │ 林间小径 │          │
-│  │ ★★      │  │ ★★★     │          │
-│  │ 1200m   │  │ 1500m   │          │
-│  │ 最佳: -- │  │ 最佳: -- │          │
-│  └─────────┘  └─────────┘          │
-│                                     │
-│  机器人数量: [0] [1] [2] [3] [4] [5]│
-│  机器人难度: [简单] [普通] [困难]    │
-│                                     │
-│  [ 开始比赛 ]                       │
-└─────────────────────────────────────┘
-9.2 比赛 HUD
-text
-┌─────────────────────────────────────┐
-│ 圈数: 2/3    排名: 1/5              │
-│ 速度: 25 km/h                       │
-│ 当前圈: 00:45.32                    │
-│ 最快圈: 00:43.10                    │
-│ 燃料: ████████░░ 80%                │
-│ [手刹] [车灯] [喇叭]                │
-└─────────────────────────────────────┘
-9.3 结算界面
-text
-┌─────────────────────────────────────┐
-│  比赛结束！                          │
-│  排名: 1 / 5                        │
-│  完赛时间: 02:22.18                 │
-│  最快圈速: 00:43.10                 │
-│  是否打破记录: 是！                  │
-│                                     │
-│  [ 再来一次 ]  [ 返回赛道选择 ]      │
-└─────────────────────────────────────┘
-10. 与现有系统集成
-10.1 载具系统
-比赛使用玩家已保存的载具蓝图。
-
-载具性能影响比赛表现。
-
-不同地形对载具要求不同：湿地需要高抓地力轮胎，山坡需要大扭矩发动机。
-
-10.2 任务面板
-新增竞速任务：
-
-完成第一场竞速比赛
-
-在沙丘环线赢得第一名
-
-打破一条赛道的最快圈速记录
-
-在湿地赛道不使用手刹完成比赛
-
-用三轮车赢得一场比赛
-
-10.3 教育模式
-地形与摩擦力：为什么湿地容易打滑？
-
-安全驾驶：弯道减速、雨天慢行。
-
-能量消耗：上坡更费油。
-
-地图知识：不同主题赛道对应不同地理环境。
-
-10.4 回放系统
-记录比赛事件，支持回放与幽灵车。
-
-11. 脚本设计
-11.1 RaceSystem（Autoload）
-职责：
-
-加载 tracks.json、terrain.json、ai_racers.json
-
-管理比赛状态
-
-生成 AI 赛车手
-
-统计圈速与排名
-
-保存记录
-
-信号：
-
-gdscript
-signal race_started(track_id: String)
-signal lap_completed(lap: int, lap_time: float)
-signal race_finished(results: Array)
-signal new_record(track_id: String, record_type: String, value: float)
-核心方法：
-
-gdscript
-func load_data() -> void
-func get_tracks() -> Array
-func start_race(track_id: String, vehicle_blueprint_id: String, ai_count: int, ai_difficulty: String) -> void
-func register_checkpoint(racer_id: String, checkpoint_index: int) -> void
-func finish_race(racer_id: String) -> void
-func get_results() -> Array
-func save_records() -> void
-func load_records() -> void
-11.2 TrackLoader
-根据 track_id 实例化赛道场景。
-
-设置地形区域、检查点、起跑线、终点线。
-
-根据 terrain_segments 分配地形材质。
-
-11.3 AIController
-沿路径点行驶。
-
-根据难度调整速度与转向。
-
-受地形影响。
-
-到达检查点与终点时通知 RaceManager。
-
-11.4 RaceHUD
-显示圈数、排名、速度、当前圈时间、最快圈、燃料。
-
-显示小地图与检查点方向。
-
-11.5 RaceResultUI
-显示排名、完赛时间、最快圈速、是否破纪录。
-
-按钮：再来一次、返回赛道选择。
-
-12. MVP 最小可行方案
-第一版只做：
-
-3 条赛道：沙丘环线、林间小径、城市街道。
-
-地形：沙石、森林、铺装路面。
-
-机器人玩家：3 个，难度简单 / 普通。
-
-比赛规则：3 圈，检查点，排名。
-
-统计：最快圈速、完赛时间、胜场。
-
-赛道选择器与结算界面。
-
-教学：起跑、检查点、圈速。
-
-保存记录到 user://race_records.json。
-
-回放日志记录起跑与完赛。
-
-后续迭代：
-
-更多赛道主题：湿地、山地、混合。
-
-更多 AI 难度与行为。
-
-幽灵车回放。
-
-天气与时间影响。
-
-移动端触控优化。
-
-多人联机竞速。
-
-13. 开发任务拆分（给智能体的 Checklist）
-□ 创建 data/racing/ 与四个 JSON 文件
-□ 实现 RaceSystem Autoload，加载赛道与地形数据
-□ 实现 TrackLoader，根据赛道 ID 生成场景
-□ 实现地形区域：Area3D + terrain_id
-□ 实现 VehicleController 读取地形参数
-□ 实现 Checkpoint 与 StartLine / FinishLine
-□ 实现 AIController，沿路径点行驶
-□ 实现 RaceManager，管理圈数、检查点、排名
-□ 实现 RaceHUD，显示圈数、排名、速度、计时
-□ 实现 TrackSelectorUI，选择赛道、AI 数量与难度
-□ 实现 RaceResultUI，显示排名与记录
-□ 实现 RaceRecords，保存最快圈速与完赛记录
-□ 任务面板增加竞速任务
-□ 回放系统记录 race_start、checkpoint、lap_complete、race_finish
-□ 编写最小测试用例，验证比赛流程
-14. 验收标准
-玩家能从赛道选择器选择赛道并开始比赛。
-
-赛道包含至少 3 种地形，影响载具速度与操控。
-
-机器人玩家能沿赛道行驶，难度不同表现不同。
-
-比赛能正确计算圈数、检查点、排名。
-
-结算界面显示排名、完赛时间、最快圈速。
-
-最快圈速与最短完赛记录保存到本地。
-
-首次比赛触发教学。
-
-比赛事件写入回放日志。
-
-游戏在 Godot 4.6 中无报错运行。
-
-15. 给智能体的开发指令
-请按本文档实现 Block Planet 赛道竞速玩法。
-遵循 Godot 4.6 与 GDScript，使用现有目录结构：
-
-系统脚本放 scripts/systems/
-
-竞速脚本放 scripts/racing/
-
-UI 脚本放 scripts/ui/
-
-数据放 data/racing/
-
-场景放 scenes/racing/ 和 scenes/ui/
-
-优先完成 MVP：3 条赛道 + 地形影响 + 3 个 AI + 圈速统计 + 记录保存。
-保持代码可读、可测试、可扩展。
-每完成一个模块，写清注释与使用说明，并更新 docs/devlog/。
-
-text
+data/racing/（五份 JSON，只读）
+├── tracks.json     6 条赛道（形状/圈数/地形分段/AI 推荐/解锁）
+├── terrain.json    6 种地形（抓地/极速/刹车/滚阻/颜色）
+├── vehicles.json   7 辆车（4 玩家 + 3 ai_only）
+├── ai_racers.json  AI 四档难度 + 6 个名字 + AI 用车池
+└── teaching.json   5 条教学（起跑/检查点/圈速/地形/山坡）
+
+RaceSystem（Autoload，scripts/systems/race_system.gd）
+  ├── 数据加载与查询（tracks / terrains / vehicles / difficulties / teaching）
+  ├── pending：上一场选择（选择器写 → 竞速场景读）
+  ├── 解锁判定 is_unlocked()：default / wins:N / record:N
+  └── submit_result() → RaceRecords 纯逻辑 + Events 广播
+        │
+        ▼
+竞速场景（scripts/racing/race_scene.gd，386 行，总装）
+  ├── TrackLayout（track_layout.gd）   赛道几何 + 地形分段 + 检查点下标（纯逻辑）
+  ├── TrackLoader（track_loader.gd）   把 Layout 画成 3D（地板/路面/起跑线/拱门）
+  ├── RaceSession（race_session.gd）   比赛规则引擎（纯逻辑）
+  ├── CarPhysics（car_physics.gd）     车辆物理（地形/燃料/侧滑）
+  ├── AiRacer（ai_racer.gd）           机器人决策（纯逻辑）
+  └── UI：race_hud / race_result_ui / race_teaching_ui / track_selector_ui
+```
+
+三个关键约定：
+
+1. **纯逻辑层可无头探针**：TrackLayout / RaceSession / RaceRecords / AiRacer /
+   CarPhysics 全部不依赖节点，`racing_probe` 82 条断言直接钉死（标记
+   `RACING_TEST_OK`）。
+2. **检查点用「门平面穿越」而非 Area3D**：每个检查点是一条垂直于赛道的线段，
+   车从后往前穿过平面且在门的横向宽度内（半宽 + 8 m）才算过门——高速掠过
+   不漏判、不受帧率影响，且判定完全在纯逻辑层。场景里的拱门只是同一份数据
+   的可视化（TrackLoader 画），不是判定源。
+3. **静态与动态分开**：赛道定义是只读静态数据；玩家记录全部落
+   `user://race_records.json`（RaceRecords 头注释明确拒绝了任务书
+   「把 best_lap 写进 tracks.json」的方案）。
+
+---
+
+## 3. 赛道（6 条，tracks.json）
+
+| id | 名称 | 主题 | 难度 | 圈数 | 长度 | 解锁 |
+|---|---|---|---|---|---|---|
+| desert_ring | 沙丘环线 | desert | 2 | 3 | 1200 m | default |
+| forest_trail | 林间小径 | forest | 3 | 3 | 1500 m | default |
+| city_circuit | 城市街道 | city | 2 | 4 | 1000 m | default |
+| wetland_cross | 沼泽穿越 | wetland | 4 | 2 | 1800 m | wins:2 |
+| mountain_road | 盘山公路 | mountain | 5 | 2 | 2200 m | record:2 |
+| all_terrain | 全地形挑战 | mixed | 4 | 3 | 2500 m | wins:5 |
+
+- **形状是公式生成的闭合环线**：`r(θ) = R·(1 + amp·sin(lobes·θ+phase)
+  + amp2·sin(lobes2·θ+phase2))`，先密集采样反解 R 使周长落在 `length_m`，
+  再每 4 m 等距重采样成中心线。`seed` 供形状微扰与 AI 犯错的确定性随机源。
+  任务书只给了长度/圈数/地形分段，形状参数是本工程新增（tracks.json `_note`）。
+- **地形分段**按圈程百分比逐点贴标签（`terrain_segments`），CarPhysics 按所在
+  段查抓地力/极速/刹车。
+- **检查点**：起跑线在 0 号点，之后大致每 300 m 一个，至少 3 个、至多 8 个。
+- **解锁**：`default` 恒开 / `wins:N` 赢 N 场 / `record:N` 破 N 次最快圈速；
+  空串与未知格式一律视为已解锁（儿童向：宁可多给，不把赛道锁死）。
+  `unlock_hint()` 生成中文说明（「赢 2 场后解锁」等）。任务书的
+  `quest_wetland` / `shop_1000` / `quest_mixed` **未实现**。
+
+---
+
+## 4. 地形与车辆
+
+### 4.1 地形（terrain.json，6 种——与任务书数值完全一致）
+
+| id | 名称 | grip | speed_factor | brake_factor | rolling_resistance | 颜色 |
+|---|---|---|---|---|---|---|
+| asphalt | 铺装路面 | 1.0 | 1.1 | 1.0 | 0.02 | #4A4A4A |
+| gravel | 沙石 | 0.7 | 0.85 | 0.7 | 0.08 | #B89B72 |
+| wetland | 湿地 | 0.4 | 0.75 | 0.5 | 0.12 | #3B5E4A |
+| hill | 山坡 | 0.8 | 0.7 | 0.8 | 0.10 | #6B8E4E |
+| forest | 森林 | 0.75 | 0.9 | 0.8 | 0.10 | #2E5B2E |
+| grass | 草地 | 0.8 | 0.95 | 0.9 | 0.06 | #5C8A3C |
+
+### 4.2 地形如何作用（CarPhysics.step）
+
+```text
+极速  = spec.max_speed_mps × 地形 speed_factor（阻力系数按此反解，全油门自然收敛）
+抓地  = 地形 grip × spec.grip_base → 侧滑回正速率（低抓地 = 推头/甩尾；手刹 ×0.2）
+刹车  = spec.brake_mps2 × 地形 brake_factor（湿地刹车距离明显变长）
+滚阻  = rolling_resistance × ROLL_K（持续减速项）
+```
+
+即任务书 §4.3「轮胎摩擦力 / 发动机功率 / 刹车力度」的量化落地；沙尘/水花
+粒子**未实现**（terrain.json 有 dust/wet 标志位但无消费方）。
+
+### 4.3 车辆（vehicles.json，7 辆）
+
+| id | 名称 | 极速 m/s | 加速 | 刹车 | 抓地 | 转向 °/s | 油箱 L | 油耗 L/s | 解锁 |
+|---|---|---|---|---|---|---|---|---|---|
+| tricycle | 小三轮 | 24 | 5.5 | 9.0 | 1.0 | 115 | 11 | 0.030 | default |
+| buggy | 越野沙滩车 | — | — | — | — | — | — | — | default |
+| motorcycle | 越野摩托 | — | — | — | — | — | — | — | default |
+| racer | 赛道方程式 | 40 | 9.5 | 11.0 | 1.05 | 88 | 11 | 0.038 | wins:1 |
+| ai_tricycle_red / ai_car_blue / ai_car_green | 机器人专用 | — | — | — | — | — | — | 0 | ai_only |
+
+- **燃料**：玩家车 `fuel_burn_lps > 0`，油尽则无法给油（HUD 显示油量）；
+  AI 油耗为 0（永不没油）。任务书 HUD 的燃料条由此实现。
+- **载具蓝图关系**：比赛用车是 `vehicles.json` 的预制赛车，**不是**玩家在
+  装配台搭的蓝图（任务书 §10.1「使用已保存蓝图」未按此实现——竞速与拼装
+  是两套车）。
+
+---
+
+## 5. 比赛规则（RaceSession，纯逻辑）
 
+```text
+状态：COUNTDOWN（3 s，车不动不计时）→ RUNNING → FINISHED
+进度：每帧 update_progress(racer, off_road) 用「门平面穿越」推进检查点
+圈数：穿过 0 号门（起跑线/终点）记一圈 + 圈速；够 laps 辆即完赛
+名次：完赛者比完赛时间；未完赛比 圈数 → 过门数 → 距下一门距离
+      （_rank_before，results() 按名次输出成绩表）
+```
+
+- **防抄近道**：必须按顺序过门（`next_gate` 环绕递增），掉头/切弯会被
+  `nearest_index_forward` 的窗口搜索与门平面判定排除。
+- **clean 判定**（结算传入）：全程未用手刹（`used_handbrake`）且未冲出
+  路面（横向偏移 > half_width 记 `off_road_time`）——「湿地无手刹完赛」
+  任务即用此标志。
+- 任务书 §7 排名规则（同圈比检查点与距离、未完赛按完成度）已实现。
+
+---
+
+## 6. 机器人（AiRacer，纯逻辑）
+
+策略：**前视点追线**（lookahead 随速度 10→46 m 增长，每帧只在前方 24 个
+采样点 ≈96 m 内找最近点，抗抄近道/掉头），按转向误差收油/点刹
+（弯越急越收）。难度四档直接改变四项参数（与任务书 ai_racers.json 一致）：
+
+| 档 | speed_factor | steering_accuracy | reaction_time | mistake_chance |
+|---|---|---|---|---|
+| easy 简单 | 0.70 | 0.6 | 0.5 | 0.15 |
+| normal 普通 | 0.85 | 0.8 | 0.3 | 0.08 |
+| hard 困难 | 0.95 | 0.9 | 0.15 | 0.03 |
+| expert 专家 | 1.00 | 1.0 | 0.05 | 0.0 |
+
+- 犯错 = 按概率进入一段「手抖 + 收油」窗口（持续 reaction_time 秒）；
+  转向噪声量 = (1 − accuracy) × 0.25。
+- AI 名字池 6 个（闪电兔/岩石龟/风之子/小星尘/铁皮狗/彩虹狐）；AI 用车池
+  数据里是 `["tricycle","buggy","racer"]`（`ai_vehicles` 键——任务书写的
+  `ai_vehicle_blueprints` 三台 ai_only 车是另一批，仅作视觉备选）。
+- AI 也吃地形 speed_factor，不耗油、从不拉手刹。
+
+---
+
+## 7. 记录 / 回放 / 教学 / 任务
+
+### 7.1 记录（user://race_records.json，RaceRecords 纯逻辑）
+
+每条赛道一个 entry，字段与任务书 §8.1 一致：
+`best_lap_time / best_lap_at / best_lap_vehicle / best_race_time /
+best_race_at / total_races / wins / best_rank / last_rank`。
+破纪录判定在 `apply()`（返回 `broke_lap / broke_race / first_race`），
+完赛即存盘；选择器 UI 可清空记录（`clear_records()`）。
+
+### 7.2 回放（user://race_replay.jsonl，JSON Lines）
+
+每行一条事件，字段与任务书 §8.4 相同（tick / action / track_id /
+vehicle_id / position[3] / player），但格式是 **JSONL 而非 CSV**，只留最近
+**600 条**。事件：`race_start / checkpoint / lap_complete / race_finish`。
+定位是「幽灵车回放的原始素材」——回放本身**未实现**。
+
+### 7.3 教学（teaching.json，5 条）
+
+| id | trigger | 内容 |
+|---|---|---|
+| race_start | first_race_start | 倒计时与基本操作 |
+| race_checkpoint | first_checkpoint | 检查点作用 |
+| race_lap | first_lap | 圈速概念 |
+| race_terrain | first_race_start | 地形影响 |
+| race_hill | first_race_start | 山坡驾驶 |
+
+`RaceSystem.teachings_for(trigger)` 按触发点取条目，race_scene 在
+起跑/首个检查点/首圈时 enqueue（与任务书 §14「首次比赛触发教学」一致）。
+「之后可重看」的入口在赛道选择器（任务书 §7 的 fishing 式 teaching.json
+结构此处简化为 trigger 匹配）。
+
+### 7.4 任务（quest_data.gd，5 条）
+
+| 任务 | 计数键 |
+|---|---|
+| q_race_first 完成第一场比赛 | race_finished_any |
+| q_race_win_desert 沙丘环线夺冠 | race_win_desert_ring |
+| q_race_record 打破任一圈速纪录 | race_new_record |
+| q_race_wetland_clean 湿地无手刹完赛 | race_clean_wetland_cross |
+| q_race_tricycle_win 小三轮夺冠 | race_win_vehicle_tricycle |
+
+计数由 ProgressManager 监听 `Events.race_finished` / `race_record_beaten`
+累加（键名规则见 progress_manager.gd:220 注释）。任务书 §10.2 五条任务
+全部落地（「湿地无手刹」从愿望句变成了 clean 标志）。
+
+---
+
+## 8. 验证（探针）
+
+| 探针 | 断言数 | 覆盖 | 标记 |
+|---|---|---|---|
+| `tests/racing_probe.gd` | 82 | 赛道几何（周长/采样/地形分段/检查点）/ 门平面过门与圈数 / 名次排序 / 记录读写与破纪录 / AI 追线与犯错 / CarPhysics 地形与燃料 | `RACING_TEST_OK` |
+
+D-010 合规：存档 `user://race_records.json` 与 `race_replay.jsonl` 由探针
+读写时走 user:// 备份/还原；回归基线：日常无头 43 探针 / 验收全量 54 探针
+（`tmp/run_regression.sh` / `full` 档）。
+
+---
+
+## 9. 差距与已知问题（以代码为准）
+
+1. **幽灵车回放未实现**：回放日志已在写（§7.2），「播放上一场轨迹」是后续
+   迭代项（任务书亦列入后续）。
+2. **地形粒子未实现**：terrain.json 的 `dust` / `wet` 标志位无消费方，
+   扬尘/水花视觉效果空缺。
+3. **竞速车 ≠ 拼装蓝图**：任务书 §10.1 的「用自己拼的车比赛」未实现，
+   当前是预制赛车（§4.3）。
+4. **联机竞速未实现**（任务书后续项，单机定位不变）。
+5. **赛道选择器的记录面板**：记录查看/清空在选择器内，无独立「竞速记录」
+   主菜单页（任务书 §8.3 的可选形态）。

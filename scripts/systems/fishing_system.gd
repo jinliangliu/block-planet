@@ -14,10 +14,13 @@ extends Node
 ## 不含任何 UI：界面（FishingGearUI / FishingUI / FishingTeachingUI）只读本类的
 ## 状态与查询接口，不反过来改状态机字段——UI 与逻辑之间只有方法调用一条路。
 ##
-## 数值设计（probe: tests/fishing_probe 逐条钉死）：
+## 数值设计（实现依据见 features/feature_fishing.md §5）：
 ##   抛投距离 = 4 + 铅坠档 × 5 × 力度；<10 m 浅水 / 10~20 m 中层 / >20 m 深水。
 ##   咬钩看「饵 × 坠」的最大匹配度（≥ 0.3 才咬），稀有度只影响钓上哪一条。
 ##   收线：张力随「鱼的拉力 + 卸力」上升，卸力太松鱼会跑、太紧会断线。
+## 运行验证：tests/fishing_probe.tscn（数据自检 + 抛投/水层/咬钩纯计算 +
+##   等咬钩→收线→结算全状态机 + 收线三败局 + 日志与 Progress 折算；开局
+##   SaveGuard 隔离、钓鱼日志单独快照还原，D-010 合规）。
 
 signal fish_caught(fish_id: String, spot_id: String, gear: Dictionary)
 signal new_species_unlocked(fish_id: String)

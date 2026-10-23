@@ -86,6 +86,16 @@ func _run() -> void:
 	var b := FlightSettings.from_dict(d)
 	_check(b.difficulty == FlightSettings.Difficulty.NORMAL and b.assist_level == FlightSettings.Assist.FULL, "from_dict 还原难度与辅助覆盖")
 
+	# ── 气象风场开关（D-067 第 9 键，与其余键同链路）──
+	_check(d.has("wind_enabled") and d["wind_enabled"] == true, "to_dict 含 wind_enabled 且默认开")
+	var w_off := FlightSettings.from_dict({"difficulty": FlightSettings.Difficulty.NORMAL,
+		"assist_level": FlightSettings.Assist.PARTIAL, "livery_index": 0, "camera_shake": true,
+		"auto_recenter": true, "hud_detail": false, "auto_level": true, "beeper_enabled": true,
+		"wind_enabled": false})
+	_check(not w_off.wind_enabled, "from_dict 还原 wind_enabled=false")
+	var w_old := FlightSettings.from_dict({"difficulty": FlightSettings.Difficulty.NORMAL})
+	_check(w_old.wind_enabled, "缺 wind_enabled 键的旧存档向前兼容为默认开")
+
 	# ── 涂装（livery_index 随设置往返）──
 	_check(AircraftLivery.count() == 4, "涂装共 4 套（实际 %d）" % AircraftLivery.count())
 	_check(AircraftLivery.name_of(0) == "经典红白", "默认涂装名=经典红白")
@@ -122,6 +132,11 @@ func _run() -> void:
 	_check(ok, "save 写入成功")
 	var d2 := FlightSettings.load_or_new(tmp)
 	_check(d2.difficulty == FlightSettings.Difficulty.CASUAL and d2.assist_level == FlightSettings.Assist.FULL, "load_or_new 读档与写入一致")
+	# 第 9 键 wind_enabled 走同一条落盘链路。
+	c.wind_enabled = false
+	c.save(tmp)
+	var d2w := FlightSettings.load_or_new(tmp)
+	_check(not d2w.wind_enabled, "wind_enabled=false 落盘读回一致")
 	# 损坏文件安全退回默认。
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	f.store_string("{ this is not json ")

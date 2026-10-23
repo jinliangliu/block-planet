@@ -1,530 +1,314 @@
+# Block Planet 钓鱼玩法实现文档
 
-# Block Planet 钓鱼玩法设计文档（开发任务书）
 > 项目：Block Planet
-> 引擎：Godot 4.6 / GDScript
-> 目标：为探索模式增加四大洋钓鱼玩法，接入生物图鉴、任务、回放与教育系统。
-> 文档用途：交给 AI 智能体按此实现，人类负责审查与试玩。
+> 引擎：Godot 4.6.3 / GDScript（Mobile 渲染器）
+> 文档性质：**已实现现状说明书**（不是开发任务书）
+> 事实来源：**代码**。本文与代码冲突时以代码为准，并应回头修订本文。
+> 相关决策：`docs/decisions.md` D-042（出海钓点：距港距离决定鱼种）、D-044（球面 3D 小鱼标记）、D-063（1 格 = 1 m）；任务书原文的存档 `user://fishing_journal.json` 非原子写缺陷已修（见 §8）。
+
+---
+
+## 0. 文档定位与改版说明
+
+本文件初稿是一份 **AI 生成的开发任务书**（四大洋子钓点 / 商店解锁钓具 / CSV 回放等）。
+该功能**已完整实现并合入 main**（Autoload `FishingSystem` 已接线，`data/fishing/` 四份
+JSON 在位），但实现与任务书在钓点模型、解锁方式、日志格式等多处分叉。本文按代码
+现状重写为**现状说明书**；任务书中有价值且仍成立的设计取向已并入对应章节。
+**不要按任务书原文施工**——它假设的基础设施（子钓点树、`shop_500` 商店解锁、
+bestiary `catchable` 字段）并不存在。
+
+现状一句话：**钓鱼 = 地图选择器四大洋 🎣 标记进入 → 选钓具（竿/轮/线/饵/坠）→
+选饵 → 配坠 → 抛投蓄力 → 等咬钩 → 收线小游戏（张力/逃鱼/断线）→ 结算入册；
+16 个钓点（4 岸钓 + 12 出海，D-042）、20 种鱼、12 件钓具、5 课教学；
+钓获记录落 `user://fishing_journal.json`（原子写），任务计数走 `Progress`。**
 
 ---
 
 ## 1. 概述
-在探索模式的地图选择器中，为四大洋增加“可钓鱼标志”。玩家选择某个大洋钓点后，进入针对该地区的探钓玩法。玩家从背包选择钓具，进入渔猎操作界面，完成鱼饵搭配、铅坠配重、抛投、渔轮收线等操作，钓到该地区特有鱼种。
 
-钓到新鱼种时弹出“新鱼种解锁卡片”，并写入生物图鉴，记录首次钓获时间、钓点、钓具等信息。
+在探索模式的地图选择器（地球页）上，四大洋各有一枚 **3D 小鱼标记**（D-044，
+判据与图例 🎣、「去钓鱼」按钮同源，读 `FishingSystem` 钓点表）。点进去选
+「去钓鱼」即进入钓鱼流程：
+
+```text
+地图选择器四大洋 🎣 → 「去钓鱼」→ 选钓点（岸钓 4 / 出海 12，D-042）
+  → 选钓具（海竿 + 渔轮 + 鱼线）→ 选鱼饵 → 配铅坠 → 抛投蓄力
+  → 等咬钩 → 收线小游戏 → 成功钓获 / 跑鱼 / 断线 → 写入日志 + 任务计数
+  → 新鱼种首次解锁提示
+```
+
+- 岸钓点（`unlock=default`）：四大洋各 1 个，步行在地图页直接可去。
+- 出海钓点（`unlock=boat`，D-042）：四大洋 × 近/中/远海共 12 个，**只在船上**
+  按「距港距离」定位唯一可下竿钓点，其余在界面上置灰并标注「需航行 X m」。
+  开船默认在离岛不远的海域（见 BoatSystem）。
 
 ---
 
-## 2. 玩家流程
+## 2. 架构与数据流
+
 ```text
-探索模式 → 地图选择器 → 四大洋钓鱼标志 → 选择钓点 → 选择钓具（海竿、渔轮、鱼线、鱼饵、铅坠） → 渔猎操作界面 → 鱼饵搭配 → 铅坠配重 → 抛投 → 等待咬钩 → 渔轮收线 → 成功钓获 / 跑鱼 → 新鱼种解锁卡片 → 写入图鉴 + 回放日志 + 任务进度
+data/fishing/（四份 JSON，只读）
+├── spots.json     钓点（16：4 岸钓 + 12 出海）
+├── gear.json      钓具（12 件：竿 2 / 轮 2 / 线 2 / 饵 3 / 坠 3）
+├── fish.json      鱼种（20）
+└── teaching.json  教学（5 课）
+
+FishingSystem（Autoload，scripts/systems/fishing_system.gd）
+  ├── FishingGear（fishing_gear.gd）      钓具数据 + 纯计算（距离/水层/适配度）
+  ├── FishingTeaching（fishing_teaching.gd）教学数据
+  ├── 状态机：选饵 → 配坠 → 抛投 → 等咬钩 → 收线 → 结算
+  └── user://fishing_journal.json（原子写）
+        │
+        ▼ 信号
+UI（scripts/ui/，只读状态、不改状态机字段）
+├── fishing_gear_ui.gd    钓点 + 钓具选择（岸钓 open_for_atlas / 出海 open_for_boat）
+├── fishing_ui.gd         渔猎操作界面（抛投/等待/收线三阶段可视化）
+├── fishing_teaching_ui.gd 教学弹窗
+└── player/fishing_bobber.gd  3D 浮漂（咬钩抖动 + 鱼线牵引）
 ```
 
-## 3. 目录结构
+三个关键约定：
 
-```
-res://
-├── data/
-│   ├── bestiary/                # 已有生物图鉴
-│   └── fishing/
-│       ├── spots.json           # 钓点
-│       ├── gear.json            # 钓具
-│       ├── fish.json            # 鱼种
-│       └── teaching.json        # 教学步骤
-├── scenes/
-│   └── ui/
-│       ├── fishing_ui.tscn      # 渔猎操作界面
-│       ├── fishing_gear_ui.tscn # 钓具选择
-│       └── fishing_teaching_ui.tscn # 教学弹窗
-└── scripts/
-    ├── systems/
-    │   ├── bestiary_data.gd     # 已有
-    │   ├── fishing_system.gd    # 钓鱼核心逻辑（Autoload）
-    │   ├── fishing_gear.gd      # 钓具数据与配置
-    │   └── fishing_teaching.gd  # 教学管理
-    └── ui/
-        ├── bestiary_ui.gd       # 已有
-        ├── fishing_ui.gd        # 渔猎操作界面控制
-        ├── fishing_gear_ui.gd   # 钓具选择控制
-        └── fishing_teaching_ui.gd # 教学弹窗控制
-```
+1. **不写 `class_name`**：Godot 不允许脚本类名与 autoload 单例同名
+   （`Class "FishingSystem" hides an autoload singleton`），与 Progress /
+   BestiaryData 一致。
+2. **UI 与逻辑单向**：UI 只读 `session_info()` / `reel_state()` 等查询接口和
+   信号，不反向写状态机字段——两者之间只有方法调用一条路。
+3. **读档失败拒写盘**：`_load_journal()` 解析失败时 `journal_ok=false`，
+   本次会话**不回写**，避免用默认模板覆盖真实存档（实测踩过：竞速探针运行时
+   日志被清空，根因是非原子写，已修，见 §8）。
 
-## 4. 地图选择器与钓点
+---
 
-### 4.1 四大洋钓点
+## 3. 钓点模型（16 个）
 
-表格
+`atlas_region` 对应 RegionAtlas 区域号：**0 太平洋 / 1 大西洋 / 2 印度洋 /
+3 北冰洋**；`region_id` 对应生物图鉴区域 id。`fish_pool` 里的鱼 id 必须在
+fish.json 存在，否则加载期 `push_error`（反向检查，永不静默空池）。
 
-| 大洋 | 钓点标志 | 特色鱼种 |
-| --- | --- | --- |
-| 太平洋 | 🎣 太平洋钓点 | 蓝鲸、座头鲸、大白鲨、鲸鲨、太平洋鲑鱼 |
-| 大西洋 | 🎣 大西洋钓点 | 蓝鳍金枪鱼、大西洋鳕鱼、灰海豹 |
-| 印度洋 | 🎣 印度洋钓点 | 鲸鲨、儒艮、蝠鲼、狮子鱼、小丑鱼 |
-| 北冰洋 | 🎣 北冰洋钓点 | 北极鳕鱼、格陵兰鲨、独角鲸 |
+| 钓点 | 区域 | 水层 | 解锁 | 鱼池 |
+|---|---|---|---|---|
+| pacific_coast 太平洋近岸 | 0 | shallow | default | 小丑鱼 / 太平洋鲑鱼 / 大白鲨 |
+| atlantic_open 大西洋外海 | 1 | deep | default | 大西洋鳕鱼 / 大西洋鲭鱼 / 蓝鳍金枪鱼 |
+| indian_reef 印度洋珊瑚礁 | 2 | shallow | default | 小丑鱼 / 狮子鱼 / 鲸鲨 |
+| arctic_edge 北冰洋冰缘 | 3 | shallow | default | 北极鳕鱼 / 独角鲸 / 格陵兰鲨 |
+| {大洋}_near 近海 ×4 | 0-3 | shallow | boat | 各 2 种（练手点） |
+| {大洋}_mid 中海 ×4 | 0-3 | mid | boat | 各 2 种 |
+| {大洋}_far 远海 ×4 | 0-3 | deep | boat | 各 1~2 种（大家伙） |
 
-每个大洋可细分子钓点：
+> 任务书初稿的「每洋细分子钓点（近岸浅水/珊瑚礁/深海）+ `need_deep_rod` 解锁」
+> **未按此实现**：岸钓只有 4 个一级钓点，细分改由「抛投落点水层」承担（§5），
+> 深海鱼种由出海距离解锁（D-042）。
 
-```
-太平洋
-├── 近岸浅水     → 小丑鱼、狮子鱼
-├── 珊瑚礁       → 鲸鲨、绿海龟
-└── 深海         → 蓝鲸、大白鲨、座头鲸
-```
+---
 
-### 4.2 spots.json
+## 4. 鱼种（20 种）
 
-```
-{
-  "spots": [
-    {
-      "id": "pacific_shallow",
-      "region_id": "pacific_ocean",
-      "name_zh": "太平洋近岸浅水",
-      "name_en": "Pacific Shallow",
-      "depth": "shallow",
-      "fish_pool": ["clownfish", "lionfish", "green_sea_turtle"],
-      "unlock": "default"
-    },
-    {
-      "id": "pacific_deep",
-      "region_id": "pacific_ocean",
-      "name_zh": "太平洋深海",
-      "name_en": "Pacific Deep Sea",
-      "depth": "deep",
-      "fish_pool": ["blue_whale", "great_white_shark", "humpback_whale"],
-      "unlock": "need_deep_rod"
-    }
-  ]
-}
-```
+字段：`id`（与图鉴条目同 id）、`region_id`、`spot_ids`、`habitat`、`depth`、
+`rarity`、`difficulty`(1-9)、`tags`、`preferred_bait`、`fight_power`(1-10)、
+`weight_kg`（**[min, max] 区间**，钓获时随机滚动）、`name_zh/en`、`scientific`、
+`fact_zh`。
 
-`unlock` 可选值：`default`、`need_deep_rod`、`quest_deep_sea`、`shop_500` 等。
+| 稀有度 | 抽取权重 | 难度区间 | 实例 |
+|---|---|---|---|
+| common | 1.0 | 1-2 | 小丑鱼、北极鳕鱼、大西洋鲱鱼 |
+| uncommon | 0.6 | 2-3 | 太平洋鲭鱼、狮子鱼、北极鳐 |
+| rare | 0.35 | 5-6 | 蓝鳍金枪鱼、太平洋枪鱼、巨石斑鱼 |
+| epic | 0.15 | 6-7 | 大白鲨、鲸鲨、独角鲸 |
+| legendary | 0.07 | 9 | 格陵兰鲨 |
 
-## 5. 钓具系统
+**稀有度只压抽取概率，不压咬钩门槛**——否则稀有鱼永远不上钩。咬不咬钩看
+「饵 × 坠」匹配度（§5）。
 
-### 5.1 钓具组成
+分布：四大洋各 5 种（岸钓 3 + 出海 2）。任务书 MVP 写的「共 12 种」已超额
+完成；任务书 `max_weight_kg: 180` 式的定值体重也未按此实现（改为区间滚动，
+记录里保存历史最大值）。
 
-```
-海竿 Sea Rod       → 长度、强度、适用钓法
-渔轮 Reel          → 卸力上限、收线速度、线容量
-鱼线 Fishing Line  → 拉力值、耐磨度、可见度
-鱼饵 Bait          → 假饵 Lure / 活饵 Live Bait
-铅坠 Sinker        → 重量影响抛投距离
+---
+
+## 5. 钓具与数值规则
+
+### 5.1 钓具（gear.json，12 件）
+
+| 类 | 默认拥有 | 任务解锁（`quest:<id>`） |
+|---|---|---|
+| 海竿 ×2 | basic_sea_rod（max_line 3） | deep_sea_rod（max_line 4，`q_fish_deep`） |
+| 渔轮 ×2 | basic_reel（卸力 2 / 速度 2） | heavy_reel（卸力 5 / 速度 3，`q_fish_five`） |
+| 鱼线 ×2 | nylon_line（拉力 2 / 可见度高） | fluorocarbon_line（拉力 3 / 可见度低，`q_fish_first`） |
+| 鱼饵 ×3 | live_shrimp、metal_lure | soft_lure（`q_fish_deep`） |
+| 铅坠 ×3 | sinker_10g / 30g / 60g（抛投档 1/3/5） | — |
+
+- **装配校验**（`FishingGear.validate`）：竿的 `max_line` 必须 ≥ 线的
+  `strength`，否则 UI 拒绝开钓（「竿线不配」）——宁可在开钓前挡住，也不让玩家
+  在收线时被隐性惩罚打懵。任务书的 `shop_500` 等商店解锁**未实现**，解锁统一走
+  任务奖励（`quest:` 前缀，领奖即发）。
+- **卸力初始值** = 该渔轮 `drag_max` × 0.5，收线中可调（0 ~ drag_max）。
+
+### 5.2 抛投与水层
+
+```text
+落点距离（m）= 4 + 铅坠抛投档 × 5 × 力度(0~1)     # 10 g 保底 4 m，60 g 满力 29 m
+水层：< 10 m 浅水（shallow）/ 10~20 m 中层（mid）/ > 20 m 深水（deep）
 ```
 
-### 5.2 gear.json
+水层决定这一竿能碰到哪条鱼（`get_fish_pool` 按 depth 过滤）。任务书
+「近岸→浅水鱼 / 中距→珊瑚礁鱼 / 远投→深海鱼」的三段式**成立**，只是珊瑚礁
+鱼不在独立中距层，而是随各钓点鱼池分布。
 
-```
-{
-  "rods": [
-    { "id": "basic_sea_rod", "name_zh": "入门海竿", "name_en": "Basic Sea Rod", "strength": 1, "max_line": 2, "unlock": "default" },
-    { "id": "deep_sea_rod", "name_zh": "深海船竿", "name_en": "Deep Sea Rod", "strength": 3, "max_line": 4, "unlock": "quest_deep_sea" }
-  ],
-  "reels": [
-    { "id": "basic_reel", "name_zh": "基础纺车轮", "name_en": "Basic Spinning Reel", "drag_max": 2, "speed": 2, "unlock": "default" },
-    { "id": "heavy_reel", "name_zh": "重型鼓轮", "name_en": "Heavy Baitcasting Reel", "drag_max": 5, "speed": 3, "unlock": "shop_500" }
-  ],
-  "lines": [
-    { "id": "nylon_line", "name_zh": "尼龙线", "name_en": "Nylon Line", "strength": 2, "visibility": "high", "unlock": "default" },
-    { "id": "fluorocarbon_line", "name_zh": "碳氟线", "name_en": "Fluorocarbon Line", "strength": 3, "visibility": "low", "unlock": "shop_300" }
-  ],
-  "baits": [
-    { "id": "live_shrimp", "name_zh": "活虾", "name_en": "Live Shrimp", "type": "live", "target": ["small_fish", "reef_fish"], "unlock": "default" },
-    { "id": "metal_lure", "name_zh": "金属假饵", "name_en": "Metal Lure", "type": "lure", "target": ["predator"], "unlock": "shop_200" },
-    { "id": "soft_lure", "name_zh": "软虫假饵", "name_en": "Soft Lure", "type": "lure", "target": ["bottom_fish"], "unlock": "shop_200" }
-  ],
-  "sinkers": [
-    { "id": "sinker_10g", "name_zh": "10克铅坠", "name_en": "10g Sinker", "weight": 10, "cast_distance": 1, "unlock": "default" },
-    { "id": "sinker_30g", "name_zh": "30克铅坠", "name_en": "30g Sinker", "weight": 30, "cast_distance": 3, "unlock": "default" },
-    { "id": "sinker_60g", "name_zh": "60克铅坠", "name_en": "60g Sinker", "weight": 60, "cast_distance": 5, "unlock": "shop_100" }
-  ]
-}
+### 5.3 鱼饵适配与铅坠惩罚
+
+```text
+bait_match：偏好饵 1.0 / 目标类群(tags∩target)对上 0.6 / 不对付 0.25
+sinker_factor：重坠(档≥5)抛非深水 ×0.5（掠过去）/ 轻坠(档≤1)抛深水 ×0.35（够不到）
+综合权重 = 稀有度权重 × bait_match × sinker_factor     # 只决定多条候选里挑哪条
+咬钩门槛：best_match < 0.3 → 这一竿直接判「没鱼咬」，不进等待
 ```
 
-### 5.3 规则
+等待时长 = 2.5 s + 0.25 s × 该水层最难鱼的 difficulty；超过 2 倍时长仍无咬钩
+才提示「这里没鱼上钩」。
 
-- 铅坠越重，抛投越远，但下沉越快，可能错过中上层鱼。
-- 假饵适合掠食性鱼类，活饵适合杂食和小鱼。
-- 鱼线拉力要大于目标鱼挣扎力，否则断线。
-- 渔轮卸力决定能否拉住大鱼，卸力太低会 “炸线”。
+### 5.4 收线小游戏
 
-## 6. 渔猎操作界面
+鱼在移动条 0~1 游动（安全区 = 0.5 ± 0.18），**按住收线 / 松手放线**：
 
-从背包选择装备后，进入渔猎操作界面。分四个阶段：
-
-### 6.1 鱼饵搭配
-
-从背包选择鱼饵。
-显示目标鱼种提示、鱼饵适配度。
-教学提示：“不同的鱼爱吃不同的饵。”
-
-### 6.2 铅坠配重
-
-选择铅坠。
-显示预计抛投距离。
-教学提示：“铅坠越重，抛得越远。”
-
-### 6.3 抛投
-
-力量条蓄力，参考 FishMasters。
-松手时机决定落点。
-落点影响能钓到的鱼种。
-
-```
-落点范围：
-近岸 → 浅水鱼
-中距 → 珊瑚礁鱼
-远投 → 深海鱼
+```text
+张力：鱼的拉力(fight×0.10×挣扎波动) + 卸力(×0.12) − 自然泄力(0.60)，×0.35 累积
+      线拉力 < 鱼挣扎力 → 加速 ×1.25；鱼在安全区外还硬收 → 再 ×1.5
+      张力 ≥ 1 → 断线（line_broke）
+逃逸：挣扎(×0.04) − 卸力(×0.10) 持续累积，≥ 1 → 跑鱼（fish_escaped）
+进度：+ 渔轮 speed × 0.12 × (1 − 0.4×张力) / 松手回退 fight × 0.012
+进度满 → 结算（try_catch）
 ```
 
-### 6.4 渔轮收线
+即任务书「卸力太紧会断线、太松会跑鱼」的量化版；大鱼需要更强的线 + 更大
+卸力 + 看着鱼的位置收放。
 
-鱼咬钩后进入收线小游戏，参考 Fishdew 的移动条机制。
-玩家控制收线速度，鱼会挣扎。
-渔轮卸力可调，太高会断线，太低会跑鱼。
+---
 
-```
-收线小游戏：
-[========|=====]  鱼的位置
-[======|=======]  安全区
-按住收线，松开放线
-```
+## 6. 状态机与接口
 
-## 7. 引导教学
-
-每条教学做成独立步骤，首次进入时触发，之后可在设置里重看。
-
-### teaching.json
-
-```
-{
-  "lessons": [
-    {
-      "id": "lesson_bait",
-      "title_zh": "鱼饵搭配",
-      "steps": [
-        "不同的鱼爱吃不同的饵。",
-        "假饵适合掠食性鱼类，活饵适合杂食和小鱼。",
-        "选对鱼饵，鱼才更容易上钩。"
-      ],
-      "trigger": "first_time_bait"
-    },
-    {
-      "id": "lesson_sinker",
-      "title_zh": "铅坠配重",
-      "steps": [
-        "铅坠越重，抛得越远。",
-        "但铅坠太重，饵下沉太快，可能错过中上层鱼。",
-        "试试不同重量的铅坠吧。"
-      ],
-      "trigger": "first_time_sinker"
-    },
-    {
-      "id": "lesson_drag",
-      "title_zh": "渔轮卸力",
-      "steps": [
-        "渔轮卸力太紧，鱼线容易断。",
-        "卸力太松，鱼会跑掉。",
-        "大鱼上钩时，要一边收线一边调整卸力。"
-      ],
-      "trigger": "first_time_drag"
-    },
-    {
-      "id": "lesson_cast",
-      "title_zh": "抛投",
-      "steps": [
-        "按住蓄力，松手抛投。",
-        "力度决定距离，时机决定落点。",
-        "想钓深海鱼，就用力抛远一点。"
-      ],
-      "trigger": "first_time_cast"
-    },
-    {
-      "id": "lesson_reel",
-      "title_zh": "渔轮收线",
-      "steps": [
-        "鱼咬钩后，按住收线。",
-        "让鱼保持在安全区内，进度条满就钓上来了。",
-        "别一直收，鱼挣扎时要放线。"
-      ],
-      "trigger": "first_time_reel"
-    }
-  ]
-}
+```text
+IDLE →(start_fishing) SELECT_BAIT →(select_bait) SELECT_SINKER →(select_sinker)
+CASTING →(cast_power) WAITING →(update_wait) HOOKED →(hook_fish) REELING
+→(update_reel 满进度/断线/跑鱼) RESULT →(end_session) IDLE
 ```
 
-## 8. 鱼种设定
+信号：`fish_caught(fish_id, spot_id, gear)` / `new_species_unlocked(fish_id)` /
+`fishing_failed(reason)`（`spot_missing` / 装备问题 / `no_bite` / `line_broke` /
+`fish_escaped`）/ `fishing_state_changed(state)` / `journal_changed`。
 
-每个大洋鱼种池独立，钓到的鱼自动写入图鉴。
+`SELECT_GEAR` 枚举在位但流程不经它（钓具在选择界面选好，`start_fishing`
+一次性带入）；任务书 `start_fishing() -> void` 实为 `-> bool`（校验失败发
+`fishing_failed` 并返回 false）。探针/UI 常用接口：`weighted_pool()`（适配度
+预览 + 抽取）、`best_match()`、`reel_state()`（收线全部可视状态，UI 每帧读
+这一份）、`session_info()`、`set_drag()` / `add_drag()`。
 
-### fish.json
+---
 
-```
-{
-  "fish": [
-    {
-      "id": "pacific_salmon",
-      "region_id": "pacific_ocean",
-      "spot_ids": ["pacific_shallow", "pacific_deep"],
-      "habitat": "ocean",
-      "depth": "mid",
-      "rarity": "common",
-      "difficulty": 2,
-      "preferred_bait": ["live_shrimp", "metal_lure"],
-      "fight_power": 3,
-      "name_zh": "太平洋鲑鱼",
-      "name_en": "Pacific Salmon",
-      "scientific": "Oncorhynchus",
-      "fact_zh": "逆流而上回到出生地产卵，被称为洄游。"
-    },
-    {
-      "id": "bluefin_tuna",
-      "region_id": "atlantic_ocean",
-      "spot_ids": ["atlantic_open"],
-      "habitat": "ocean",
-      "depth": "deep",
-      "rarity": "rare",
-      "difficulty": 5,
-      "preferred_bait": ["metal_lure"],
-      "fight_power": 8,
-      "name_zh": "蓝鳍金枪鱼",
-      "name_en": "Atlantic Bluefin Tuna",
-      "scientific": "Thunnus thynnus",
-      "fact_zh": "游得极快，是海洋里的高速猎手。"
-    }
-  ]
-}
+## 7. 日志 / 图鉴 / 教学 / 任务
+
+### 7.1 钓鱼日志（user://fishing_journal.json）
+
+```text
+{ version, records, gear(已拥有钓具 id), lessons_seen, replay, stats }
+records[fish_id] = {
+  first_caught_at / first_caught_spot / first_caught_gear(五件套) /
+  last_caught_at / catch_count / max_weight_kg(历史最大) / released }
+replay[] = { tick(ms), action, spot, fish_id, player:"小方块" }   # 最近 300 条
+action ∈ cast / catch / release / break / escape
+stats: casts / catches / escapes / releases
 ```
 
-稀有度表
+任务书的 CSV 回放（`tick, action, position, fish_id, player`，含坐标列）
+**未按此实现**：改为 JSON 对象数组、无 position 列、上限 300 条。
+放生只加 `released` 计数与任务计数，**不删图鉴记录**（钓到过就是钓到过）。
 
-表格
+### 7.2 与生物图鉴的关系（任务书 §9 未落地）
 
-| 稀有度 | 颜色 | 难度 | 说明 |
-| --- | --- | --- | --- |
-| common | 白 | 1–2 | 常见，容易钓 |
-| uncommon | 绿 | 3 | 需要合适鱼饵 |
-| rare | 蓝 | 4–5 | 需要远投和好装备 |
-| epic | 紫 | 6–7 | 需要特定钓点和鱼饵 |
-| legendary | 金 | 8–10 | 极难，有特殊条件 |
+fish.json 的 id 与图鉴条目 id 一致，但 **bestiary 数据侧没有 `catchable`
+字段、图鉴 UI 也没有钓鱼图标**——「新鱼种解锁卡片」与钓获时间/钓点/钓具记录
+都存在**钓鱼日志**里（FishingUI 消费），未接入 BestiaryData。fish.json 注释里
+「图鉴侧标 catchable:true」的表述与 data/bestiary 实际内容不符，以代码为准。
 
-## 9. 生物图鉴补充
+### 7.3 教学（teaching.json，5 课）
 
-### 9.1 图鉴增加海钓鱼类
+`lesson_bait` / `lesson_sinker` / `lesson_drag` / `lesson_cast` / `lesson_reel`，
+各自 `trigger`（first_time_*）首次触发；看过的课记入 `lessons_seen`，钓具界面
+提供「重看教学」（`reset_lessons()` 清空已看记录）。任务书 §7 的五课文案
+与实现**完全一致**。
 
-在 bestiary 的海洋区域里，补充可钓的鱼类条目。建议字段：
+### 7.4 任务（quest_data.gd）
 
-```
-{
-  "id": "bluefin_tuna",
-  "kingdom": "animalia",
-  "category": "fish",
-  "region_id": "atlantic_ocean",
-  "catchable": true,
-  "fishing_difficulty": 5,
-  "name_zh": "蓝鳍金枪鱼",
-  "name_en": "Atlantic Bluefin Tuna",
-  "scientific": "Thunnus thynnus",
-  "fact_zh": "游得极快，是海洋里的高速猎手。"
-}
-```
+| 任务 | 目标 | 奖励钩子 |
+|---|---|---|
+| q_fish_first | fish_caught ×1 | 解锁碳氟线 |
+| q_fish_five | fish_caught ×5 | 解锁重型鼓轮 |
+| q_fish_deep | fish_deep ×1 | 解锁深海船竿 + 软虫 |
+| q_fish_oceans | fished_region_* ×4（四大洋各钓 1 次） | — |
+| q_fish_lure | fish_lure_predator ×1（假饵钓掠食性） | — |
+| q_fish_release | fish_released ×3（放生 3 条） | — |
 
-`catchable: true` 表示可钓，图鉴 UI 加 “钓鱼” 图标。
+另有成就 `a_hunt_fish`。任务书 §11.1 的五条任务全部落地，「钓到 1 条稀有鱼」
+一项以 `fish_rare` 计数形式存在于 Progress 通知键（未单列任务）。
 
-### 9.2 新鱼种解锁卡片
+---
 
-首次钓到新鱼种时弹出：
+## 8. 持久化与踩过的坑
 
-```
-┌─────────────────────────┐
-│   🎉 新鱼种解锁！        │
-│                         │
-│   [鱼图标]               │
-│   蓝鳍金枪鱼             │
-│   Atlantic Bluefin Tuna  │
-│                         │
-│   “游得极快，是海洋里的   │
-│    高速猎手。”           │
-│                         │
-│   首次钓获：2026-10-14   │
-│   钓点：大西洋外海        │
-│   钓具：深海船竿 + 金属假饵│
-│                         │
-│   [ 收入图鉴 ]           │
-└─────────────────────────┘
-```
+- **原子写**：`_save_journal()` 先写 `fishing_journal.json.tmp` 再 rename 覆盖。
+  背景：`FileAccess.WRITE` 会先把原文件截断为 0 字节，若此刻进程被信号打断
+  （本工程 headless 退出期偶发段错误），存档即被清空——改为临时文件 + 改名，
+  任何时刻盘上都有一份完整存档（decisions.md 竞速章节记载了这次实测数据丢失）。
+- **读档失败拒写**：解析失败时 `journal_ok=false`，本次会话不回写（§2.3）。
+- **退出落盘**：`_exit_tree()` 时保存一次；每次钓获/放生/领奖即时保存。
 
-### 9.3 图鉴标记钓获时间
+---
 
-玩家存档中记录：
+## 9. 界面入口
 
-```
-{
-  "id": "bluefin_tuna",
-  "first_caught_at": "2026-10-14T15:30:00",
-  "first_caught_spot": "atlantic_open",
-  "first_caught_gear": {
-    "rod": "deep_sea_rod",
-    "reel": "heavy_reel",
-    "line": "fluorocarbon_line",
-    "bait": "metal_lure",
-    "sinker": "sinker_60g"
-  },
-  "catch_count": 1,
-  "max_weight_kg": 180
-}
-```
+| 入口 | 路径 |
+|---|---|
+| 地图选择器 | 四大洋球面 3D 小鱼标记（D-044）/ 图例 🎣 / 介绍页「去钓鱼」按钮，三者判据同源（FishingSystem 钓点表）→ `hud.open_fishing_gear(atlas_region)` |
+| 出海 | 船上「去钓鱼」→ `hud.open_fishing_gear_boat(atlas_region, 距港距离)`：按距离定位唯一可下竿点，其余置灰标注「需航行 X m」 |
+| 教学重看 | 钓具选择界面「重看教学」 |
 
-这些数据存 `user://fishing_journal.json`，不写进 `fish.json`。
+渔猎界面（FishingUI）四阶段：选饵（显示目标鱼与适配度）→ 配坠（预告抛投
+距离/可达水层）→ 抛投（力量条蓄力）→ 收线（鱼位置/安全区/张力/进度 +
+卸力调节）。3D 浮漂（FishingBobber）随钓具抛出，咬钩时抖动并牵鱼线。
 
-## 10. 脚本设计
+---
 
-### 10.1 FishingSystem（Autoload）
+## 10. 验证（探针）
 
-职责：
+| 探针 | 覆盖 |
+|---|---|
+| `tests/fishing_probe.gd` | **87 断言**：四份数据加载自检（16 钓点 / 20 鱼 / 岸边钓点过滤 / 默认钓具）、纯计算（抛投距离公式与水层边界、饵适配度、铅坠惩罚、装配校验、咬钩门槛）、等咬钩超时（`NO_BITE_FACTOR` 单帧大步长分支）、完整钓获（单鱼种池确定性：等咬钩 → 收线 → 结算，验重量区间、日志 records/replay/stats、Progress 计数折算）、收线三败局（饵不对没鱼 / 卸力最大断线 / 卸力全松跑鱼）、放生与教学、状态机边界（坏钓点 / 缺渔轮 / 非等待态 / 非收线态） |
+| `tests/boat_probe.gd` | 出海钓点鱼池非空、距港距离分带（D-042 接线） |
+| `tests/life_probe.gd` / `globe_marker_probe.gd` | 球面小鱼标记（D-044）存在性与计数 |
 
-- 加载 spots.json、gear.json、fish.json、teaching.json
-- 提供钓点、鱼种、钓具查询
-- 管理钓鱼状态机
-- 发出信号
+> D-010 合规：`fishing_probe` 开局 `SaveGuard.snapshot()`（progress/settings/
+> 竞速三件套 + Progress 内存态），钓鱼日志单独快照原文本；收尾还原文本 +
+> 把 `journal_ok` 置否（`_save_journal` 的拒写闸——否则退出期
+> `FishingSystem._exit_tree` 会把探针改乱的日志再写一遍盘），`_exit_tree`
+> 安全网 + 120 s 看门狗兜底；断言全部走「基线差分」，真实存档里已有什么
+> 都不影响结论。
+> 回归基线：日常无头 **43 探针** / 验收全量 **54 探针**
+> （`tmp/run_regression.sh` / `tmp/run_regression.sh full`）。
 
-信号：
+---
 
-```
-signal fish_caught(fish_id: String, spot_id: String, gear: Dictionary)
-signal new_species_unlocked(fish_id: String)
-signal fishing_failed(reason: String)
-signal fishing_state_changed(state: int)
-```
+## 11. 差距与已知问题（以代码为准）
 
-状态枚举：
-
-```
-enum State {
-    IDLE,
-    SELECT_GEAR,
-    SELECT_BAIT,
-    SELECT_SINKER,
-    CASTING,
-    WAITING,
-    HOOKED,
-    REELING,
-    RESULT
-}
-```
-
-核心方法：
-
-```
-func load_data() -> void
-func get_spots_for_region(region_id: String) -> Array
-func get_fish_pool(spot_id: String, bait_id: String, depth: String) -> Array
-func start_fishing(spot_id: String, gear: Dictionary) -> void
-func cast_power(power: float) -> float          # 返回距离
-func hook_fish() -> Dictionary                  # 返回鱼实例
-func update_reel(delta: float, input: float) -> float  # 返回进度
-func try_catch() -> Dictionary
-func release_fish(fish_id: String) -> void
-```
-
-### 10.2 FishingUI
-
-控制渔猎操作界面
-四个阶段：鱼饵、铅坠、抛投、收线
-显示力量条、鱼位置、安全区、进度条
-成功后调用 `FishingSystem.try_catch()`
-
-### 10.3 FishingGearUI
-
-从背包选择海竿、渔轮、鱼线、鱼饵、铅坠
-显示适配度与预计抛投距离
-返回 gear 字典
-
-### 10.4 FishingTeachingUI
-
-根据 teaching.json 显示教学步骤
-首次触发，记录已看教学
-
-## 11. 任务与回放
-
-### 11.1 任务面板
-
-新增钓鱼任务：
-
-- 钓到你的第一条鱼
-- 在四大洋各钓到 1 种鱼
-- 钓到 1 条稀有鱼
-- 用假饵钓到 1 条掠食性鱼类
-- 放生 3 条鱼
-
-### 11.2 回放日志
-
-```
-tick, action, position, fish_id, player
-1200, cast, [10,64,20], null, daughter
-1300, catch, [10,64,20], pacific_salmon, daughter
-1400, release, [10,64,20], pacific_salmon, daughter
-```
-
-## 12. MVP 最小可行方案
-
-第一版只做：
-
-- 四大洋各 1 个钓点，地图选择器显示 🎣 标志
-- 基础海竿 + 基础渔轮 + 尼龙线 + 活虾 + 10g/30g 铅坠
-- 钓鱼流程：选饵 → 选铅坠 → 抛投 → 收线
-- 每个大洋 3 种鱼，共 12 种
-- 首次钓到新鱼种弹出解锁卡片
-- 图鉴标记首次钓获时间
-- 5 条引导教学
-- 写入回放日志
-
-后续迭代：
-
-- 鱼竿 / 渔轮 / 鱼线升级
-- 假饵与活饵区分
-- 稀有度与天气 / 时间
-- 深海钓点与大型鱼
-- 移动端触控优化
-- 水族馆展示
-
-## 13. 开发任务拆分（给智能体的 Checklist）
-
-- 创建 data/fishing/ 目录与四个 JSON 文件
-- 实现 FishingSystem Autoload，加载所有 JSON
-- 实现 FishingGearUI，从背包选择钓具
-- 实现 FishingUI 状态机：鱼饵 → 铅坠 → 抛投 → 收线
-- 实现抛投力量条与距离计算
-- 实现收线小游戏，鱼挣扎与卸力
-- 实现鱼种判定：地区、钓点、鱼饵、深度
-- 实现 FishingTeachingUI，首次触发教学
-- 扩展 BestiaryData，支持 catchable 与钓鱼记录
-- 实现新鱼种解锁卡片
-- 将钓获时间、钓点、钓具写入 user://fishing_journal.json
-- 地图选择器增加四大洋钓鱼标志
-- 任务面板增加钓鱼任务
-- 回放系统记录 cast、catch、release 事件
-- 编写最小测试用例，验证钓到鱼与图鉴解锁
-
-## 14. 验收标准
-
-1. 玩家能从地图选择器进入四大洋钓点。
-2. 能从背包选择海竿、渔轮、鱼线、鱼饵、铅坠。
-3. 能完成鱼饵搭配、铅坠配重、抛投、收线四个操作。
-4. 不同铅坠影响抛投距离，不同鱼饵影响鱼种。
-5. 首次钓到新鱼种弹出解锁卡片，图鉴中记录首次钓获时间。
-6. 教学环节首次触发，之后可重看。
-7. 钓获事件写入回放日志。
-8. 游戏在 Godot 4.6 中无报错运行。
-
-## 15. 给智能体的开发指令
-
-请按本文档实现 Block Planet 钓鱼玩法。
-遵循 Godot 4.6 与 GDScript，使用现有目录结构：
-
-- 系统脚本放 `scripts/systems/`
-- UI 脚本放 `scripts/ui/`
-- 数据放 `data/fishing/`
-- 场景放 `scenes/ui/`
-
-优先完成 MVP，保持代码可读、可测试、可扩展。
-每完成一个模块，写清注释与使用说明，并更新 `docs/devlog/`。
+1. ~~独立钓鱼探针缺失~~ —— **已修复**（2026-10-23）：新增
+   `tests/fishing_probe.gd`（87 断言），钉死抛投距离公式、水层分界、
+   `BITE_MIN_MATCH` 门槛、等咬钩超时、收线三败局（断线 / 跑鱼 / 没鱼）、
+   完整钓获链路与日志 round-trip（records / replay / stats）+ Progress
+   计数折算；已登记进 `tmp/run_regression.sh` 日常档（42 → 43 探针）。
+   断线用例借任务锁装备 `heavy_reel`（drag_max=5 时逃逸速率归零，保证
+   断线先于跑鱼的确定性）——发放走 `grant_gear()` 公有接口，不验解锁流。
+2. **图鉴集成未落地**：任务书 §9 的 `catchable` 字段 / 图鉴钓鱼图标 / 解锁
+   卡片入图鉴均未实现，钓获记录只在钓鱼日志（§7.2）。
+3. **`wind_enabled` 式的统一设置面板不覆盖钓鱼**：钓鱼无面板化设置项
+   （教学重看入口在钓具界面内）。
+4. **UI 细节以试玩为准**：力量条手感、安全区宽度（0.18）、张力可视化等
+   数值虽被代码钉死，但未经过系统可玩性评估。
