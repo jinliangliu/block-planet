@@ -798,7 +798,7 @@ bash tmp/run_regression.sh          # 日常：无头逻辑探针（快）
 bash tmp/run_regression.sh full     # 验收：无头 + 窗口截图（须目检截图）
 ```
 
-当前 **44 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`）；`full` 验收档共 **55 探针**（含窗口截图），最近一次全量 **0 FAIL**、`[user://] RESTORED_OK`。
+当前 **44 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`）；`full` 验收档共 **55 探针**（含窗口截图），最近一次全量 **2154 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-069 收尾后）。
 D-061 新增 `landing_quality_probe`（45 断言：A 评分边界 19 + B 任务改造 13 + C 呼号边沿 7 + D 端到端落地 6）。
 D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状态机 / L3 符号 / 微颤 / 净空 / 相机吸附）、`cockpit_align_probe`（16 断言：材质绑定四闸 / 2D dash 未变形 / 四角投影 ±12 px / 可见性反转）、`cockpit3d_shot`（窗口 10 图 + 白屏像素闸）。
 
