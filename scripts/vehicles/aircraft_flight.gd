@@ -338,7 +338,7 @@ static func integrate(
 	# 但垂直分量交给机轮支撑——由节点在 move_and_slide 之后抹平。
 	state.velocity += acceleration(state, controls) * delta
 	state.position += state.velocity * delta
-	_refresh_readings(state)
+	_refresh_readings(state, on_ground)
 
 
 static func _update_rates(
@@ -430,7 +430,7 @@ static func _integrate_attitude(state: State, delta: float, on_ground: bool) -> 
 	state.basis = basis
 
 
-static func _refresh_readings(state: State) -> void:
+static func _refresh_readings(state: State, on_ground: bool = false) -> void:
 	var af := state.airframe
 	var v_air := air_velocity(state)
 	var speed := v_air.length()
@@ -438,8 +438,15 @@ static func _refresh_readings(state: State) -> void:
 	state.airspeed = speed
 	state.ground_speed = state.velocity.length()
 	state.alpha = alpha
-	state.stalled = absf(alpha) > STALL_ALPHA and speed > 3.0
-	state.stall_warning = absf(alpha) > STALL_WARN_ALPHA and speed > 3.0
+	# D-069 地面门：地面不起失速标志。飞机在地面由机轮承载而非气动承载，
+	# 「失速」在地面没有物理意义、也没有改出动作可做。而 angle_of_attack
+	# 的分母取 maxf(-v_b.z, 0.5) —— 前向速度掉到 0.5 m/s 量级时，落稳/滑行
+	# 的垂直抖动（±2~3 m/s）会被放大成满攻角（atan2(1.5, 0.5)=1.25 → 钳到
+	# 0.6 rad，远超 STALL_ALPHA 0.32），总速又常超过 speed > 3.0 的低速门
+	# ⇒ 停在地面的飞机「失速」。该误报会让起飞教练误让位（U-8 让位条件）
+	# 且污染 StallCoach 的告警边沿记忆（起飞后首次真实失速无上升沿）。
+	state.stalled = absf(alpha) > STALL_ALPHA and speed > 3.0 and not on_ground
+	state.stall_warning = absf(alpha) > STALL_WARN_ALPHA and speed > 3.0 and not on_ground
 	state.overspeed = speed > af.vne
 	# 载荷系数：升力 / 重力。失速后升力掉下去，读数自然回落。
 	var cl := lift_coefficient(alpha, CL_MAX * flap_cl_factor(state.flaps))

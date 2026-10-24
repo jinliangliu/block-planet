@@ -34,6 +34,9 @@ var _crash_reasons: Array[String] = []
 ## 只还原文件会被它覆盖（实测：只写文件后 flew 107→119，还原失效）。
 var _saved_progress := ""
 var _saved_settings := ""
+## U-9：飞行一次性教学提示进度（user://flight_teaching.json）。本探针会真实
+## 起飞到 15 m 以上，座舱视角 + 教练区空闲时会触发提示并新建该文件。
+var _saved_teaching := ""
 var _saved_counters: Dictionary = {}
 var _saved_states: Dictionary = {}
 var _saved_quiz_streak := 0
@@ -50,6 +53,7 @@ func _run() -> void:
 	# 跑前快照 user:// 两个存档文件，_finish() 前原样还原（life_probe 阶段 S 同款教训）。
 	_saved_progress = _read_user_text("user://progress.json")
 	_saved_settings = _read_user_text("user://settings.json")
+	_saved_teaching = _read_user_text("user://flight_teaching.json")
 	_saved_counters = Progress.counters.duplicate()
 	_saved_states = Progress.states.duplicate()
 	_saved_quiz_streak = Progress._quiz_correct_since_reward
@@ -1068,6 +1072,7 @@ func _write_user_text(path: String, text: String) -> void:
 func _restore_user_saves() -> void:
 	_write_user_text("user://progress.json", _saved_progress)
 	_write_user_text("user://settings.json", _saved_settings)
+	_write_user_text("user://flight_teaching.json", _saved_teaching)
 	# 内存态一并还原：否则 Progress._exit_tree 的 _save() 会把探针推进过的
 	# 计数再写一遍盘，文件还原被覆盖（D-010 铁律 3 的实测教训）。
 	Progress.counters = _saved_counters.duplicate()

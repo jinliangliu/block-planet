@@ -89,11 +89,17 @@ func step_for(snap: Dictionary, delta: float) -> Dictionary:
 ## 可继续起飞流程。地面怠速发脾气的边角由 snapshot 的 stall_warning 边沿
 ## 触发，不依赖本让位。
 func _step_of(snap: Dictionary) -> Dictionary:
+	var on_ground := bool(snap.get("on_ground", false))
 	# 失速让位（U-8 / D-069）：含熄火导致的失速——点火是起飞教练的领域，
 	# 但重启后的失速跟住由 StallCoach 持续带（其头注释「熄火交圈」）。
-	if bool(snap.get("stalled", false)) or bool(snap.get("stall_warning", false)):
+	# **地面门（对偶不变量）**：让位条件必须与接管条件对偶——StallCoach 只在
+	# 地面以上（AGL > LOW_AGL）接管，本教练就只在地面以上让位。否则地面一旦
+	# 出现失速标志（历史上因 angle_of_attack 低速放大而误报，D-069 已在数据
+	# 层加地面门），两个教练会同时沉默，座舱视角 fp 的「空卡即隐藏」会把它
+	# 放大成整卡消失 ⇒ 新玩家看不到「① 按【F】启动发动机」（D-043 承诺）。
+	if not on_ground and (bool(snap.get("stalled", false)) \
+			or bool(snap.get("stall_warning", false))):
 		return {}
-	var on_ground := bool(snap.get("on_ground", false))
 	var kmh := float(snap.get("kmh", 0.0))
 	var alt_agl := float(snap.get("altitude_agl", 0.0))
 	var engine := bool(snap.get("engine", false))

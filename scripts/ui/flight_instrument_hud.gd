@@ -186,8 +186,9 @@ func _apply_visibility(mode: int) -> void:
 	# 环顾等「机体在屏外」的视角才需要文字增量读数。地图/回放同样不显示。
 	_panel.visible = detail and not map_like and not fp
 	# 警告横幅：有警告且非地图/回放时显示（_refresh_warn 再细化内容）。
-	# U-6 / D-069：失速类走 banner_alerts() 排除——权威文字通道是 hud.gd 的
-	# 卡片失速行（带【↓】/U-8 状态机文案），本横幅对失速让位、只报其余警告。
+	# U-6 / D-069：失速类走 banner_alerts() 排除——权威文字通道是 hud.gd 教练区
+	# 里的 StallCoach 状态机文案（带【↓】的改出教案），本横幅对失速让位、
+	# 只报其余警告。（原「卡片失速行」已随 U-8 删除，勿再按旧名寻找。）
 	var has_alerts := not _instruments.banner_alerts().is_empty()
 	_warn.visible = has_alerts and not map_like
 	# 横幅位置（D-052）：座舱视角卡片已挪到左上，横幅回到顶部中央（最醒目
@@ -271,7 +272,9 @@ func _refresh_chase() -> void:
 		_c_br.text = "目标  —"
 
 
-# ── 详细清单（左侧 12 仪表全读）──
+# ── 详细清单（追尾等机体在屏外视角的增量读数，U-5 后为 7 行）──
+# U-5 / D-069：原 12 行「全读」与追尾四角信息大面积重复，现只保留四角没有的
+# 增量读数（失速余量 / 姿态 / 离地 / 转弯率 / 导航 CDI / 转速 / 襟翼·起落架）。
 func _build_panel() -> void:
 	_panel = Control.new()
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -355,7 +358,8 @@ func _build_warn() -> void:
 
 
 func _refresh_warn() -> void:
-	# U-6 / D-069：banner_alerts() 已剔除失速类（卡片失速行是权威通道）。
+	# U-6 / D-069：banner_alerts() 已剔除失速类（StallCoach 经教练区渲染的
+	# 改出教案是权威文字通道；原「卡片失速行」已随 U-8 删除）。
 	var al := _instruments.banner_alerts()
 	if al.is_empty():
 		_warn.visible = false

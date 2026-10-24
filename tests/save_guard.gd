@@ -24,6 +24,9 @@ const EXTRA_FILES := [
 	"user://race_records.json",
 	"user://race_replay.jsonl",
 	"user://race_teaching.json",
+	# U-9：飞行一次性教学提示进度（座舱「低头看 3D 仪表台」）。任何会真实
+	# 起飞到 15 m 以上的探针都可能触发它并新建本文件，必须纳入隔离。
+	"user://flight_teaching.json",
 ]
 
 static var _progress := ""

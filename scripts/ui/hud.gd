@@ -57,6 +57,11 @@ var _build_screen: BuildScreen
 var _inventory_panel: InventoryPanel
 var _toast_label: Label
 var _toast_tween: Tween
+## 当前 tween 是否承载着一条**尚未确认看过**的飞行教学提示（U-9 / D-069）。
+## F-13：Toast 是覆盖式的——新提示顶掉旧提示时旧 tween 被 kill，kill 不触发
+## finished 信号。因此这里额外记一个布尔：顶掉时据此 cancel_pending()，
+## 让没看全的提示下次条件满足时重演，而不是被永久消耗。
+var _teaching_toast_pending := false
 var _death_overlay: Control
 var _death_tween: Tween
 ## RIP 覆盖层上次播放时刻（ms，Time.get_ticks_msec；D-059 限频用，初值取
@@ -162,6 +167,12 @@ var _takeoff_coach: TakeoffCoach
 ## （同一块地两套教案不能同屏——失速教案非空即占用，起飞教练让位但内部
 ## 计时照常推进，防「起飞成功」横幅在教案结束后复活）。
 var _stall_coach: StallCoach
+## 飞行一次性教学提示的进度层（U-9 / D-069）：纯逻辑器 + user://
+## flight_teaching.json 持久化（tmp→rename 原子写）。当前只有一条提示：
+## 座舱视角已离地后教「低头可以看 3D 仪表台」（D-065 补了 CockpitPanel，
+## 但儿童玩家不知道第一人称能低头看仪表台）。触屏设备无鼠标环顾手段，
+## 提示不投（缺口记 U-12）。
+var _flight_teaching: FlightTeaching
 ## 警告蜂鸣码播放器（D-034）：程序生成音，落地儿童友好「语音提示」。
 var _alert_beeper: AlertBeeper
 
@@ -265,6 +276,8 @@ func _build() -> void:
 	_takeoff_coach = TakeoffCoach.new()
 	# 失速改出教练（U-8 / D-069）：同上，纯逻辑器；登机时 bind 并重置。
 	_stall_coach = StallCoach.new()
+	# 一次性教学提示进度层（U-9）：构造即读档（无文件 = 什么都没看过）。
+	_flight_teaching = FlightTeaching.new()
 	# 警告蜂鸣码播放器（D-034）：程序生成音，无 TTS / 无语音资产依赖。
 	_alert_beeper = AlertBeeper.new()
 	add_child(_alert_beeper)
@@ -1058,20 +1071,27 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 	# 从 M 地图选择器查看，飞行中不损失信息。
 	if _map_name_label != null:
 		_map_name_label.visible = not _riding
-	# 提示行（Toast）：驾驶时从顶部居中挪到**底部居中、座舱仪表簇下方**
-	# （y H-52…H-20）。D-046 挪到底部居中是为避让顶部飞行面板卡片；D-049
-	# 座舱仪表簇放大后占 y≈H-312…H-60 的整条底中带，旧位置（H-160…H-128）
-	# 正压在地平仪与 ALT/SPD 框上——登机/奖励提示会糊住座舱主仪表。簇下方
-	# 8 px 处对两种视角都干净：座舱下簇已让出；追尾四角读数只到 x≤246 /
-	# x≥W-246（提示行 x 320…960 不碰）；触屏摇杆/油门杆在 x≤160 / x≥W-80。
-	# 下机经同一信号复位到顶部居中（_show_toast 只改文本与透明度、不碰锚点，
-	# 移位不会被它覆盖）。
+	# 提示行（Toast）：驾驶时从顶部居中挪到**底部居中、座舱仪表台上方**。
+	# D-046 挪到底部居中是为避让顶部飞行面板卡片；D-049 原锚在固定的
+	# y H-52…H-20（「簇下方 8 px」），但 D-053 按儿童可读性放大仪表簇
+	# （主表 25.2% / dash 14.1% 屏高）后，固定锚点落回了 2D 仪表台的盘排
+	# 内部——_instrument_hud 是 _toast_label 的后置兄弟，画在 Toast 之上，
+	# 提示文字中间会被主表/空速盘糊掉（U-9 / U-10 / D-061 三处 Toast 连带
+	# 半失效）。改按 CockpitInstruments.metrics() 的 dash 顶沿取相对位：
+	# Toast 贴 dash 顶沿上方 8 px，落进风挡开口，天然适配 590~720 的高度
+	# 漂移。只读 metrics，不触碰 D-053 尺寸红线。下机经同一信号复位到顶部
+	# 居中（_show_toast 只改文本与透明度、不碰锚点，移位不会被它覆盖）。
 	if _toast_label != null:
 		if _riding:
+			var dash_top := -40.0  # metrics 取不到时的兜底（= 旧 H-52 上方）
+			var vp := _toast_label.get_viewport_rect().size
+			if vp.x >= 1.0 and vp.y >= 1.0:
+				var mi := CockpitInstruments.metrics(vp)
+				dash_top = (mi["dash"] as Rect2).position.y
 			_toast_label.anchor_top = 1.0
 			_toast_label.anchor_bottom = 1.0
-			_toast_label.offset_top = -52.0
-			_toast_label.offset_bottom = -20.0
+			_toast_label.offset_top = dash_top - 40.0
+			_toast_label.offset_bottom = dash_top - 8.0
 		else:
 			_toast_label.anchor_top = 0.0
 			_toast_label.anchor_bottom = 0.0
@@ -1252,6 +1272,23 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 		var bar := String(step.get("bar", ""))
 		_coach_bar.visible = not bar.is_empty()
 		_coach_bar.text = bar
+	# 一次性教学提示（U-9 / D-069）：全部触发判据都在 FlightTeaching 内部
+	# （非触屏 + 非蓝图机 + 座舱视角 + AGL≥15 m + 教练区空闲 + 未看过），
+	# 命中即返回课文案——**每帧都调，但一生只命中一次**。
+	# 走 Toast（覆盖式，2.2 s 保持 + 0.6 s 淡出）而非教练区：它不与教案
+	# 抢同一块地，也不改变卡片布局。
+	# F-13：命中只是「记 pending」而非「看过」，看过由 Toast 完整播完的
+	# tween finished 回调确认（_on_teaching_toast_shown）。被其它提示顶掉
+	# 则不确认，下次条件满足时重演——一次性提示不因一次遮挡而永久丢失。
+	if _flight_teaching != null:
+		var hint := _flight_teaching.hint_for(reading, {
+			"cockpit_view": fp,
+			"coach_busy": not step.is_empty(),
+			"blueprint_built": craft.blueprint_built,
+			"touch": DisplayServer.is_touchscreen_available(),
+		})
+		if not hint.is_empty():
+			_show_toast(hint, true)
 	# 座舱视角：一行内容都没有（教练区收起）时整卡收起——否则
 	# PanelContainer 只剩一条空面板边框悬在左上（实测像一条「神秘胶囊」）。
 	# U-8 / D-069：原失速行已删除，fp 下卡片只剩教练区——失速教案①起
@@ -3281,9 +3318,18 @@ func _build_toast(root: Control) -> void:
 	root.add_child(_toast_label)
 
 
-func _show_toast(text: String) -> void:
+## `teaching_hint` = true 表示这条是一次性飞行教学提示（U-9）：播完要回调
+## FlightTeaching.confirm_shown() 才算「看过」（F-13）；被顶掉则 cancel，
+## 允许重演。普通提示传默认 false，不参与这套确认。
+func _show_toast(text: String, teaching_hint: bool = false) -> void:
 	if _toast_label == null:
 		return
+	# 覆盖式：新提示顶掉旧提示。被顶掉的若正是待确认的教学提示，说明它
+	# 没播完 ⇒ 取消待确认（不落盘），下次条件满足时重演。
+	if _teaching_toast_pending:
+		_teaching_toast_pending = false
+		if _flight_teaching != null:
+			_flight_teaching.cancel_pending()
 	_toast_label.text = text
 	if _toast_tween != null:
 		_toast_tween.kill()
@@ -3291,6 +3337,18 @@ func _show_toast(text: String) -> void:
 	_toast_tween = create_tween()
 	_toast_tween.tween_interval(2.2)
 	_toast_tween.tween_property(_toast_label, "modulate:a", 0.0, 0.6)
+	if teaching_hint:
+		_teaching_toast_pending = true
+		# finished 只在 tween 自然跑完时发出；中途被 kill 不发 ⇒ 正好就是
+		# 「看完了才消耗」的判据。
+		_toast_tween.finished.connect(_on_teaching_toast_shown)
+
+
+## 教学提示 Toast 完整播完：此刻才确认看过并落盘。
+func _on_teaching_toast_shown() -> void:
+	_teaching_toast_pending = false
+	if _flight_teaching != null:
+		_flight_teaching.confirm_shown()
 
 
 ## 死亡 RIP 覆盖层：暗幕 + 墓碑图案 + 文案，与玩家的死亡停顿时长同步。

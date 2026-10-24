@@ -35,8 +35,9 @@ const NOSE_DOWN_PITCH := -3.0
 const STEP2_HOLD_S := 0.3
 ## ③→成功判据：失速余量（km/h）——≈2.8 m/s 余量，温和不易二次失速。
 const SPEED_RECOVERED_KMH := 10.0
-## 着陆判据 AGL（m）：低于此值教案整体退出（地面失速物理上不可能，
-## GROUND_PITCH_MAX 12° < 警告迎角 15.5°；本闸是兜底）。
+## 着陆判据 AGL（m）：低于此值教案整体退出（地面上机轮承载、无改出动作
+## 可做；数据层 D-069 已加地面门——地面 stalled/stall_warning 恒 false，
+## 本闸是 UI 层兜底，防将来数据层回归时教案在地面上空转）。
 const LOW_AGL := 2.0
 
 var _state: int = State.IDLE
@@ -87,6 +88,11 @@ func elapsed() -> float:
 
 ## 每帧由 HUD 的 _refresh_flight_panel 调用：推进内部状态机并返回当前步。
 ## 返回 {text, sub, color, flash, bar}；空字典 = 此刻不需要教案。
+## 注意：**不加** `if _craft == null: return {}` 这类守卫（TakeoffCoach 有，
+## 本类没有，是刻意的）——本类 step_for 只读 snap 字典，从不解引用 _craft
+## （_craft 仅作 bind 记录供 HUD 判断绑定状态）。加守卫会让 A 段那批用
+## StallCoach.new() 未 bind 实例做的纯逻辑断言全部返回空（实测 20+ 条连坐
+## 失败）。契约差异本身无害：TakeoffCoach 的 _step_of 会读 craft 派生值。
 func step_for(snap: Dictionary, delta: float) -> Dictionary:
 	_elapsed += delta
 	_step_time += delta
@@ -109,7 +115,7 @@ func step_for(snap: Dictionary, delta: float) -> Dictionary:
 			if stalled_edge:
 				_enter(State.STEP1_NOSE_DOWN)
 			elif not airborne:
-				_enter(State.IDLE)  # R7：着陆 → 静默（①不设超时）
+				_enter(State.IDLE, true)  # R7：着陆 → 静默（①不设超时）
 			elif sv["pitch"] <= NOSE_DOWN_PITCH:
 				# R2：俯角达标并维持 → ②。
 				_nose_hold += delta
@@ -121,7 +127,7 @@ func step_for(snap: Dictionary, delta: float) -> Dictionary:
 			if stalled_edge:
 				_enter(State.STEP1_NOSE_DOWN)
 			elif not airborne:
-				_enter(State.IDLE)
+				_enter(State.IDLE, true)
 			elif margin >= 0.0:
 				# R3：margin≥0 持续 0.3 s 才推进（同 R2 去抖——速度贴线抖动时
 				# ②③文案不互换）。教学提示与完成判据分离：②只「教」加油门，
@@ -131,22 +137,28 @@ func step_for(snap: Dictionary, delta: float) -> Dictionary:
 					_enter(State.STEP3_SPEED)
 			else:
 				_margin_hold = 0.0
-				if _step_time >= STEP_TIMEOUT_S:
+				# R6 守卫：完全失速中不超时收工。飞机还在失速就有教学价值，
+				# 静默反而更危险；且回卷①会形成「15 s 超时 → 上升沿 → 重进①」
+				# 的周期红闪。守卫放在超时分支（不是回卷①），停在②③。
+				if _step_time >= STEP_TIMEOUT_S and not sv["stalled"]:
 					_enter(State.IDLE)  # R6（仅②③）
 		State.STEP3_SPEED:
 			if stalled_edge:
 				_enter(State.STEP1_NOSE_DOWN)
 			elif not airborne:
-				_enter(State.IDLE)
+				_enter(State.IDLE, true)
 			elif margin >= SPEED_RECOVERED_KMH:
 				_enter(State.SUCCESS)  # R4
-			elif _step_time >= STEP_TIMEOUT_S:
+			# R6 守卫（同上）：完全失速卡住时不静默收工——这条路径窗口截图
+			# 不可达（C 段改出循环上限 12 s < 守卫 15 s），只能靠 A23 / A23b
+			# 的纯逻辑断言保护，不是冗余保险，是唯一保护。
+			elif _step_time >= STEP_TIMEOUT_S and not sv["stalled"]:
 				_enter(State.IDLE)
 		State.SUCCESS:
 			if stalled_edge:
 				_enter(State.STEP1_NOSE_DOWN)
 			elif not airborne:
-				_enter(State.IDLE)  # R8：着陆即收
+				_enter(State.IDLE, true)  # R8：着陆即收
 			else:
 				_success_hold += delta
 				if _success_hold >= SUCCESS_HOLD_S:
@@ -202,12 +214,24 @@ func _step_of(sv: Dictionary) -> Dictionary:
 	return {}
 
 
-func _enter(next: int) -> void:
+func _enter(next: int, clear_edges: bool = false) -> void:
 	_state = next
 	_step_time = 0.0
 	_nose_hold = 0.0
 	_margin_hold = 0.0
 	_success_hold = 0.0
+	# `clear_edges`：退出时**一并清掉边沿记忆**。只在**着陆**路径用——
+	# 着地时 `_was_warning` 仍是 true，不清的话下一次失速的
+	# `warning_edge = warning and not _was_warning` 恒为 false，教案从此
+	# 再也不触发（「着陆过一次之后失速永远不教」的静默失效，D-069 复核发现）。
+	#
+	# 单步超时路径**不能**清：那条路径上失速往往还在持续（余量迟迟不转正），
+	# 清了就会在下一帧立刻重进①——15 s 超时形同虚设，教案变成死循环跟读。
+	# 保留边沿记忆才能真正静默；等失速解除时 `_was_warning` 自然回到 false，
+	# 下一次失速照常触发。
+	if clear_edges:
+		_was_warning = false
+		_was_stalled = false
 
 
 ## snapshot 读取（键名与 Aircraft.snapshot() / AircraftFlight.snapshot() 对齐：

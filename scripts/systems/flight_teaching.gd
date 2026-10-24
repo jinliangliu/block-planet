@@ -34,6 +34,14 @@ const LOOKDOWN_TRIGGER_AGL := 15.0
 ## 已看过的提示 id 列表（内存态；_init 时从磁盘加载）。
 var _seen: Array[String] = []
 
+## 已弹出但**尚未确认看过**的提示 id（内存态，**不落盘**）。
+## F-13：原实现是「投递即消耗」——hint_for 命中就 mark_seen 写盘，但 Toast
+## 是覆盖式的（hud.gd 共 11 处 _show_toast 调用），提示投出去后 2.8 s 内若
+## 被坠机「💥」之类的提示顶掉，它就被永久消耗掉了，玩家再也看不到。
+## 正确语义是「看过才消耗」：投递只记 pending，由 HUD 在 Toast 完整播完
+## （tween 自然结束、未被顶掉）后回调 confirm_shown() 才落盘。
+var _pending_id := ""
+
 
 func _init() -> void:
 	_load()
@@ -53,17 +61,46 @@ func mark_seen(hint_id: String) -> void:
 	_save()
 
 
-## 每帧由 HUD 的 _refresh_flight_panel 调用：满足全部触发条件时返回课文案
-## （并就地标记看过——一次性提示，返回即消耗），否则返回空串。
+## 有提示已弹出、正等待「看过」确认（探针 / HUD 判重入口）。
+func has_pending() -> bool:
+	return not _pending_id.is_empty()
+
+
+func pending_id() -> String:
+	return _pending_id
+
+
+## 确认看过（HUD 在 Toast tween 自然结束时回调）：此时才落盘。
+## 幂等：重复调用无副作用。
+func confirm_shown() -> void:
+	if _pending_id.is_empty():
+		return
+	var id := _pending_id
+	_pending_id = ""
+	mark_seen(id)
+
+
+## 取消待确认（Toast 被后续提示顶掉 = 没看全）：不落盘，下次条件满足时重演。
+## 这是一次性提示「不因一次遮挡而永久丢失」的另一半保障。
+func cancel_pending() -> void:
+	_pending_id = ""
+
+
+## 每帧由 HUD 的 _refresh_flight_panel 调用：满足全部触发条件时返回课文案，
+## 否则返回空串。F-13：命中**只记 pending 不落盘**，等 HUD 回调
+## confirm_shown() 才算看过（详见 _pending_id 的注释）。
 ## `snap` 为 Aircraft.snapshot()；`ctx` 由 HUD 填环境事实：
 ##   cockpit_view  —— 座舱视角（含自由观察底层为座舱，fp 同款判据）；
 ##   coach_busy    —— 教练区正被起飞/失速教案占用（不抢话筒）；
 ##   blueprint_built —— 蓝图试飞机（契约不建座舱几何，无从「低头」）；
 ##   touch         —— 触屏设备（无鼠标环顾，U-12 缺口）。
 func hint_for(snap: Dictionary, ctx: Dictionary) -> String:
+	# 已弹出待确认：不再重复占用 Toast（否则每帧都会顶掉自己，永远看不到）。
+	if not _pending_id.is_empty():
+		return ""
 	if not should_fire(snap, ctx, _seen):
 		return ""
-	mark_seen(HINT_LOOKDOWN)
+	_pending_id = HINT_LOOKDOWN
 	return String(HINTS[HINT_LOOKDOWN])
 
 
