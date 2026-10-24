@@ -1083,15 +1083,20 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 	# 居中（_show_toast 只改文本与透明度、不碰锚点，移位不会被它覆盖）。
 	if _toast_label != null:
 		if _riding:
-			var dash_top := -40.0  # metrics 取不到时的兜底（= 旧 H-52 上方）
 			var vp := _toast_label.get_viewport_rect().size
+			var dash_top := vp.y - 40.0  # metrics 取不到时的兜底（屏底上方 40 px）
 			if vp.x >= 1.0 and vp.y >= 1.0:
 				var mi := CockpitInstruments.metrics(vp)
 				dash_top = (mi["dash"] as Rect2).position.y
+			# anchor 同在屏底（1.0）时 offset **必须为负**、按「距屏底多远」
+			# 计量（hotbar/摇杆同款写法）：Toast 贴在 dash 顶沿上方 8 px（底沿）
+			# 到 40 px（顶沿），落进风挡开口。曾误写成正值 dash_top−40（按
+			# 「距屏顶」计量），anchor 1.0 下等于屏高 + 正值 ⇒ Toast 整块
+			# 推到屏幕外，驾驶中三处 Toast（U-9 / U-10 / D-061）全部不可见。
 			_toast_label.anchor_top = 1.0
 			_toast_label.anchor_bottom = 1.0
-			_toast_label.offset_top = dash_top - 40.0
-			_toast_label.offset_bottom = dash_top - 8.0
+			_toast_label.offset_bottom = dash_top - 8.0 - vp.y
+			_toast_label.offset_top = dash_top - 40.0 - vp.y
 		else:
 			_toast_label.anchor_top = 0.0
 			_toast_label.anchor_bottom = 0.0
@@ -1258,6 +1263,16 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 	_coach_sub.visible = active
 	if active:
 		var col: Color = step.get("color", Color(1.0, 1.0, 1.0))
+		# U-8 目检后续（D-069）：失速教案是失速**唯一**文字通道（U-6 已撤全宽
+		# 横幅、删卡片失速行），旧通道是全宽 22px，座舱视角里 15px 显著度下降
+		# 明显。失速教案占用时主句 15→17 / 副句 12→13，起飞教练维持原尺寸
+		# （其内容不是安全关键，且卡片行高按 15 排过版，不动布局）。
+		if not stall_step.is_empty():
+			_coach_main.add_theme_font_size_override("font_size", 17)
+			_coach_sub.add_theme_font_size_override("font_size", 13)
+		else:
+			_coach_main.add_theme_font_size_override("font_size", 15)
+			_coach_sub.add_theme_font_size_override("font_size", 12)
 		# 「要按键」的步骤用呼吸式闪烁抓住注意力（儿童向：低对比、不刺眼）。
 		var alpha := 1.0
 		if bool(step.get("flash", false)):

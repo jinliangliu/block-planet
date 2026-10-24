@@ -549,7 +549,7 @@ D-065 补了 `CockpitPanel` 之后，第一人称**低头能看到 3D 仪表台*
 | 通道 | Toast（覆盖式，2.2 s 保持 + 0.6 s 淡出）——**不占教练区**，避免与起飞/失速教案抢同一块地 |
 | 一次性 | **看过才消耗**（D-069 F-13）：命中只记内存态 `pending_id` 不落盘；Toast tween 自然结束时回调 `confirm_shown()` 才 `mark_seen` 落盘；被后续 Toast 顶掉（tween 被 kill、`finished` 不发）则 `cancel_pending()`，下次条件满足时重演 |
 | 为什么不用「投递即消耗」 | Toast 是覆盖式的（HUD 共 11 处 `_show_toast`），提示投出去 2.8 s 内若被坠机「💥」之类顶掉，旧实现会把这条一次性提示**永久消耗**，玩家再也看不到 |
-| 位置 | 驾驶时按 `CockpitInstruments.metrics()` 的 **dash 顶沿**取相对位（贴顶沿上方 8 px，落进风挡开口）；D-053 放大仪表簇后，旧固定锚点（y H-52…H-20）落回了 2D 仪表台盘排内部、被画在上层的仪表盘糊住 |
+| 位置 | 驾驶时按 `CockpitInstruments.metrics()` 的 **dash 顶沿**取相对位（贴顶沿上方 8 px，落进风挡开口）；D-053 放大仪表簇后，旧固定锚点（y H-52…H-20）落回了 2D 仪表台盘排内部、被画在上层的仪表盘糊住。**anchor 同在屏底（1.0）时 offset 必须为负**、按「距屏底多远」计量（`offset_bottom = dash_top − 8 − vp.y`）——正值写法（按距屏顶计量）会把 Toast 整块推出屏幕外 |
 | 持久化 | `user://flight_teaching.json`，`{"seen": [id, ...]}` 数组形状 + **tmp→rename 原子写** |
 | 15 m 的依据 | 起降滑跑阶段教练区正忙、且「低头看仪表」在起降期是危险建议；15 m 与 `TakeoffCoach.TAKEOFF_ALT` 同值，正好接在「🎉 起飞成功」之后 |
 
@@ -798,7 +798,7 @@ bash tmp/run_regression.sh          # 日常：无头逻辑探针（快）
 bash tmp/run_regression.sh full     # 验收：无头 + 窗口截图（须目检截图）
 ```
 
-当前 **44 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`）；`full` 验收档共 **55 探针**（含窗口截图），最近一次全量 **2154 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-069 收尾后）。
+当前 **44 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`）；`full` 验收档共 **56 探针**（含窗口截图），最近一次全量 **2177 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-069 第二轮收尾后）。
 D-061 新增 `landing_quality_probe`（45 断言：A 评分边界 19 + B 任务改造 13 + C 呼号边沿 7 + D 端到端落地 6）。
 D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状态机 / L3 符号 / 微颤 / 净空 / 相机吸附）、`cockpit_align_probe`（16 断言：材质绑定四闸 / 2D dash 未变形 / 四角投影 ±12 px / 可见性反转）、`cockpit3d_shot`（窗口 10 图 + 白屏像素闸）。
 
@@ -807,7 +807,7 @@ D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状�
 | 探针 | 覆盖 |
 |---|---|
 | `flight_probe` | 气动标定、起降、巡航、聚合断言 |
-| `flight_instruments_probe` | 12 项仪表读数与警告状态机；D-069 起另含 U-5 清单契约（7 行增量 + 去重闸）与 U-6 横幅让位（排除集 / 纯失速空 / 混合警告） |
+| `flight_instruments_probe` | 12 项仪表读数与警告状态机；D-069 起另含 U-5 清单契约（7 行增量 + 去重闸 + **地面失速余量「—（地面）」分流**）与 U-6 横幅让位（排除集 / 纯失速空 / 混合警告） |
 | `stall_coach_probe` | **90** 条（D-069）：A 段失速教案状态机纯逻辑（①两种语气 / 去抖双向 / 单步超时 / ②③④成功三态着陆静默 / 重复失速回① / 成功保持收起 / 三个阈值等值点 / 边沿记忆清理 / **R6 守卫 A23·A23b** / 未 bind 无守卫 A24）+ B 段 U-9 六个 gate 与持久化（原子写无残留 / 四种损坏容错 / **F-13 看过才消耗：pending→confirm→cancel 全链**）+ C 段端到端（**地面失速数据层门 C1b·C1b2** / 让位对偶 C4b / 起飞教练让位 → 真实起飞 → Toast 一次性 → 逼失速 → ①→②→③→成功 全程 latch 且步序单调递增） |
 | `cockpit_instruments_probe` | **129** 条：四档视口几何、比例恒定、拆字、俯仰钳制 |
 | `cockpit_instruments_shot` | 窗口截图取证（17 条） |
@@ -816,9 +816,10 @@ D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状�
 | `cockpit3d_shot` | 窗口 10 图 + 白屏像素闸（四角最亮通道 < 0.62）+ 蓝图机零几何 |
 | `flight_director_probe` | **51** 条：导引律、模式判据、不出屏、标签动作词 |
 | `flight_director_shot` | 三态截图取证（对准 / 偏航+偏高 / 起飞） |
-| `flight_hud_shot` | 真实飞行链路 HUD（39 条） |
+| `flight_hud_shot` | 真实飞行链路 HUD（41 条，含**失速教案主句字号 17/13** 两条） |
 | `flight_view_probe`、`flight_stream_probe`、`flight_reset_probe`、`crash_recover_probe`、`flight_settings_probe` | 视角 / 流式 / 重置（D-039 Y 键 + D-056 坠机自动归位，40 条）/ 设置 |
-| `coach_cockpit_shot`、`takeoff_coach_shot`、`flight_panel_shot`、`flight_shot` | 教练与面板取证 |
+| `coach_cockpit_shot`（22 条，含起飞教练字号维持 15/12）、`takeoff_coach_shot`、`flight_panel_shot`、`flight_shot` | 教练与面板取证 |
+| `stall_coach_shot` | **22 处断言站点**（D-069 二轮；happy path 执行 17 条 + 5 条解体守卫，守卫只在失败路径上触发）：失速教案六图取证——① 黄闪 / ① 红闪 / ② 油门条 / ③ 速度条 / 改出成功 / U-9 Toast；含 **Toast 相对位几何闸**（整块在 dash 顶沿上方且未出屏）、F-13 pending→confirm 窗口断言与 **③ 证据-断言耦合闸**（保存时教练区仍停在③）。转瞬态截图用 `Engine.time_scale = 0.15` 慢放，避开「进程帧墙钟长度随负载浮动」导致的证据图与断言脱钩 |
 | `airport_probe`、`field_probe` | 机场与降落场 |
 | `terrain_block_probe`、`terrain_survey_probe` | D-055：新方块属性/纹理/掉落（22 条）；分层地形的数字验收（18 条，含**③b 全域无空气墙**——最大单步落差 ≤ `MAX_SLOPE+SLOPE_SLACK`，地形改陡了立刻 FAIL） |
 
@@ -903,6 +904,7 @@ IDLE ──(stalled ∨ stall_warning 上升沿，且 AGL>2 m)──▶ ① 松�
 | ② 完成判据 | 失速余量 ≥0（不是油门门控） | **教学提示与完成判据分离**：②只「教」加油门，不「考」它——俯冲改出但没推油门的儿童不该被卡住 |
 | ③ 完成判据 | 余量 ≥10 km/h（≈2.8 m/s） | 温和，不易二次失速 |
 | 熄火交圈 | ② 遇 `engine=false` 改教「先按【F】点火」 | 与起飞教练的「按 F」分支同文案形状，点火后自动回到推油门措辞 |
+| 主句字号 | 失速教案 **17 / 副句 13**；起飞教练维持 15 / 12 | U-6 后失速文字通道只剩教练区一份，15px 在座舱里显著度比旧全宽 22px 横幅降明显；起飞教练内容非安全关键，且卡片行高按 15 排过版，不动 |
 
 **两块教练区的同屏互斥**：起飞教练 `_step_of()` 顶部 `if stalled or stall_warning: return {}`，失速教案全权负责；hud.gd **每帧各调一次**两个 coach（不能只调占位的那个——起飞教练的内部计时必须照常推进，否则失速教案结束后它从冻结时刻续跑，「🎉 起飞成功」会在教案收尾后复活）。
 

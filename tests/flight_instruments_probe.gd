@@ -309,6 +309,16 @@ func _run_panel_row_checks() -> void:
 	# 失速余量数值：120 km/h − 13.1 m/s × 3.6 ≈ +72.8 km/h。
 	_check(String(rows[0]).contains("+72") or String(rows[0]).contains("+73"),
 		"⑬ 失速余量数值正确（%s）" % String(rows[0]))
+	# U-5 后续项（D-069 目检）：地面滑速必低于失速速度，负余量是物理事实而非
+	# 预警——常显「-37 km/h」会让儿童以为马上要掉下来，离地前分流为「—（地面）」。
+	var gnd := FlightInstruments.new()
+	gnd.update({"kmh": 10.0, "stall_speed": 13.1, "altitude_agl": 0.0},
+		_ID, 0.1)
+	var grows: Array = FlightInstrumentHUD.panel_row_texts(gnd)
+	_check(String(grows[0]) == "失速余量：—（地面）",
+		"⑬ 地面（AGL=0）失速余量 = 「—（地面）」而非负值（%s）" % String(grows[0]))
+	_check(gnd.is_airborne() == false,
+		"⑬ 地面口径 is_airborne() = false（与分流判据同源）")
 	# 有导航目标 → CDI 行带 TO/FROM 旗。
 	var nav := FlightInstruments.new()
 	nav.set_navigation(Vector3(0.0, 0.0, 100.0), "机场")

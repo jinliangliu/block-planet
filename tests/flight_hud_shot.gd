@@ -219,6 +219,12 @@ func _run() -> void:
 	# 「要失速了！」：告警上升沿进入①，两种文案随 stalled 与否自适应。
 	_check(_hud._coach_main.visible and _hud._coach_main.text.contains("低头"),
 		"失速态教练区显示改出教案第①步（「%s」）" % _hud._coach_main.text)
+	# U-8 目检后续（D-069）：失速教案是失速唯一文字通道（U-6 撤横幅删卡片行），
+	# 主句 15→17 / 副句 12→13 补偿旧全宽 22px 横幅的显著度损失。
+	_check(_hud._coach_main.get_theme_font_size("font_size") == 17,
+		"失速教案主句字号 17（实际 %d）" % _hud._coach_main.get_theme_font_size("font_size"))
+	_check(_hud._coach_sub.get_theme_font_size("font_size") == 13,
+		"失速教案副句字号 13（实际 %d）" % _hud._coach_sub.get_theme_font_size("font_size"))
 	await _shoot("flight_hud_stall.png")
 
 	# 改出：推杆低头 + 满油门补能，等告警消失后下机。

@@ -313,7 +313,13 @@ func _build_panel() -> void:
 ## 警告行与全宽横幅同源同文，整体撤掉（横幅是警告权威通道，见 U-6）。
 static func panel_row_texts(fi: FlightInstruments) -> Array[String]:
 	var out: Array[String] = []
-	out.append("失速余量：%+.0f km/h" % fi.airspeed_margin_kmh)
+	# U-5 后续项（D-069 目检）：地面滑速必低于失速速度，负余量是物理事实而非
+	# 预警——常显「-20 km/h」会让儿童以为马上要掉下来。离地前给「—（地面）」，
+	# 越过 AIRBORNE_AGL（2 m）后才给数值（is_airborne 同口径）。
+	if fi.is_airborne():
+		out.append("失速余量：%+.0f km/h" % fi.airspeed_margin_kmh)
+	else:
+		out.append("失速余量：—（地面）")
 	out.append("姿态：俯仰 %+.0f°  坡度 %+.0f°" % [fi.pitch_deg, fi.roll_deg])
 	out.append("离地：%d m" % int(fi.altitude_agl))
 	out.append("转弯率：%+.1f°/s（标准率 %s）" % [fi.turn_rate_deg_s,

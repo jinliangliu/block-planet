@@ -147,6 +147,12 @@ func _run() -> void:
 	_check(card.encloses(sub_rect), "教练副句整块落在飞行面板卡片内")
 	_check(card.encloses(bar_rect), "教练进度条整块落在飞行面板卡片内")
 	_check(String(_hud._coach_main.text).contains("W"), "教练主句是第②步推油门（含 W）")
+	# U-8 目检后续（D-069）：字号只对失速教案放大（17/13），起飞教练维持
+	# 15/12——其内容非安全关键，且卡片行高按 15 排过版。
+	_check(_hud._coach_main.get_theme_font_size("font_size") == 15,
+		"起飞教练主句字号维持 15（实际 %d）" % _hud._coach_main.get_theme_font_size("font_size"))
+	_check(_hud._coach_sub.get_theme_font_size("font_size") == 12,
+		"起飞教练副句字号维持 12（实际 %d）" % _hud._coach_sub.get_theme_font_size("font_size"))
 
 	# ── ② 追尾：卡片与左上角读数 _c_tl 零重叠 ──
 	var c_tl: Rect2 = _hud._instrument_hud._c_tl.get_global_rect()
