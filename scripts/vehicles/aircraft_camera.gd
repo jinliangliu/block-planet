@@ -10,7 +10,8 @@ extends Camera3D
 ## 儿童友好（dylan 2026-10-15 定稿）：
 ## - 默认追尾 13 m / FOV 75°（比旧弹簧臂 9 m / 70° 更远更宽）；
 ## - 追尾与后视抑制滚转，地平线保持稳定（防晕）；
-## - 自由观察松手自动回正（FlightSettings.auto_recenter 可关）；
+## - 座舱内鼠标 = 驾驶员环顾（D-070，持久：视线停在落下的地方，回正只归
+##   鼠标中键 / 下次登机）；自由观察松手自动回正（FlightSettings.auto_recenter 可关）；
 ## - 镜头抖动微量且可关（FlightSettings.camera_shake）；
 ## - 追尾/后视射线防穿模（被地形挡住时自动拉近）。
 ##
@@ -56,6 +57,10 @@ const RATE_FOV := 3.3
 ## 自由观察灵敏度（rad/px）。
 const LOOK_SENS := 0.0025
 const LOOK_PITCH_LIMIT := 1.1
+## 环顾偏航限幅（rad ≈ 137°，D-070）：座舱里这是「驾驶员的头」不是「绕飞机
+## 的轨道相机」——能回头看同侧机翼与座舱壁，但不该原地整圈自转（超过 ±90°
+## 后 up 仍取机体 UP，画面会越来越别扭）。座舱内鼠标环顾与自由观察共用。
+const LOOK_YAW_LIMIT := 2.4
 ## 松手自动回正速率（1/s）：τ ≈ 0.4 s。
 const RECENTER_RATE := 2.5
 # ── 抖动 ─────────────────────────────────────────────────────
@@ -243,11 +248,13 @@ func exit_replay() -> void:
 		set_mode(_base_mode)
 
 
-## 鼠标 / 右摇杆环顾增量（仅 FREE_LOOK 生效）。
+## 鼠标 / 右摇杆环顾增量。D-070 起座舱内视（第一人称）也接受——座舱里
+## 鼠标就是驾驶员的视线；自由观察（FREE_LOOK 覆盖层）同样走这里。两者
+## 共用同一组偏移，符号约定一致：鼠标右移 → 视野右转，鼠标上移 → 抬头。
 func apply_look_delta(delta: Vector2) -> void:
-	if _mode != ViewMode.FREE_LOOK:
+	if _mode != ViewMode.FREE_LOOK and _mode != ViewMode.FIRST_PERSON:
 		return
-	_look_yaw += delta.x * LOOK_SENS
+	_look_yaw = clampf(_look_yaw + delta.x * LOOK_SENS, -LOOK_YAW_LIMIT, LOOK_YAW_LIMIT)
 	_look_pitch = clampf(_look_pitch - delta.y * LOOK_SENS, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
 
 
@@ -280,8 +287,13 @@ func _process(delta: float) -> void:
 	camera_shake_enabled = FlightSettings.current().camera_shake
 	if _mode == ViewMode.REPLAY:
 		return   # 位姿由回放系统直写
-	# 自由观察回正：松手后按设置把偏移指数归零。
-	if _mode != ViewMode.FREE_LOOK and _auto_recenter:
+	# 环顾回正：只对**非座舱模式**（追尾/后视/地图）按设置把偏移指数归零——
+	# 从座舱经覆盖层攒下的偏移，切回普通视角时回正，避免「视线被上次飞行
+	# 锁定」。座舱内视**不回正**（D-070）：鼠标就是驾驶员的视线，gaze 应当
+	# 停在落下的地方；回正交给鼠标中键（recenter）与下次登机
+	# （reset_to_cockpit）。auto_recenter 只管「松手」——即 V / 按住右键的
+	# 自由观察覆盖层退出那一刻（见 set_free_look）。
+	if _mode != ViewMode.FREE_LOOK and not is_cockpit_view() and _auto_recenter:
 		_look_yaw = _damp(_look_yaw, 0.0, RECENTER_RATE, delta)
 		_look_pitch = _damp(_look_pitch, 0.0, RECENTER_RATE, delta)
 	var target := _target_transform(_mode)
@@ -309,6 +321,19 @@ func _process(delta: float) -> void:
 	_apply_shake(delta)
 
 
+## 座舱视线方向（未归一，looking_at 只用方向）：机头 + 天地线抬升，再叠
+## 环顾偏移。D-070 起第一人称也接受鼠标环顾，与座舱底自由观察共用本条
+## 式子——偏移为零时逐位退回 D-050 的原方向（nose×10 + UP×1.1）。
+## 偏航符号与玩家徒步视角一致（player.gd 的 rotate_y(-delta.x)）：鼠标右移
+## → 视野朝机体局部 +X（右）转；俯仰正向 = 抬头（绕机体 RIGHT）。
+func _cockpit_look_dir(craft_basis: Basis, nose: Vector3) -> Vector3:
+	var dir := nose + (craft_basis * Vector3.UP) * (COCKPIT_LOOK_UP / 10.0)
+	if is_zero_approx(_look_yaw) and is_zero_approx(_look_pitch):
+		return dir
+	return Basis(craft_basis * Vector3.UP, -_look_yaw) \
+		* Basis(craft_basis * Vector3.RIGHT, _look_pitch) * dir
+
+
 ## 各模式目标位姿（世界坐标，无阻尼的「虚拟 rig」）。
 func _target_transform(mode: ViewMode) -> Transform3D:
 	var craft_xform := _craft.global_transform
@@ -322,7 +347,7 @@ func _target_transform(mode: ViewMode) -> Transform3D:
 		ViewMode.FIRST_PERSON:
 			var eye: Vector3 = craft_xform * COCKPIT_OFFSET
 			xf.origin = eye
-			var look := eye + nose * 10.0 + (craft_basis * Vector3.UP) * COCKPIT_LOOK_UP
+			var look := eye + _cockpit_look_dir(craft_basis, nose) * 10.0
 			xf = xf.looking_at(look, craft_basis * Vector3.UP)
 		ViewMode.CHASE:
 			# leveled 基 +Z = 机头方向（Basis(UP, atan2(nose.x, nose.z)) 的性质），
@@ -337,13 +362,13 @@ func _target_transform(mode: ViewMode) -> Transform3D:
 			xf = xf.looking_at(craft_xform.origin, Vector3.UP)
 		ViewMode.FREE_LOOK:
 			if _base_mode == ViewMode.FIRST_PERSON:
+				# 座舱内环顾：与第一人称同一条视线式子（D-070 统一，含天地线
+				# 抬升）——偏移为零时自由观察与座舱视角完全重合，覆盖层只是
+				# 「多一个 V / 按住右键的入口 + 松手回正」，不再有视线差。
 				var eye2: Vector3 = craft_xform * COCKPIT_OFFSET
 				xf.origin = eye2
-				# 座舱内环顾：偏航符号与玩家鼠标视角一致（player.gd
-				# rotate_y(-delta.x)）——鼠标右移 → 视野朝机体局部 +X（右）转。
-				var dir := (Basis(craft_basis * Vector3.UP, -_look_yaw)
-					* Basis(craft_basis * Vector3.RIGHT, _look_pitch)) * nose
-				xf = xf.looking_at(eye2 + dir * 10.0, craft_basis * Vector3.UP)
+				var look2 := eye2 + _cockpit_look_dir(craft_basis, nose) * 10.0
+				xf = xf.looking_at(look2, craft_basis * Vector3.UP)
 			else:
 				# 追尾自由观察：相机绕机体球面环顾，仍看向机体。
 				# 默认位（偏航 0）在机体正后；偏航正向 = 相机移向机体左侧

@@ -92,7 +92,7 @@ FlightSettings（scripts/core/flight_settings.gd，纯逻辑，类级单例 curr
 | 2 | `assist_level` | 关闭 / 半开 / 全开 | 半开 | ✅ 第二行分段按钮 | — | `Aircraft.gd:601` → 气动增益 |
 | 3 | `livery_index` | 0~3（经典红白 / 深海蓝 / 丛林绿 / 落日橙） | 0 | ✅ 第三行分段按钮 | — | `Aircraft.gd:357/603` → 材质 |
 | 4 | `camera_shake` | bool | true | ✅ 开关行「开 / 关」（D-057） | — | `AircraftCamera.gd:79/279`（坠机 / 湍流镜头抖动） |
-| 5 | `auto_recenter` | bool | true | ✅ 开关行「开 / 关」（D-057） | — | `AircraftCamera.gd:80/279`（自由观察松手回正） |
+| 5 | `auto_recenter` | bool | true | ✅ 开关行「开 / 关」（D-057） | — | `AircraftCamera.gd:80/279`（自由观察松手回正）。**D-070 起语义收窄**：只管 V / 按住右键的自由观察覆盖层退出那一刻；座舱内的鼠标驾驶员环顾**不**受它管（gaze 持久，回正归鼠标中键 `recenter()` 与下次登机） |
 | 6 | `hud_detail` | bool | false | ✅ 开关行「简单 / 详细」（D-057） | **H 键**（`player.gd:307-312`） | `FlightInstrumentHUD.gd:183`（简单 / 详细模式） |
 | 7 | `auto_level` | bool | true | ✅ 开关行「开 / 关」（D-057） | **双击左键**（`player.gd:237`） | 约 2 秒增强增益摆平坡度 |
 | 8 | `beeper_enabled` | bool | true | ✅ 开关行「开 / 关」（D-057） | — | `FlightInstrumentHUD.gd:142`（警告蜂鸣码） |

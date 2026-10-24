@@ -336,9 +336,10 @@ func _run() -> void:
 			% turbo.snapshot()["airspeed"])
 	turbo.queue_free()
 
-	# ── H 段：键盘 / 鼠标驾驶通路（此前探针全程远程驾驶，键鼠通路零覆盖）──
+	# ── H 段：键盘驾驶通路（此前探针全程远程驾驶，键鼠通路零覆盖）────────
 	# 真实驾驶形态：piloted=true 且 use_player_input=true（不调 drive_remotely），
 	# _prepare_input 走 Input.get_axis 读动作；触屏分支在桌面端恒不激活。
+	# D-070 起杆量只剩键盘一个来源（鼠标操纵杆整体拆除，座舱内只环顾视角）。
 	var kb := Aircraft.spawn(main_scene, start + Vector3(6.0, 0.0, 6.0), RUNWAY_HEADING)
 	kb.set_piloted(true, player)
 	kb.set_engine(true)
@@ -376,11 +377,14 @@ func _run() -> void:
 	_check(kb.controls.throttle < thr1 - 0.05,
 		"S 收低油门（%.2f → %.2f）" % [thr1, kb.controls.throttle])
 	Input.action_release("move_back")
-	# 鼠标操纵杆：右移 → 右滚、上移 → 抬头（Godot 鼠标 motion 的 y 正方向向下）。
-	kb.add_mouse_motion(Vector2(200.0, -200.0))
+	# D-070：鼠标操纵杆已整体拆除（add_mouse_motion / _stick 删除）。这里留
+	# 一条「无隐性杆源」闸：所有键松开后杆量必须干净回零——旧鼠标杆若还在，
+	# 松杆后 _stick 会按 STICK_CENTER_RATE 慢回中，量出非零残余。
 	await get_tree().physics_frame
-	_check(kb.controls.roll > 0.3, "鼠标右移产生右滚杆量（%.2f）" % kb.controls.roll)
-	_check(kb.controls.pitch > 0.3, "鼠标上移产生抬头杆量（%.2f）" % kb.controls.pitch)
+	_check(absf(kb.controls.roll) < 0.01 and absf(kb.controls.pitch) < 0.01
+		and absf(kb.controls.yaw) < 0.01,
+		"D-070：松杆后杆量干净回零，无隐性杆源（r %.3f / p %.3f / y %.3f）"
+			% [kb.controls.roll, kb.controls.pitch, kb.controls.yaw])
 	kb.set_piloted(false)
 	kb.queue_free()
 
@@ -745,7 +749,7 @@ func _run() -> void:
 	_check(not is_instance_valid(bp_craft),
 		"D-056：坠机残骸已被自动重置清除（未等 4 秒消散）")
 
-	# ── N 段：残骸坠落 + 鼠标杆单位圆（P2-10 / P2-11）────────────
+	# ── N 段：残骸坠落（P2-10）───────────────────────────────
 	# P2-10：wreck 原来把 velocity 置零后 _physics_process 直接 return——
 	# 空中解体的残骸悬停 4 秒等消散。现在残骸继续受重力坠落。
 	var wreck_craft := Aircraft.spawn(
@@ -761,19 +765,8 @@ func _run() -> void:
 			% [wreck_y0, wreck_y1, wreck_y0 - wreck_y1])
 	wreck_craft.queue_free()
 	await get_tree().physics_frame
-	# P2-11：鼠标杆分别钳 x/y 时，对角推满总杆量达 √2 ≈ 1.41（滚转与俯仰
-	# 同时超订）。改按模长归一到单位圆。
-	var stick_craft := Aircraft.spawn(main_scene, start, RUNWAY_HEADING)
-	stick_craft.drive_remotely()
-	for i in range(20):
-		stick_craft.add_mouse_motion(Vector2(200.0, 200.0))
-	_check(stick_craft._stick.length() <= 1.001,
-		"P2-11：对角推满杆量限幅在单位圆（|%.3f| ≤ 1）" % stick_craft._stick.length())
-	_check(absf(stick_craft._stick.x - stick_craft._stick.y) < 0.01
-		and stick_craft._stick.x > 0.0,
-		"P2-11：归一化保持对角方向（x=y=%.3f）" % stick_craft._stick.x)
-	stick_craft.queue_free()
-	await get_tree().physics_frame
+	# （P2-11 鼠标杆单位圆随 D-070 拆除鼠标操纵杆一并废止：_stick 与
+	# add_mouse_motion 已删除，「杆量只来自键盘」由 H 段末的回零闸守护。）
 
 	_finish()
 

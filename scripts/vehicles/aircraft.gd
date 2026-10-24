@@ -11,7 +11,7 @@ extends CharacterBody3D
 ## （12×12 格 = 12×12 m）大一圈，起飞需要一段平地或跑道。
 ##
 ## 驾驶输入（use_player_input = true 且 piloted 时）：
-##   鼠标 → 操纵杆（俯仰 / 滚转，松手缓慢回中）
+##   ↑ / ↓ → 拉杆 / 推杆    ← / → → 左右压杆（任何视角都能用）
 ##   W / S → 油门增减    A / D → 方向舵（地面即前轮转向）
 ##   F → 发动机启停（熄火后油门锁 0，滑翔仍可操纵）
 ##   空格 → 地面机轮刹车 / 空中拉升（上升）
@@ -52,10 +52,6 @@ const ROLLING_RESISTANCE := 0.6
 const BRAKE_DECEL := 6.0
 ## 前轮转向速率（rad/s），随速度衰减（高速靠气动舵面）。
 const STEER_RATE := 0.8
-# ── 鼠标操纵杆 ──────────────────────────────────────────────
-const MOUSE_STICK_SENSITIVITY := 0.006
-## 松手回中速率（1/s）：慢回中，允许玩家保持一个稳定的转弯坡度。
-const STICK_CENTER_RATE := 0.55
 ## 油门变化速率（每秒）。
 const THROTTLE_RATE := 0.55
 ## 空中加速（Shift）油门变化速率（每秒）：比 W 推油快一倍以上，「按一下就走」。
@@ -90,7 +86,7 @@ const RPM_RANGE := 2100.0
 const RPM_MAX := RPM_IDLE + RPM_RANGE
 ## RPM 表滞后时间常数（秒）：转速不瞬变，指针才像真的。
 const RPM_TAU := 0.4
-## 自动改平持续时间（秒）：双击左键后以增强辅助增益摆平（D-034 鼠标操控）。
+## 自动改平持续时间（秒）：双击左键后以增强辅助增益摆平（D-034）。
 const LEVEL_ASSIST_TIME := 2.0
 
 # ── 接地质量评分（U-7） ──────────────────────────────────────
@@ -103,8 +99,8 @@ const LANDING_ROLL_TIMEOUT := 15.0
 @export var use_player_input := true
 
 var controls := AircraftFlight.Controls.new()
-## 触屏驾驶输入：由 HUD 飞行触控层写入，替代键盘/鼠标（仅触屏设备、有人驾驶时启用）。
-## 桌面端 _touch_active 恒为 false，走键盘/鼠标分支，互不影响。
+## 触屏驾驶输入：由 HUD 飞行触控层写入，替代键盘（仅触屏设备、有人驾驶时启用）。
+## 桌面端 _touch_active 恒为 false，走键盘分支，互不影响（D-070 起鼠标不再接飞机）。
 var _touch_active := false
 var _touch_pitch := 0.0
 var _touch_roll := 0.0
@@ -141,7 +137,6 @@ var _bp_cats: Array[int] = []
 ## 收回时不退回 AIRCRAFT 道具——否则「工坊台试飞 → 收回」可无限刷物品（P2-3）。
 var blueprint_built := false
 var _wrecked := false
-var _stick := Vector2.ZERO
 var _readings_timer := 0.0
 var _stall_state := false
 var _collider: CollisionShape3D
@@ -414,16 +409,6 @@ func seat_transform() -> Transform3D:
 	return global_transform * Transform3D(Basis.IDENTITY, SEAT_OFFSET)
 
 
-## 鼠标操纵杆：累积杆量后限幅在单位圆内（P2-11）。分别钳 x/y 会让对角
-## 推满时总杆量达 √2 ≈ 1.41——滚转与俯仰同时超订；先各自钳、再按模长
-## 归一，任何方向总杆量不超过 1。
-func add_mouse_motion(relative: Vector2) -> void:
-	_stick.x = clampf(_stick.x + relative.x * MOUSE_STICK_SENSITIVITY, -1.0, 1.0)
-	_stick.y = clampf(_stick.y + relative.y * MOUSE_STICK_SENSITIVITY, -1.0, 1.0)
-	if _stick.length() > 1.0:
-		_stick = _stick.normalized()
-
-
 ## 交给脚本/探针驾驶：纳入控制通路，但控制量完全由外部写 controls。
 ## （只设 use_player_input=false 而不设 piloted，会被当成无人停放机——杆与油门
 ## 每帧回零，飞机纹丝不动。这个组合是探针最容易踩的坑，故封一个入口。）
@@ -566,7 +551,6 @@ func set_piloted(value: bool, who: Player = null) -> void:
 	controls.yaw = 0.0
 	engine_running = false
 	_state.flaps = 0
-	_stick = Vector2.ZERO
 	_touch_active = false
 	_touch_pitch = 0.0
 	_touch_roll = 0.0
@@ -855,12 +839,9 @@ func _prepare_input(delta: float) -> void:
 		controls.brake = _touch_brake
 		return
 
-	# 自动改平进行中：杆量快速回中，让位给 integrate 的摆平增益（否则鼠标
-	# 杆量会把改平指令抵掉）。玩家重新移动鼠标即刻接管（_stick 又被写回）。
-	var center_rate := STICK_CENTER_RATE
-	if _level_timer > 0.0:
-		center_rate = 6.0
-	_stick = _stick.lerp(Vector2.ZERO, clampf(center_rate * delta, 0.0, 1.0))
+	# 杆量只来自键盘（D-070：鼠标已彻底不接飞机——座舱内只环顾视角）。
+	# 自动改平进行中同样不特殊回中：改平增益叠在玩家杆量之上，玩家按住
+	# 方向键就是「即刻接管」（D-034 旧鼠标杆的接管语义由键盘继承）。
 	var kbd_pitch := Input.get_axis("aircraft_pitch_down", "aircraft_pitch_up")
 	var kbd_roll := Input.get_axis("aircraft_roll_left", "aircraft_roll_right")
 	# 空格 / Ctrl 在飞行上下文里重新定义（儿童友好的「上升 / 下降」）：
@@ -868,8 +849,8 @@ func _prepare_input(delta: float) -> void:
 	var on_floor := is_on_floor()
 	var climb_cmd := 1.0 if Input.is_action_pressed("jump") and not on_floor else 0.0
 	var descend_cmd := 1.0 if Input.is_action_pressed("fly_down") and not on_floor else 0.0
-	controls.pitch = clampf(-_stick.y + kbd_pitch + climb_cmd - descend_cmd, -1.0, 1.0)
-	controls.roll = clampf(_stick.x + kbd_roll, -1.0, 1.0)
+	controls.pitch = clampf(kbd_pitch + climb_cmd - descend_cmd, -1.0, 1.0)
+	controls.roll = clampf(kbd_roll, -1.0, 1.0)
 	controls.yaw = Input.get_axis("move_left", "move_right")
 	controls.brake = Input.is_action_pressed("jump") and on_floor
 	var throttle_axis := Input.get_axis("move_back", "move_forward")

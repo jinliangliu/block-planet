@@ -23,7 +23,8 @@ const ACTIONS := {
 	"toggle_missions": [KEY_K],
 	# 飞行设置面板（O）：难度与辅助稳定（D-032 Phase 5-b）。
 	"toggle_settings": [KEY_O],
-	# 飞行器驾驶：鼠标给操纵杆（俯仰/滚转），方向键为键盘替代；
+	# 飞行器驾驶：飞机只由键盘（触屏由 HUD 摇杆）操纵——方向键拉杆压杆，
+	# D-070 起鼠标不再接飞机，座舱内只环顾驾驶员视角（aircraft_camera.gd）；
 	# W/S 复用 move_forward/back（油门），A/D 复用 move_left/right（方向舵），
 	# 空格复用 jump（地面机轮刹车 / 空中拉升），Shift 复用 sprint（空中加速），
 	# Ctrl 复用 fly_down（空中下降），F 发动机启停，X 下机，

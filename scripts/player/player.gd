@@ -172,15 +172,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if _aircraft != null:
-			# 驾驶中鼠标是操纵杆：左右滚转、上下俯仰（仅第一人称座舱生效，
-			# D-034——追尾/后视/地图模式用键盘方向键，避免视线外鼠标一晃、
-			# 飞机就跟着歪）。自由观察（V / 按住右键）激活时让位给视角环顾（D-033）。
+			# 驾驶中鼠标 = 驾驶员视角（D-070）：座舱内移动鼠标环顾驾驶舱，
+			# 飞机本身只由键盘（触屏由 HUD 摇杆）操纵。自由观察（V / 按住
+			# 右键）本来就是视角环顾，与座舱内视共用同一组偏移量。
+			# 追尾/后视/地图模式鼠标既不接飞机也不转视角（D-034 的教训：
+			# 视线外鼠标一晃飞机就歪）——那些模式想环顾用 V 或按住右键。
 			if flight_camera != null \
-					and flight_camera.current_mode() == AircraftCamera.ViewMode.FREE_LOOK:
+					and (flight_camera.current_mode() == AircraftCamera.ViewMode.FREE_LOOK \
+					or flight_camera.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON):
 				flight_camera.apply_look_delta(event.relative)
-			elif flight_camera != null \
-					and flight_camera.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON:
-				_aircraft.add_mouse_motion(event.relative)
 		else:
 			_rotate_view(Vector2(event.relative.x, event.relative.y) * MOUSE_SENSITIVITY)
 
@@ -223,7 +223,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			flight_camera.recenter()
 			return
 		# 双击左键 = 自动改平（D-034）：约 2 秒内增强增益把坡度摆回水平；
-		# 期间重新移动鼠标即刻接管。
+		# 期间重新按方向键即刻接管（D-070 起鼠标不再接飞机）。
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			# Esc 解锁后首次点击先恢复捕获（D-034）：不当改平输入，也避免
 			# 与下面的双击判定抢同一个点击。
@@ -784,7 +784,8 @@ func ride_aircraft(craft: Aircraft) -> void:
 	# 弹簧臂排除机体自身，否则追尾相机会被机身顶到座舱里。
 	_spring_arm.add_excluded_object(craft.get_rid())
 	camera_distance = CAM_DISTANCE_MAX_RIDING
-	# 驾驶中鼠标让位给操纵杆，弹簧臂俯仰不再由视角驱动——设一个越过垂尾的默认值。
+	# 驾驶中飞机只由键盘/触屏操纵（D-070），玩家自身的弹簧臂俯仰与飞机
+	# 杆量是两条路——设一个越过垂尾的默认值，避免下机瞬间视角穿模。
 	_spring_arm.rotation.x = CHASE_PITCH_RIDING
 	# 登机即回到捕获态（D-034）：Esc 解锁过鼠标再登机也不能带着自由指针开飞机。
 	_esc_released = false

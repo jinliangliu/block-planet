@@ -2,8 +2,9 @@ extends Node
 ## 飞行视角与回放验证探针（D-033，窗口模式：截图需 Vulkan 渲染）。
 ## 覆盖：登机 → 相机激活 → 发动机启停与油门门控 → C 视角切换（平滑不瞬移）
 ## → V 自由观察（偏移生效 + 松手回正）→ R 后视 → M 战术地图（采样 + 开关）
+## → ⑩ 座舱内鼠标 = 驾驶员视角（D-070：视野跟随 + 杆量零写入 + 限幅 + 持久）
 ## → 回放（录制 → 电影运镜 → 机体重演 → 幽灵轨迹 → 跳过复位）。
-## 四张截图：座舱 / 追尾 / 战术地图 / 回放运镜。
+## 五张截图：座舱 / 追尾 / 战术地图 / 环顾中的座舱 / 回放运镜。
 ## 运行：Godot_v4.6.3-stable_win64.exe --path . res://tests/flight_view_probe.tscn
 
 const SHOT_DIR := "res://tmp"
@@ -222,6 +223,65 @@ func _run() -> void:
 	tmap.close_map()
 	await _frames(3)
 	_check(not tmap.is_open(), "⑦ 再按 M 关闭战术地图")
+
+	# ── ⑩ 座舱内鼠标 = 驾驶员视角（D-070）──
+	# 经 player._unhandled_input 派发**真实**鼠标位移（不是直接调相机 API）：
+	# 这条路同时守两件事——视野要跟着转，且一个杆量都不许写进飞机（D-070
+	# 前鼠标是座舱操纵杆，第二条断言在那时是红的，反向对照成立）。
+	cam.toggle_first_third()   # ⑤/⑥/⑦ 后基座是 CHASE → 切座舱
+	await _frames(10)
+	_check(cam.current_mode() == AircraftCamera.ViewMode.FIRST_PERSON,
+		"⑩ C 切回第一人称座舱")
+	var prev_mouse_mode := Input.mouse_mode
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	var roll0: float = craft.controls.roll
+	var pitch0: float = craft.controls.pitch
+	for i in range(6):
+		var ev := InputEventMouseMotion.new()
+		ev.relative = Vector2(60.0, 0.0)   # 右移 6×60 px ≈ 0.9 rad
+		player._unhandled_input(ev)
+	await _frames(20)
+	var off10: float = _view_yaw_offset(cam, craft)
+	_check(absf(off10) > 0.15, "⑩ 座舱内鼠标环顾生效（视野偏航 %.2f rad）" % off10)
+	_check(absf(craft.controls.roll - roll0) < 0.01 and absf(craft.controls.pitch - pitch0) < 0.01,
+		"⑩ 鼠标不再写入飞机杆量（Δroll %.3f / Δpitch %.3f）"
+			% [craft.controls.roll - roll0, craft.controls.pitch - pitch0])
+	# 眼位刚性吸附不被视角偏移破坏（D-065 R1：座舱位置每帧吸附 COCKPIT_OFFSET）。
+	var eye10: Vector3 = craft.global_transform * Vector3(0.0, 1.15, -3.4)
+	_check(cam.global_position.distance_to(eye10) < 0.5,
+		"⑩ 环顾只转向不位移（眼位偏差 %.2f m）" % cam.global_position.distance_to(eye10))
+	await _shot("flight_view_look.png")
+	# 偏航限幅：来回猛甩 40×400 px ≈ 40 rad，必须钳在 LOOK_YAW_LIMIT——
+	# 座舱里这是「驾驶员的头」，不是绕飞机的轨道相机。
+	for i in range(40):
+		var ev2 := InputEventMouseMotion.new()
+		ev2.relative = Vector2(400.0, 0.0)
+		player._unhandled_input(ev2)
+	await _frames(10)
+	_check(absf(cam._look_yaw) <= AircraftCamera.LOOK_YAW_LIMIT + 0.001,
+		"⑩ 环顾偏航限幅 ±%.1f rad（实际 %.2f）"
+			% [AircraftCamera.LOOK_YAW_LIMIT, cam._look_yaw])
+	# 持久：停手不自动回正——驾驶员的视线停在落下的地方（回正只归中键）。
+	# 先等姿态收敛：相机朝向按 RATE_ROT=10 对目标做 slerp（τ≈0.1 s），
+	# 0.87→2.4 rad 的大角度要 ~1 s 才到位——不等收敛就采样，「漂移」量到的
+	# 全是 slerp 残余（run1 实测 0.331 rad 全从这里来，不是回正）。
+	await _frames(60)
+	var yaw_state: float = cam._look_yaw
+	var off10b: float = _view_yaw_offset(cam, craft)
+	await _frames(90)
+	_check(absf(cam._look_yaw - yaw_state) < 0.001,
+		"⑩ 座舱内环顾状态不自动回正（_look_yaw %.3f → %.3f）"
+			% [yaw_state, cam._look_yaw])
+	_check(absf(_view_yaw_offset(cam, craft) - off10b) < 0.02,
+		"⑩ 座舱内环顾视野不自动回正（90 帧漂移 %.3f rad）"
+			% absf(_view_yaw_offset(cam, craft) - off10b))
+	cam.recenter()
+	await _frames(90)   # 2.4 rad → 0 的 slerp 收敛（τ≈0.1 s，90 帧 ≈1.5 s）
+	_check(absf(_view_yaw_offset(cam, craft)) < 0.05,
+		"⑩ recenter 后视野归位（残余 %.3f rad）" % _view_yaw_offset(cam, craft))
+	Input.mouse_mode = prev_mouse_mode
+	cam.toggle_first_third()   # → 追尾，恢复 ⑧ 起点
+	await _frames(5)
 
 	# ── ⑧ 回放：录制一段完整飞行 → 电影运镜 → 机体重演 → 幽灵轨迹 → 跳过复位 ──
 	# 脚本驾驶（use_player_input=false 后直接写 controls，与 e2e 同路径）；
