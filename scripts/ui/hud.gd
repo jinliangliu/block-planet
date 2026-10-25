@@ -1147,6 +1147,11 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 		var cr := _player.aircraft()
 		if cr != null and is_instance_valid(cr):
 			_instrument_hud.setup(cr, _flight_camera)
+			# 地形前视预警（D-072 P2b）：注入高度场采样器。闭包惰性解析
+			# player.world()——区域切换重建 World 后也不会采到旧世界。
+			_instrument_hud.set_terrain_sampler(func(wx: int, wz: int) -> int:
+				var w := _player.world_ref()
+				return w.get_surface_height(wx, wz) if w != null else 0)
 	# 起飞教练（D-043 / D-046）：登机绑定飞机（顺带把阶梯重置回第①步），
 	# 下机解绑。界面不在这里显隐——教练区是飞行面板卡片的子节点，随卡片走。
 	# 失速改出教案（U-8 / D-069）：同范式，bind 时整体重置（每次登机从干净

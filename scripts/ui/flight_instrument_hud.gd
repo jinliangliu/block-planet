@@ -95,6 +95,15 @@ func setup(craft: Aircraft, camera: AircraftCamera) -> void:
 	_camera = camera
 	_instruments.reset_voice_cues()
 	_instruments.reset_altitude_callouts()
+	# 地形前视预警（D-072 P2b）：状态随登机重置（上次飞行的残余警告不带进本次）。
+	_instruments.reset_terrain_warning()
+
+
+## 注入地形前视预警的高度场采样器（D-072 P2b）：由 hud.gd 登机时经
+## player.world_ref() 解析后传入；下机不清（世界实例在局内不变，且采样器是
+## 惰性闭包，换区后自动指向新世界）。
+func set_terrain_sampler(cb: Callable) -> void:
+	_instruments.set_terrain_sampler(cb)
 
 
 func set_beeper(beeper: AlertBeeper) -> void:

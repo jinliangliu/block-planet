@@ -655,10 +655,12 @@ D-065 补了 `CockpitPanel` 之后，第一人称**低头能看到 3D 仪表台*
 
 ## 10. 警告系统
 
-`FlightInstruments.alerts()` 六类，按优先级排序（同级内 WARNING 在 CAUTION 前）：
+`FlightInstruments.alerts()` 八类九条，按优先级排序（同级内 WARNING 在 CAUTION 前）：
 
 | id | 级别 | 文案 | 蜂鸣码 |
 |---|---|---|---|
+| terrain | 警告 | 前方有山！快拉升 | 880 Hz 急鸣三声 / 0.8 s |
+| terrain_caution | 注意 | 前方有山，准备拉升 | 700 Hz 两声 / 1.5 s |
 | stall_full | 警告 | 失速了！推杆低头 | 880/620 交替连续 |
 | stall | 注意 | 要失速了，推杆低头 | 880 Hz 急鸣三声 |
 | overspeed | 警告 | 飞太快！收油减速 | 660/520 双音循环 |
@@ -672,6 +674,7 @@ D-065 补了 `CockpitPanel` 之后，第一人称**低头能看到 3D 仪表台*
 - **同刻只播最高级那条的声音**，其余留灯光（防声音叠加成噪音）
 - 低油滞环 20% / 25%
 - 高度过低**刻意要求下沉率条件**（注意 AGL<15 且 VS<−2.5；警告 AGL<6 且 VS<−4；着地或 AGL>20 清除）——否则降落进近全程报警，儿童会学会忽略警报（警报疲劳比没警报更糟）
+- **地形前视（D-072 P2b，GPWS 式，`TerrainWarning` 纯逻辑类）**：沿地速航迹外推 10 s、每 50 m 采一点（`min_ahead` = 预测最小余量；`rise` = 前方最高地表 − 脚下地表，同一采样器源头一致）。警告 = `min_ahead < 25`（绝对档，贴地平飞也拦）；注意 = `min_ahead < 40` 且 `rise > 20`（rise 条件是「山在迎面而来」与「只是在低空飞」的判别——没有它 FD 封顶 100 m 巡航会全程黄牌）；清除带 +20 m 滞环。三门控：未离地（AGL≤2）不报（滑跑正前方永远有「山」）、失速中让位 StallCoach（含 stall_warning，「推杆低头」与「快拉升」实时冲突，同 D-071 范式）、着陆下降段屏蔽（AGL<60 且 VS<−1.5）。高度场经 Callable 采样器由 hud.gd 登机时注入（`player.world_ref()` 惰性解析，换区不漂）；采样用 `get_surface_height`（精确面）， coarse LOD 网格对精确面的 overshoot（steep 区可达 ~17 m）是已记录的设计限制
 - 蜂鸣码全部落在 330–880 Hz、单条 ≤1.2 s，避免刺耳；`user://voice/<id>.wav` 存在时优先播采样（预留语音资产接口）
 - 主音量 0.22（提示不是警报）；设置里可整体关闭
 
@@ -802,10 +805,11 @@ bash tmp/run_regression.sh          # 日常：无头逻辑探针（快）
 bash tmp/run_regression.sh full     # 验收：无头 + 窗口截图（须目检截图）
 ```
 
-当前 **44 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`）；`full` 验收档共 **56 探针**（含窗口截图），最近一次全量 **2186 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-071 失速让位后）。
+当前 **45 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`、D-072 P2b 新增 `terrain_warning_probe`）；`full` 验收档共 **56 探针**（含窗口截图），最近一次全量 **2186 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-071 失速让位后）。
 D-070（PC 操控定稿：鼠标 = 驾驶员视角，飞机只由键盘操纵）后：`flight_probe` 149 → **146**（拆鼠标杆 −4、新增「无隐性杆源」闸 +1）、`flight_view_probe` 47 → **55**（新增 ⑩ 段 8 条：视野跟随 / 杆量零写入 / 眼位刚性 / 偏航限幅 ±2.4 rad / 状态与视野均不自动回正 / recenter 归位），full 档总数相应变为 **56 探针 / 2179 PASS**（以 D-070 回归实测为准）。
 D-061 新增 `landing_quality_probe`（45 断言：A 评分边界 19 + B 任务改造 13 + C 呼号边沿 7 + D 端到端落地 6）。
 D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状态机 / L3 符号 / 微颤 / 净空 / 相机吸附）、`cockpit_align_probe`（16 断言：材质绑定四闸 / 2D dash 未变形 / 四角投影 ±12 px / 可见性反转）、`cockpit3d_shot`（窗口 10 图 + 白屏像素闸）。
+D-072 新增 `terrain_warning_probe`（43 断言：A 段 `TerrainWarning` 纯逻辑——两级门限 + rise 判别对（同余量异 rise，防空闸）+ 滞环等值点 + 三门控及反向对照 + 采样密度声明 + 缺键安全默认；B 段 `FlightInstruments` 集成——置顶优先级 / 横幅通道 / 蜂鸣 cadence / 失速让位 / 无采样器恒 0；C 段 hud.gd 采样器注入端到端——贴谷地平飞触发 → 爬升滞环清除）。
 
 飞行相关探针：
 
@@ -827,6 +831,7 @@ D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状�
 | `stall_coach_shot` | **22 处断言站点**（D-069 二轮；happy path 执行 17 条 + 5 条解体守卫，守卫只在失败路径上触发）：失速教案六图取证——① 黄闪 / ① 红闪 / ② 油门条 / ③ 速度条 / 改出成功 / U-9 Toast；含 **Toast 相对位几何闸**（整块在 dash 顶沿上方且未出屏）、F-13 pending→confirm 窗口断言与 **③ 证据-断言耦合闸**（保存时教练区仍停在③）。转瞬态截图用 `Engine.time_scale = 0.15` 慢放，避开「进程帧墙钟长度随负载浮动」导致的证据图与断言脱钩 |
 | `airport_probe`、`field_probe` | 机场与降落场 |
 | `terrain_block_probe`、`terrain_survey_probe` | D-055：新方块属性/纹理/掉落（22 条）；分层地形的数字验收（**24 条**，D-072 P2a 重写为环带采样 + 谷地安全区专闸 + 渐变带「限高不加剧陡壁」对比，含 ③b 全域无空气墙——最大单步落差 ≤ `MAX_SLOPE+SLOPE_SLACK`，地形改陡了立刻 FAIL） |
+| `terrain_warning_probe` | **43 条**（D-072 P2b）：地形前视预警纯逻辑 + 仪表集成 + 真实采样器接线端到端 |
 
 ⚠️ 铁律：**探针严禁并行**（`user://` 竞态，已污染过两次结论）。`airport` / `field` / `rebuild_drain` 退出期偶发 `rc=139` 是已知良性（断言全 PASS 后发生在 Vulkan 清理段）。
 

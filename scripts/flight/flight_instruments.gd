@@ -12,6 +12,7 @@ extends RefCounted
 ## alerts() 取当前生效警告（灯光用，按优先级排序）；take_voice_cues(delta)
 ## 取「本次该响」的语音/蜂鸣提示（边沿触发 + 重播 cadence，只播最高级那条，
 ## 取一次即从内部队列清除）。reset_voice_cues() 在登机/下机时清空。
+## 地形前视预警（D-072 P2b）另需 set_terrain_sampler() 注入高度场，否则不报。
 ##
 ## 数值全部来自 gameplay-designer Phase A 报告（D-034），阈值/滞环/优先级
 ## 以此文件为唯一事实来源；节点层只喂原始读数（snapshot）。
@@ -48,11 +49,19 @@ const BEEP_CODES := {
 	# 进近高度呼号（U-10）：中频两声，各层共用同一音色（层级信息由 Toast
 	# 文字给，不靠音高编码——儿童不解析音高序列）。
 	"alt_call": {"freq": 780.0, "dur": 0.09, "gap": 0.12, "count": 2, "replay": 0.0},
+	# 地形前视警告（D-072 P2b）：最高急切档（880 失速同频），三连急鸣每 0.8 s。
+	"terrain": {"freq": 880.0, "dur": 0.1, "gap": 0.1, "count": 3, "replay": 0.8},
+	# 地形前视注意：中频两声，每 1.5 s 一组（比 altitude_low 的 1.0 s 缓——
+	# 注意档有 10 s 预热，不需要那么急）。
+	"terrain_caution": {"freq": 700.0, "dur": 0.1, "gap": 0.15, "count": 2, "replay": 1.5},
 }
 
 ## 警告优先级（Phase A §5）：失速 = 超速 = 耗尽 > 过低 > 低油。
 ## 同刻多警只播最高级那条的声音，其余留灯光——防声音叠加成噪音。
+## D-072 P2b：地形前视两级置顶（-1）——装山是秒级致命威胁，比失速/超速更
+## 没有后续。与失速不会同屏（TerrainWarning 门控 2：失速中让位 StallCoach）。
 const ALERT_PRIORITY := {
+	"terrain": -1, "terrain_caution": -1,
 	"stall": 0, "stall_full": 0, "overspeed": 0, "fuel_empty": 0,
 	"altitude_critical": 1, "altitude_low": 1, "low_fuel": 2,
 }
@@ -136,6 +145,9 @@ var stall_warning := false
 var overspeed := false
 ## 高度过低级别（0=无 / 1=注意 / 2=警告）：_refresh_alerts 维护。
 var alt_warn := 0
+## 地形前视级别（0=无 / 1=注意 / 2=警告，D-072 P2b）：_terrain.update 维护，
+## 与 _terrain.level 同步（探针可直接读本字段）。采样器未注入时恒 0。
+var terrain_warn := 0
 
 # ── 导航（HSI/CDI）────────────────────────────────────────
 ## set_navigation(target) 后生效：HSI 显示目标方位角，CDI 显示直飞偏差。
@@ -156,6 +168,8 @@ var _fuel_low_latched := false
 var _cue_ids := {}
 var _cue_timers := {}
 var _nav_target := Vector3.ZERO
+## 地形前视预警（D-072 P2b）：纯逻辑实例，高度场采样器由节点层登机时注入。
+var _terrain := TerrainWarning.new()
 ## 进近高度呼号（U-10）：上帧 AGL（穿越边沿检测）、本次飞行已呼过的层
 ## （一次性，防同层重复）、待取走的层（take_altitude_callouts 消费）。
 var _prev_agl := 0.0
@@ -173,6 +187,20 @@ func set_navigation(target: Vector3, name: String = "") -> void:
 func clear_navigation() -> void:
 	nav_active = false
 	nav_name = ""
+
+
+## 注入地形前视预警的高度场采样器（D-072 P2b）：`(wx: int, wz: int) -> int`。
+## 由 hud.gd 登机时经 player.world_ref() 惰性解析注入；不注入则 terrain_warn 恒 0。
+func set_terrain_sampler(cb: Callable) -> void:
+	_terrain.set_sampler(cb)
+
+
+## 清空地形预警状态（登机/下机时与 reset_voice_cues 同步调）。
+## 镜像字段 terrain_warn 必须同步清零——它由 update() 维护，但探针与 HUD
+## 可能在两次 update 之间读它（登机装配路径先于首帧 tick）。
+func reset_terrain_warning() -> void:
+	_terrain.reset()
+	terrain_warn = 0
 
 
 ## 每帧更新。reading 为 Aircraft.snapshot() 的输出（探针可手搓同名字典）；
@@ -242,6 +270,10 @@ func update(reading: Dictionary, craft_basis: Basis, delta: float) -> void:
 		nav_to_flag = true  # MVP 直飞导航恒为 TO
 	_update_altitude_callouts()
 	_refresh_alerts()
+	# 地形前视预警（D-072 P2b）：纯逻辑实例自己读 reading 的 position/velocity，
+	# 采样器未注入时它是 no-op（level 恒 0），对既有探针零影响。
+	_terrain.update(reading)
+	terrain_warn = _terrain.level
 
 
 ## 进近高度呼号边沿检测（U-10）：已离地且明确下沉时，AGL 从上往下穿过
@@ -306,6 +338,12 @@ func alerts() -> Array[Dictionary]:
 		list.append(_alert("stall", AlertLevel.CAUTION, "要失速了，推杆低头"))
 	if overspeed:
 		list.append(_alert("overspeed", AlertLevel.WARNING, "飞太快！收油减速"))
+	# 地形前视（D-072 P2b，置顶优先级）：装山是秒级致命威胁。
+	match terrain_warn:
+		2:
+			list.append(_alert("terrain", AlertLevel.WARNING, "前方有山！快拉升"))
+		1:
+			list.append(_alert("terrain_caution", AlertLevel.CAUTION, "前方有山，准备拉升"))
 	if fuel_empty:
 		list.append(_alert("fuel_empty", AlertLevel.WARNING, "没油了！滑翔降落"))
 	elif fuel_low:

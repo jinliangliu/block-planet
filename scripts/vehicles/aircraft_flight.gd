@@ -480,6 +480,9 @@ static func snapshot(state: State) -> Dictionary:
 		"yaw_rate": state.yaw_rate,
 		"yaw_rate_dps": rad_to_deg(state.yaw_rate),
 		"vertical_speed": state.velocity.y,
+		# 地速矢量（D-072 P2b 地形前视预警的航迹外推源；风场下 velocity 是
+		# 地速——「会撞什么」看地迹航迹，不是空速矢量）。
+		"velocity": state.velocity,
 		"sideslip_deg": rad_to_deg(sideslip(state)),
 		"pitch_deg": rad_to_deg(asin(clampf(nose.y, -1.0, 1.0))),
 		"bank_deg": rad_to_deg(-asin(clampf(state.basis.x.y, -1.0, 1.0))),
