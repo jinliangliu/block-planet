@@ -16,6 +16,16 @@ const PROBE_PAD := preload("res://tests/probe_pad.gd")
 
 ## 巡航目标离地高度（m）：> U-9 触发高度 15 m，且高于起飞教练成功判定高度。
 const CRUISE_ALT := 40.0
+## 高度保持 PD 增益（D-072 P2a 回归修复）：`controls.pitch` 是**俯仰角速度
+## 目标**且飞行动力学刻意不做俯仰自动配平，纯 P 高度保持（曾用 0.08）会激励
+## 出发散长周期振荡——实测（tmp/alt_hold）新旧地形下飞机在 40 m 目标上下
+## ±20~50 m 振荡、俯仰冲到 +44°/−58°，周期性俯冲到 11~17 m AGL 接 50+ m/s，
+## C10 入口相位随地形反馈翻转（波峰 y≈125 → 波谷 y≈45）即撞脊解体/超速折翼。
+## 旧探针能过纯属振荡相位侥幸对齐，不是稳定性。垂直速度阻尼项（D）把振荡
+## 压到 ±10 m 内；增益 KP=0.10/KD=0.20 实测 15 s 全程不坠机（含 AGL 低模
+## 网格 ±15 m 偏差噪声——>64 m 后射线打 coarse LOD，非精确地表）。
+const HOLD_KP := 0.10
+const HOLD_KD := 0.20
 ## 单阶段等待上限（秒），超时即失败，避免探针卡死。
 const PHASE_TIMEOUT := 30.0
 ## StallCoach 纯逻辑段的固定步长（s）：状态机所有计时都按 delta 累加，
@@ -553,7 +563,8 @@ func _c_integration() -> void:
 		var agl := float(_craft.snapshot()["altitude_agl"])
 		if not _craft.is_on_floor() and absf(agl - CRUISE_ALT) < 6.0:
 			break
-		_craft.controls.pitch = clampf((CRUISE_ALT - agl) * 0.08, -0.35, 0.5)
+		_craft.controls.pitch = _hold_pitch(CRUISE_ALT, agl,
+			float(_craft.snapshot()["vertical_speed"]), -0.35, 0.5)
 		await get_tree().physics_frame
 		elapsed += get_physics_process_delta_time()
 	var cruise := _craft.snapshot()
@@ -570,21 +581,31 @@ func _c_integration() -> void:
 		if _hud._toast_label != null and _hud._toast_label.text == hint_text:
 			toast_seen = true
 			break
-		_craft.controls.pitch = clampf(
-			(CRUISE_ALT - float(_craft.snapshot()["altitude_agl"])) * 0.08, -0.35, 0.5)
+		var s6 := _craft.snapshot()
+		_craft.controls.pitch = _hold_pitch(CRUISE_ALT,
+			float(s6["altitude_agl"]), float(s6["vertical_speed"]), -0.35, 0.5)
 		await get_tree().physics_frame
 		elapsed += get_physics_process_delta_time()
 	_check(toast_seen, "C6 座舱视角已离地后投递「低头看仪表台」提示（Toast）")
 	# F-13：投递先记 pending，「看过」要等 Toast tween 自然播完（2.2 s 保持
-	# + 0.6 s 淡出）才由 finished 回调确认落盘。轮询等确认完成（5 s 上限）。
+	# + 0.6 s 淡出）才由 finished 回调确认落盘。轮询等确认完成。
+	# 窗口 12 s 而非 2.8 s 的裸 tween 时长：Toast 是覆盖式的，教学提示播的
+	# 2.8 s 内可能被**其它**提示顶掉——实测（D-072 P2a 回归）PD 高度保持下
+	# AGL 在 30 m 呼号带附近振荡，下穿 30 m 触发 U-10 呼号「📢 30 米」，
+	# 正好盖掉教学提示。这是**设计内行为**（F-13：顶掉→cancel_pending→条件
+	# 仍满足则重演），且呼号（每次飞行每层一次）/成就（全局一次）都是一次性
+	# 事件——重演链必然收敛：实测干扰在 t≈2.6 s、重演于 t≈5.8 s 播完。12 s
+	# 容得下约 3 轮干扰。若把巡航高度提到 60 m 避开呼号带，反而会解锁
+	# 「冲上云霄」成就弹 Toast（保存态依赖，更不可控）——高度不动、窗口放宽。
 	var confirmed := false
 	elapsed = 0.0
-	while elapsed < 5.0 and not _craft.is_wrecked():
+	while elapsed < 12.0 and not _craft.is_wrecked():
 		if _hud._flight_teaching.is_seen(FlightTeaching.HINT_LOOKDOWN):
 			confirmed = true
 			break
-		_craft.controls.pitch = clampf(
-			(CRUISE_ALT - float(_craft.snapshot()["altitude_agl"])) * 0.08, -0.35, 0.5)
+		var s7 := _craft.snapshot()
+		_craft.controls.pitch = _hold_pitch(CRUISE_ALT,
+			float(s7["altitude_agl"]), float(s7["vertical_speed"]), -0.35, 0.5)
 		await get_tree().physics_frame
 		elapsed += get_physics_process_delta_time()
 	_check(confirmed, "C7 Toast 播完后确认看过（F-13 看过才消耗）")
@@ -595,8 +616,9 @@ func _c_integration() -> void:
 	if _hud._toast_label != null:
 		_hud._toast_label.text = ""
 	for i in range(180):
-		_craft.controls.pitch = clampf(
-			(CRUISE_ALT - float(_craft.snapshot()["altitude_agl"])) * 0.08, -0.35, 0.5)
+		var s9 := _craft.snapshot()
+		_craft.controls.pitch = _hold_pitch(CRUISE_ALT,
+			float(s9["altitude_agl"]), float(s9["vertical_speed"]), -0.35, 0.5)
 		await get_tree().physics_frame
 	_check(_hud._toast_label == null or _hud._toast_label.text != hint_text,
 		"C9 一次性语义：3 s 内不再重复投递")
@@ -699,8 +721,9 @@ func _c_integration() -> void:
 		frames += 1
 		if not is_instance_valid(_craft) or _craft.is_wrecked():
 			break
-		_craft.controls.pitch = clampf(
-			(hold_agl - float(_craft.snapshot()["altitude_agl"])) * 0.08, -0.15, 0.35)
+		var s13 := _craft.snapshot()
+		_craft.controls.pitch = _hold_pitch(hold_agl,
+			float(s13["altitude_agl"]), float(s13["vertical_speed"]), -0.15, 0.35)
 		# 拿到成功文案就收工：教案后段的正反馈已经取到，多飞一秒多一分
 		# 撞地风险（探针的价值在断言，不在续航）。
 		if _latch_any("改出成功"):
@@ -738,6 +761,16 @@ func _c_integration() -> void:
 
 
 # ── 工具 ──────────────────────────────────────────────────
+## 高度保持 PD（D-072 P2a 回归修复）：`controls.pitch` 映射到**俯仰角速度**
+## （aircraft_flight.gd `target_pitch = controls.pitch × PITCH_RATE_MAX`），且
+## 模型刻意没有俯仰自动配平——纯 P 会把「高度误差 → 角速度」的开环积分段
+## （角速度→姿态→航迹→高度）激励成发散 phugoid。垂直速度阻尼项直接对治：
+##   爬升率 > 0 时压低杆、下降率 > 0 时抬杆，与高度误差项叠加。
+## `target` 为 AGL 目标（巡航段 CRUISE_ALT；C13 收尾段用进入时的高度）。
+func _hold_pitch(target: float, agl: float, vs: float, lo: float, hi: float) -> float:
+	return clampf((target - agl) * HOLD_KP - vs * HOLD_KD, lo, hi)
+
+
 ## StallCoach 只认这 8 个键（其余 snapshot 字段它不看）。
 ## `stall_speed` 默认 13.1 m/s（≈47 km/h，轻型机空载失速速度同量级）；A20
 ## 会传别的值来验「余量门槛随襟翼/载重派生」而不是写死 km/h。

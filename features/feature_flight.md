@@ -826,7 +826,7 @@ D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状�
 | `coach_cockpit_shot`（22 条，含起飞教练字号维持 15/12）、`takeoff_coach_shot`、`flight_panel_shot`、`flight_shot` | 教练与面板取证 |
 | `stall_coach_shot` | **22 处断言站点**（D-069 二轮；happy path 执行 17 条 + 5 条解体守卫，守卫只在失败路径上触发）：失速教案六图取证——① 黄闪 / ① 红闪 / ② 油门条 / ③ 速度条 / 改出成功 / U-9 Toast；含 **Toast 相对位几何闸**（整块在 dash 顶沿上方且未出屏）、F-13 pending→confirm 窗口断言与 **③ 证据-断言耦合闸**（保存时教练区仍停在③）。转瞬态截图用 `Engine.time_scale = 0.15` 慢放，避开「进程帧墙钟长度随负载浮动」导致的证据图与断言脱钩 |
 | `airport_probe`、`field_probe` | 机场与降落场 |
-| `terrain_block_probe`、`terrain_survey_probe` | D-055：新方块属性/纹理/掉落（22 条）；分层地形的数字验收（18 条，含**③b 全域无空气墙**——最大单步落差 ≤ `MAX_SLOPE+SLOPE_SLACK`，地形改陡了立刻 FAIL） |
+| `terrain_block_probe`、`terrain_survey_probe` | D-055：新方块属性/纹理/掉落（22 条）；分层地形的数字验收（**24 条**，D-072 P2a 重写为环带采样 + 谷地安全区专闸 + 渐变带「限高不加剧陡壁」对比，含 ③b 全域无空气墙——最大单步落差 ≤ `MAX_SLOPE+SLOPE_SLACK`，地形改陡了立刻 FAIL） |
 
 ⚠️ 铁律：**探针严禁并行**（`user://` 竞态，已污染过两次结论）。`airport` / `field` / `rebuild_drain` 退出期偶发 `rc=139` 是已知良性（断言全 PASS 后发生在 Vulkan 清理段）。
 

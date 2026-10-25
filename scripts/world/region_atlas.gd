@@ -521,6 +521,10 @@ const REGIONS := [
 			[22, 28, 86, 84],       # 村庄 A（REGION_MIN/MAX + 施工缘）
 			[-6, -6, 22, 22],       # 简易降落场（大洋/极地区域用）
 		],
+		# D-072 机场谷地中心（格）：world._layered_height 以此为心做近场限高，
+		# 与 main._airport_center(ASIA) 的 (114,96) 必须一致（terrain_survey_
+		# probe 有交叉断言）。迁机场选址时两处同改。
+		"airport_center": [114, 96],
 		# 树线：高于此高度不再长树（雪线附近长树不合直觉，也会让树干戳出盘外）。
 		"tree_line": 118.0,
 		"sky": Color(1.0, 1.0, 1.0),

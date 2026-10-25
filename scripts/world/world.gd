@@ -136,6 +136,9 @@ var _noise := FastNoiseLite.new()
 # 一次 Rect2i 列表；否则每列都要遍历 profile 数组并做 4 次 int 转换。
 var _flat_zone_cache: Array[Rect2i] = []
 var _flat_zone_loaded := false
+# D-072：机场谷地中心（格）缓存。Vector2(NAN, NAN) = 本区域未配置（不限高）。
+var _valley_center := Vector2(NAN, NAN)
+var _valley_loaded := false
 # 极地冰山噪声：低频成团，决定哪里隆起露出海面的冰山（D-028）。
 var _iceberg_noise := FastNoiseLite.new()
 # ── D-055 亚洲分层地形噪声（仅 "terrain": "layered" 的区域使用） ──────────
@@ -236,6 +239,8 @@ func set_region(region_id: int) -> void:
 	# 缓存必须在此作废，否则切区域后会拿旧区域的矩形去否决新地形。
 	_flat_zone_cache.clear()
 	_flat_zone_loaded = false
+	# D-072：机场谷地中心同样随区域切换而变，缓存一并作废。
+	_valley_loaded = false
 
 
 func get_region() -> int:
@@ -1285,9 +1290,9 @@ func _raw_height(wx: int, wz: int) -> int:
 	return clampi(int(round(h)), 2, CHUNK_SIZE.y - 8)
 
 
-## D-055 分层高度。返回绝对高度（格）。四段顺序即真实地貌的生成次序：
-## 先有高原台地，高原边缘隆起成山脊，河流自高原切谷（只在低地切深），
-## 平整保护区最后否决一切起伏。
+## D-055 分层高度。返回绝对高度（格）。生成次序：先有高原台地，高原边缘
+## 隆起成山脊，河流自高原切谷（只在低地切深），D-072 的近场限高把机场
+## 谷地内的附加量压平，平整保护区最后否决一切起伏。
 func _layered_height(wx: int, wz: int, base_h: float) -> float:
 	# ② 青藏高原地基：超低频 smoothstep 成片抬升。
 	# 门限区间必须覆盖噪声实际取值范围：FastNoiseLite 的 2D simplex 输出
@@ -1314,15 +1319,58 @@ func _layered_height(wx: int, wz: int, base_h: float) -> float:
 	var river := 1.0 - smoothstep(RIVER_T0, RIVER_T1, absf(rv))
 	var cut := RIVER_CUT * (1.0 - plateau_n) * river
 
-	var layered := base_h + plateau + ridge - cut
-	# ① 平整保护区：机场 / 村庄 / 降落场必须回到丘陵基底——高山会顶掉机场
+	# ① D-072 近场限高（机场谷地）：机场是口袋里的唯一平地，谷外 200~500 m
+	# 就是 80~180 m 山体——人工驾驶起飞后没爬两眼就装山（用户实测反馈）。
+	# 根因不是世界小（已 ±64 km、峰顶距世界顶 60 m 余量），而是机场周边
+	# 可飞空域的形状。故只压「分层附加量」（高原+山脊-河谷），不动基底，
+	# 也不动 classic 区域（本函数只在 layered 区域调用）：谷内回到无山无河
+	# 的丘陵基底，VALLEY_R..VALLEY_RAMP 连续升到全量。与②的保护区权重
+	# 不冲突——谷内附加量已是 0，保护区再压一次还是基底。
+	var extras := (plateau + ridge - cut) * _near_field_weight(wx, wz)
+	# ② 平整保护区：机场 / 村庄 / 降落场必须回到丘陵基底——高山会顶掉机场
 	# 选址（山顶只有一格可站，上方凑不出四格空气），村庄整平区也不能变悬崖。
 	# 但**必须有渐变边缘**：早期用 `if in_rect: return base_h` 硬否决，结果
 	# 区外紧邻的 196 格山脊与区内 30 格平原一步相接，实测单步落差 162 格
 	# （81m）——玩家在机场外就是一道空气墙，飞机撞上必解体。
 	# 改为按「到保护区边界的距离」在 FLAT_FEATHER 内平滑压回基底：
 	# 区内权重 0（完全平坦），边缘 FLAT_FEATHER 格内线性升到 1。
-	return lerpf(base_h, layered, _flat_weight(wx, wz))
+	return lerpf(base_h, base_h + extras, _flat_weight(wx, wz))
+
+
+## D-072 机场谷地半径（格）：此距离内分层附加量完全压制（无山无河的丘陵）。
+## 300 m 的依据：勘察实测 8 方向飞行剖面——满油门爬升 10.7 m/s 的飞机在
+## 300 m 处离地已 ~95 m，而谷内基底丘陵最高 ~44 m，余量充足；再小（200 m）
+## 会把 SE 400 m 处的 136 m 墙留在渐变带外，挡休闲玩家（改平 60 m）的去路。
+const VALLEY_R := 300.0
+## D-072 渐变带外缘（格）：此距离外恢复全量分层地形（喜马拉雅/昆仑原样）。
+## 900 m 的依据：实测 -Z 方向 700 m 有 167 m 山体、SW 700 m 有 144 m，
+## 外缘取 900 可把这两处压到 ~110~130 m；再放到 600 m 压不动它们（墙在
+## 渐变带外），放到 1500 m 则把太多山体推平、失去分层地形本意。
+const VALLEY_RAMP := 900.0
+
+
+## D-072 机场谷地中心（格坐标）。未配置 airport_center 的区域返回
+## Vector2(NAN, NAN)（调用方据此跳过限高）。缓存随 set_region 作废。
+func _valley_origin() -> Vector2:
+	if _valley_loaded:
+		return _valley_center
+	_valley_loaded = true
+	var c: Array = _profile.get("airport_center", [])
+	if c.size() == 2:
+		_valley_center = Vector2(float(c[0]), float(c[1]))
+	return _valley_center
+
+
+## D-072 近场权重：机场谷内 0（无山无河），VALLEY_R..VALLEY_RAMP 平滑升到 1，
+## 更远处恒 1。径向（欧氏）距离——渐变带是圆的，不会像矩形保护区那样在
+## 对角线方向留下最近的墙。未配置谷地的区域恒 1（零影响）。
+func _near_field_weight(wx: int, wz: int) -> float:
+	var c := _valley_origin()
+	if is_nan(c.x):
+		return 1.0
+	var dx := float(wx) - c.x
+	var dz := float(wz) - c.y
+	return smoothstep(VALLEY_R, VALLEY_RAMP, sqrt(dx * dx + dz * dz))
 
 
 ## 平整保护区权重：区内 0（纯基底），FLAT_FEATHER 格的边缘渐变带内升到 1。
