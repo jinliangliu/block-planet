@@ -189,6 +189,18 @@ func _run() -> void:
 		"巡航态教练区无失速教案内容（「%s」）" % _hud._coach_main.text)
 	await _shoot("flight_hud_cruise.png")
 
+	# ── D-071 前置：给一个导航目标，让飞行指引十字进入可见态 ──────────
+	# 让位断言的对照组：无导航目标时指引恒 OFF（本来就看不见），先造一个
+	# 「看得见」的基线，才能证明教案激活时它是**被藏起来的**而不是偶发同态。
+	# 目标取机体前方 260 m（<APPROACH_DIST 400 m → 进近态，非 OFF）。
+	var nav_target_world: Vector3 = _craft.global_position + Vector3(0.0, -20.0, -260.0)
+	_hud.set_flight_navigation(_world.to_render(nav_target_world), "D-071 测试目标")
+	for i in range(6):
+		await get_tree().process_frame
+	var fd0: FlightDirector = _hud._instrument_hud._fd
+	_check(_hud._instrument_hud._cockpit.visible and fd0.visible,
+		"D-071 基线：座舱视角 + 导航目标下飞行指引可见（mode=%d）" % fd0.current_mode())
+
 	# ── ③ 怠速拉杆逼出失速告警 ─────────────────────────────
 	# 手法对齐 flight_probe E 段（D-067 后同款）：6 s 中度拉杆爬升预热后
 	# （pitch 0.6 + 满油门）**收怠速 + 持续满杆**——能量耗尽路径。满油门拉杆
@@ -225,6 +237,16 @@ func _run() -> void:
 		"失速教案主句字号 17（实际 %d）" % _hud._coach_main.get_theme_font_size("font_size"))
 	_check(_hud._coach_sub.get_theme_font_size("font_size") == 13,
 		"失速教案副句字号 13（实际 %d）" % _hud._coach_sub.get_theme_font_size("font_size"))
+	# D-071：失速教案激活时飞行指引十字整体退场（UI/UX 评估结论：儿童一次只
+	# 听一个声音——指引的「掉头」教失速中坡度、进近段「抬头」与教案「低头」
+	# 字面相反，两个指令源同屏有真实冲突）。refresh 仍在跑（_mode 不丢），
+	# 恢复由教案结束自动完成；HSI/CDI/小地图不退场（无文字指令）。
+	for i in range(4):
+		await get_tree().process_frame
+	_check(not fd0.visible,
+		"D-071 失速教案激活时飞行指引退场（mode=%d，非 OFF 同态）" % fd0.current_mode())
+	_check(_hud._instrument_hud._stall_coach_active,
+		"D-071 退场锁来自教案激活标志而非指引自身退 OFF")
 	await _shoot("flight_hud_stall.png")
 
 	# 改出：推杆低头 + 满油门补能，等告警消失后下机。
@@ -235,6 +257,16 @@ func _run() -> void:
 		await get_tree().physics_frame
 		elapsed += get_physics_process_delta_time()
 	_check(not bool(_craft.snapshot()["stall_warning"]), "推杆后失速告警解除")
+
+	# D-071：教案收尾（「改出成功！」保持 2.5 s）后激活标志释放，飞行指引
+	# 应自动归位——证明退场没弄丢状态、恢复不需要额外接线。
+	var d71_ms := Time.get_ticks_msec()
+	while _hud._instrument_hud._stall_coach_active and Time.get_ticks_msec() - d71_ms < 10000:
+		await get_tree().physics_frame
+	for i in range(4):
+		await get_tree().process_frame
+	_check(fd0.visible,
+		"D-071 教案结束后飞行指引自动归位（mode=%d）" % fd0.current_mode())
 
 	# 下机：仪表盘应当重新隐藏。
 	_player.exit_aircraft()

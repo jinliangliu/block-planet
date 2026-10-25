@@ -480,6 +480,8 @@ s=1（1280×720）实测几何：
 
 目标复用既有的 `set_navigation`（HSI / CDI / 3D 标注 / 十字永远同源），`main.gd` 零改动。
 
+**D-071 让位**：失速教案（StallCoach）占用教练区期间，指引十字**整体退场**（只锁 `visible`，`refresh` 照跑、导航目标不丢），教案收尾瞬间自动归位。理由：失速时「掉头」（压坡度转弯）与教案「按【↓】低头」是**实时行为冲突**（坡度加速失速），进近段「抬头」更与「低头」字面相反——儿童一次只听一个声音，D-069 让位范式（横幅撤、卡片行删、起飞教练让位）自此补全到第四个通道。HSI/CDI/小地图/3D 标注不退场（无文字指令，玩家始终知道目标在哪）。
+
 ### 7.6 座舱视角的其他 HUD
 
 | 元素 | 位置 / 行为 |
@@ -800,7 +802,7 @@ bash tmp/run_regression.sh          # 日常：无头逻辑探针（快）
 bash tmp/run_regression.sh full     # 验收：无头 + 窗口截图（须目检截图）
 ```
 
-当前 **44 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`）；`full` 验收档共 **56 探针**（含窗口截图），最近一次全量 **2177 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-069 第二轮收尾后）。
+当前 **44 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`）；`full` 验收档共 **56 探针**（含窗口截图），最近一次全量 **2186 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-071 失速让位后）。
 D-070（PC 操控定稿：鼠标 = 驾驶员视角，飞机只由键盘操纵）后：`flight_probe` 149 → **146**（拆鼠标杆 −4、新增「无隐性杆源」闸 +1）、`flight_view_probe` 47 → **55**（新增 ⑩ 段 8 条：视野跟随 / 杆量零写入 / 眼位刚性 / 偏航限幅 ±2.4 rad / 状态与视野均不自动回正 / recenter 归位），full 档总数相应变为 **56 探针 / 2179 PASS**（以 D-070 回归实测为准）。
 D-061 新增 `landing_quality_probe`（45 断言：A 评分边界 19 + B 任务改造 13 + C 呼号边沿 7 + D 端到端落地 6）。
 D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状态机 / L3 符号 / 微颤 / 净空 / 相机吸附）、`cockpit_align_probe`（16 断言：材质绑定四闸 / 2D dash 未变形 / 四角投影 ±12 px / 可见性反转）、`cockpit3d_shot`（窗口 10 图 + 白屏像素闸）。
@@ -819,7 +821,7 @@ D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状�
 | `cockpit3d_shot` | 窗口 10 图 + 白屏像素闸（四角最亮通道 < 0.62）+ 蓝图机零几何 |
 | `flight_director_probe` | **51** 条：导引律、模式判据、不出屏、标签动作词 |
 | `flight_director_shot` | 三态截图取证（对准 / 偏航+偏高 / 起飞） |
-| `flight_hud_shot` | 真实飞行链路 HUD（41 条，含**失速教案主句字号 17/13** 两条） |
+| `flight_hud_shot` | 真实飞行链路 HUD（45 条，含**失速教案主句字号 17/13** 两条与 **D-071 飞行指引让位**四条：基线可见 / 教案激活退场 / 退场锁来源 / 收尾自动归位） |
 | `flight_view_probe`（**55** 条，D-070 新增 ⑩ 段：座舱内鼠标 = 驾驶员视角，经 `player._unhandled_input` 派发真实鼠标位移）、`flight_stream_probe`、`flight_reset_probe`、`crash_recover_probe`、`flight_settings_probe` | 视角 / 流式 / 重置（D-039 Y 键 + D-056 坠机自动归位，40 条）/ 设置 |
 | `coach_cockpit_shot`（22 条，含起飞教练字号维持 15/12）、`takeoff_coach_shot`、`flight_panel_shot`、`flight_shot` | 教练与面板取证 |
 | `stall_coach_shot` | **22 处断言站点**（D-069 二轮；happy path 执行 17 条 + 5 条解体守卫，守卫只在失败路径上触发）：失速教案六图取证——① 黄闪 / ① 红闪 / ② 油门条 / ③ 速度条 / 改出成功 / U-9 Toast；含 **Toast 相对位几何闸**（整块在 dash 顶沿上方且未出屏）、F-13 pending→confirm 窗口断言与 **③ 证据-断言耦合闸**（保存时教练区仍停在③）。转瞬态截图用 `Engine.time_scale = 0.15` 慢放，避开「进程帧墙钟长度随负载浮动」导致的证据图与断言脱钩 |

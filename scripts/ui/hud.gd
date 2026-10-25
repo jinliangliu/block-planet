@@ -1201,6 +1201,10 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 	var craft: Aircraft = _player.aircraft() if _player != null else null
 	if craft == null or craft.is_wrecked():
 		_flight_panel.visible = false
+		# D-071：无机体/残骸时失速教案必然不活跃，推送 false 让指引退场锁释放
+		# （下机后 tick 不再跑，但残留 true 会让下次登机首帧指引被误锁一帧）。
+		if _instrument_hud != null:
+			_instrument_hud.set_stall_coach_active(false)
 		return
 	_flight_panel.visible = true
 	# 座舱视角：卡片挪到左上、只留教练区（D-052；U-8 起失速行删除，
@@ -1254,6 +1258,12 @@ func _refresh_flight_panel(delta: float = 0.0) -> void:
 	var takeoff_step: Dictionary = {}
 	if _stall_coach != null:
 		stall_step = _stall_coach.step_for(reading, delta)
+	# D-071：失速教案激活状态推给仪表 HUD（本函数在 _process 里先于
+	# _instrument_hud.tick 执行，同帧生效）——教案占用教练区时飞行指引十字
+	# 整体退场：其文字指令（「掉头」「抬头」）与教案实时冲突，见
+	# flight_instrument_hud.gd 的 _stall_coach_active 注释。
+	if _instrument_hud != null:
+		_instrument_hud.set_stall_coach_active(not stall_step.is_empty())
 	if _takeoff_coach != null and _coach_main != null:
 		takeoff_step = _takeoff_coach.step_for(reading, delta)
 	var step: Dictionary = stall_step if not stall_step.is_empty() else takeoff_step

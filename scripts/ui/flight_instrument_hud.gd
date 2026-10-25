@@ -41,6 +41,12 @@ var _minimap: _Minimap
 var _cockpit: CockpitInstruments
 ## 飞行指引十字（D-054）：仅第一人称可见的航径指令标记（准星该往哪挪）。
 var _fd: FlightDirector
+## 失速教案激活中（D-071）：由 hud.gd 每帧推送。失速改出是安全关键指令，
+## 指引的文字指令（「掉头」「抬头」）与教案实时冲突——「掉头」教孩子在失速
+## 中坡，进近段的「抬头」更可能与「低头」字面相反。故教案激活时指引**整体
+## 退场**（同帧生效，改出成功即刻恢复），refresh 仍继续跑（切换零重建成本，
+## 且 _mode 状态不丢）。UI/UX 评估结论：儿童一次只听一个声音。
+var _stall_coach_active := false
 # 追尾四角
 var _c_tl: Label
 var _c_tr: Label
@@ -129,6 +135,11 @@ func clear_navigation() -> void:
 		_fd.clear_guide()
 
 
+## 失速教案激活状态（D-071）：hud.gd 每帧推送。见 _stall_coach_active 注释。
+func set_stall_coach_active(active: bool) -> void:
+	_stall_coach_active = active
+
+
 ## 每帧驱动：读快照 → 加工 → 蜂鸣 → 按视角分发 → 刷视图 → 刷 3D 视图。
 func tick(delta: float) -> void:
 	if _craft == null or not is_instance_valid(_craft):
@@ -158,10 +169,16 @@ func tick(delta: float) -> void:
 		_cockpit.refresh(_instruments)
 	# 飞行指引十字（D-054）：与座舱同视角。必须先 refresh 再判可见——mode
 	# 由 refresh 依空速/离地高度/距离算出，无目标或停机时它是 OFF。
+	# D-071：失速教案激活时整体退场（只锁 visible，refresh 照跑）——文字指令
+	# 与教案实时冲突，且「掉头」教失速中坡度有真实风险；恢复由 hud 推送
+	# false 自动完成。HSI/CDI/小地图/3D 标注不退场（无文字指令、无冲突），
+	# 玩家仍知道目标在哪，改出成功后指引即刻归位。
 	if _fd != null:
 		if _cockpit.visible and _craft != null:
 			_fd.refresh(_craft.global_position, _instruments)
-		_fd.visible = _cockpit.visible and _fd.current_mode() != FlightDirector.Mode.OFF
+		_fd.visible = (_cockpit.visible
+			and not _stall_coach_active
+			and _fd.current_mode() != FlightDirector.Mode.OFF)
 	if _panel.visible:
 		_refresh_panel()
 	_refresh_minimap(mode)
