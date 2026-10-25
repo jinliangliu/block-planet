@@ -82,14 +82,19 @@ func _ready() -> void:
 		var builder := AirportBuilder.new()
 		airport_spawn = builder.build(_world, center)
 		craft_park = builder.parking_spot()
-		mission_anchor = Vector3(center)
+		# D-072：锚点高度取跑道面（base_y+1）。历史上锚点 y=0——比跑道面低
+		# 29 m，于是 FD 的 3° 下滑道、3D 目标双环、地面箭头列全部锚在地下：
+		# 进近引导世界侧标注实际不可见，且 APPROACH 模式对着地下点持续算
+		# 「低头」偏差（坠机直接嫌疑，见 D-072 根因②）。
+		mission_anchor = Vector3(center.x, float(builder.base_y + 1), center.z)
 	elif RegionAtlas.has_landing_field(region):
 		var site := _find_field_site()
 		field_site = site
 		var builder := AirportBuilder.new()
 		airport_spawn = builder.build_field(_world, site)
 		craft_park = builder.parking_spot()
-		mission_anchor = Vector3(site)
+		# 同 D-072：简易降落场锚点同样取道面高度（build_field 也走 _probe_base_y）。
+		mission_anchor = Vector3(site.x, float(builder.base_y + 1), site.z)
 	# 村庄先于出生点生成：亚洲出生点锚定在村庄整平区内，扫描时读到的
 	# 必须是整平后的 GRASS+空气（set_block_deferred 的数据写入是同步的）。
 	_build_village()
@@ -141,7 +146,8 @@ func _ready() -> void:
 	# 飞行任务航路 / 降落区锚定机场或降落场（两者皆无才锚定出生点）：
 	# 形成「跑道起飞 → 单向绕场 → 落回跑道面」闭环。
 	if mission_anchor == Vector3.ZERO:
-		mission_anchor = Vector3(spawn_pos.x, 0.0, spawn_pos.z)
+		# D-072：无机场/降落场的区域，锚点落到出生点地表（spawn_pos.y 即地表）。
+		mission_anchor = Vector3(spawn_pos.x, spawn_pos.y, spawn_pos.z)
 	_mission_anchor = mission_anchor
 	_hud.set_mission_anchor(mission_anchor)
 	# 探索模式飞行地图：开局即在跑道上摆一架可见飞机（停于出生点以北约 19 格、
@@ -247,6 +253,13 @@ func _sync_mission_navigation() -> void:
 			if _route != null:
 				_route.clear()
 			_hud.set_tactical_route([], -1)
+			# D-072：任务结束/放弃时把导航目标复位回机场锚点——否则 FD/HSI/
+			# 3D 标注仍指着最后一个航点，玩家失去「回场」参照（锚点本身已是
+			# 跑道面高度，下滑道与目标环都正确）。
+			var anchor_back := _world.to_render(_mission_anchor)
+			_hud.set_flight_navigation(anchor_back, "机场/任务")
+			if _flight_markers != null:
+				_flight_markers.set_target(anchor_back, "机场/任务")
 		return
 	if _route == null:
 		_route = RoutePlan.new()

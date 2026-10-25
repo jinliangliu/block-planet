@@ -100,7 +100,8 @@ func _run() -> void:
 
 	# 4) 飞行任务航路 / 降落区锚定机场（runway ↔ mission 联动）。
 	#    机场中心随跑道加宽东移到 (114,96)（避开亚洲村庄 A），任务锚点同步。
-	var mm := MissionData.missions_for_airport(Vector3(114.0, 0.0, 96.0))
+	#    D-072：锚点 y = 跑道面（base_y+1，探针里用默认 30）——航点不再埋地下。
+	var mm := MissionData.missions_for_airport(Vector3(114.0, 30.0, 96.0))
 	_check(mm.size() == 3, "missions_for_airport 返回三任务")
 	var landing: MissionData = mm[2]
 	_check(landing.type == MissionData.Type.LANDING, "第三个任务为降落")
@@ -116,6 +117,15 @@ func _run() -> void:
 	# 4b) 降落任务要求停在跑道面（zone_block = COBBLESTONE）。
 	_check(landing.zone_block() == BlockTypes.Block.COBBLESTONE,
 		"降落任务要求停在跑道面（zone_block=COBBLESTONE）")
+
+	# D-072（根因②修复守护）：绕场航点同高且位于巡航层（跑道面 30 + 80 =
+	# 110 MSL）。历史上航点 y=0——FD 进近段按 3° 下滑道修正到地下点、3D
+	# 目标环埋在地下，进近引导不可见且持续指令「低头」。
+	var alt_same := true
+	for wp: Vector3 in circuit.waypoints:
+		if absf(wp.y - 110.0) > 0.01:
+			alt_same = false
+	_check(alt_same, "绕场航点同高且位于巡航层 y=110（跑道面 30 + CIRCUIT_ALT 80）")
 
 	# 4c) 绕点航路为单向进场矩形：末航点落在跑道中线上（最后一程直线进场），
 	#     首航点越过跑道北端（+28），第三航点在南端外侧。

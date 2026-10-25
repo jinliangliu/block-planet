@@ -15,6 +15,10 @@ const DEFAULT_MIN_SPEED := 40.0         # 起飞：最低安全空速 (km/h)
 const DEFAULT_RADIUS := 30.0            # 绕点：判定半径 (m)
 const DEFAULT_ZONE_RADIUS := 50.0       # 降落：降落区半径 (m)
 const DEFAULT_TOUCHDOWN_VS := 3.0       # 降落：允许最大触地垂直速度 (m/s)
+## D-072：绕场巡航层高度（m，相对跑道面）。机场口袋外 200~500 m 即有
+## 120~150 m 高差的山体，30 m 平飞习惯必撞；80 m 巡航层配 FD 10° 爬升
+## 与（后续 P2）近场限高后，孩子在高处飞才有余量。
+const CIRCUIT_ALT := 80.0
 const DEFAULT_ROLL_SPEED := 25.0        # 降落：允许最大停稳滑跑速度 (km/h)
 const DEFAULT_REWARD := 5               # 成功奖励绿宝石
 
@@ -90,8 +94,12 @@ static func default_missions() -> Array[MissionData]:
 ## 降落区落在锚点、绕点航路为绕锚点的矩形，使「起飞 → 绕场 → 落回」闭环贴合实际机场位置。
 ## 只取 center 的 xz（y 忽略）。传 Vector3.ZERO 时退化为绕原点的旧预设形状。
 static func missions_for_airport(center: Vector3) -> Array[MissionData]:
+	# center 契约（D-072）：x/z = 机场中心，**y = 跑道面高度**（main.gd 传
+	# builder.base_y + 1）。历史版本 y=0，航点全埋在地下 29 m——FD 进近段按
+	# 3° 下滑道修正到地下点、3D 目标环埋在地下，见 D-072 根因②。
 	var cx := center.x
 	var cz := center.z
+	var cy := center.y + CIRCUIT_ALT   # 绕场巡航层（MSL）
 
 	var takeoff := MissionData.new()
 	takeoff.id = "m_takeoff"
@@ -105,11 +113,14 @@ static func missions_for_airport(center: Vector3) -> Array[MissionData]:
 	circuit.type = Type.CIRCUIT
 	# 跑道朝向 +Z 的单向进场矩形（起飞越过北端 → 侧风 → 南端外侧风 →
 	# 回到中线）：末航点落在跑道中线上，最后一程即直线进场，对准跑道。
+	# D-072：航点高度 = 跑道面 + CIRCUIT_ALT（80 m 巡航层）。MissionManager
+	# 只按 xz 判定捕获（mission_manager.gd _step_circuit），高度不改变捕获；
+	# 它修好的是 FD 下滑道参照与 3D 目标环的可见性（此前 y=0 埋在地下）。
 	circuit.waypoints = [
-		Vector3(cx, 0.0, cz + 90.0),
-		Vector3(cx + 110.0, 0.0, cz + 90.0),
-		Vector3(cx + 110.0, 0.0, cz - 90.0),
-		Vector3(cx, 0.0, cz - 90.0),
+		Vector3(cx, cy, cz + 90.0),
+		Vector3(cx + 110.0, cy, cz + 90.0),
+		Vector3(cx + 110.0, cy, cz - 90.0),
+		Vector3(cx, cy, cz - 90.0),
 	]
 	circuit.params = {"radius": DEFAULT_RADIUS}
 

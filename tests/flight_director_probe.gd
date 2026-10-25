@@ -57,13 +57,22 @@ func _check_mode() -> void:
 		"① 起飞瞬间（d≈0、爬升中）→ TAKEOFF，不按距离误判进近")
 	_check(FlightDirector.mode_for(true, 40.0, 3.0, 120.0, 90.0) == M.TAKEOFF,
 		"① 爬升离场（AGL 40m、d 120m）→ TAKEOFF")
+	# D-072：CLIMB_CEIL 60→100、TAKEOFF_DIST 200→250 的边界守护——爬升段
+	# 覆盖到绕场巡航层（80 m AGL）与转弯半径，孩子不会在 60 m 被切进
+	# APPROACH 提前往下带；超过新边界仍让位给 CRUISE。
+	_check(FlightDirector.mode_for(true, 80.0, 3.0, 120.0, 90.0) == M.TAKEOFF,
+		"① 爬升过旧上限（AGL 80m、d 120m）→ 仍 TAKEOFF（CLIMB_CEIL 100）")
+	_check(FlightDirector.mode_for(true, 40.0, 3.0, 220.0, 90.0) == M.TAKEOFF,
+		"① 爬升过旧距离（AGL 40m、d 220m）→ 仍 TAKEOFF（TAKEOFF_DIST 250）")
 	_check(FlightDirector.mode_for(true, 40.0, -2.0, 300.0, 90.0) == M.APPROACH,
 		"① 下降接近（d 300m）→ APPROACH")
 	_check(FlightDirector.mode_for(true, 40.0, -2.0, 800.0, 90.0) == M.CRUISE,
 		"① 远距离（d 800m）→ CRUISE")
-	# 爬升但已远离机场（d>200）不该再锁起飞段，否则飞出去还一直提示 8° 爬升。
+	# 爬升但已远离机场（d>250）不该再锁起飞段，否则飞出去还一直提示 10° 爬升。
 	_check(FlightDirector.mode_for(true, 30.0, 3.0, 500.0, 90.0) == M.CRUISE,
 		"① 远离机场爬升（d 500m）→ CRUISE（不再锁起飞爬升角）")
+	_check(FlightDirector.mode_for(true, 120.0, 3.0, 120.0, 90.0) == M.APPROACH,
+		"① 爬升越过新上限（AGL 120m）→ APPROACH（不再锁起飞爬升角）")
 
 
 ## ② 航向偏差 wrap（正 = 目标在右）。
