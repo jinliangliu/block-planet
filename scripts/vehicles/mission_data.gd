@@ -10,7 +10,7 @@ extends Resource
 
 enum Type { TAKEOFF, CIRCUIT, LANDING }
 
-const DEFAULT_TARGET_ALT := 30.0        # 起飞：目标离地高度 (m)
+const DEFAULT_TARGET_ALT := 40.0        # 起飞：目标离地高度 (m)（D-073：30→40 用户定稿，配 P2a 谷地与 FD 爬升剖面，给悬崖顶航点留余量）
 const DEFAULT_MIN_SPEED := 40.0         # 起飞：最低安全空速 (km/h)
 const DEFAULT_RADIUS := 30.0            # 绕点：判定半径 (m)
 const DEFAULT_ZONE_RADIUS := 50.0       # 降落：降落区半径 (m)
@@ -116,11 +116,14 @@ static func missions_for_airport(center: Vector3) -> Array[MissionData]:
 	# D-072：航点高度 = 跑道面 + CIRCUIT_ALT（80 m 巡航层）。MissionManager
 	# 只按 xz 判定捕获（mission_manager.gd _step_circuit），高度不改变捕获；
 	# 它修好的是 FD 下滑道参照与 3D 目标环的可见性（此前 y=0 埋在地下）。
+	# D-073：半径 90/110 → 120（用户定稿「绕场半径扩到 120 m」）。120 m 仍在
+	# P2a 谷地（VALLEY_R 300）内——四边都是平野；配 P2b 地形前视预警，出谷
+	# 边缘前有「前方有山」提示。
 	circuit.waypoints = [
-		Vector3(cx, cy, cz + 90.0),
-		Vector3(cx + 110.0, cy, cz + 90.0),
-		Vector3(cx + 110.0, cy, cz - 90.0),
-		Vector3(cx, cy, cz - 90.0),
+		Vector3(cx, cy, cz + 120.0),
+		Vector3(cx + 120.0, cy, cz + 120.0),
+		Vector3(cx + 120.0, cy, cz - 120.0),
+		Vector3(cx, cy, cz - 120.0),
 	]
 	circuit.params = {"radius": DEFAULT_RADIUS}
 

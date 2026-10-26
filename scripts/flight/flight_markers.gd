@@ -13,6 +13,11 @@ const FADE_DISTANCE := 50.0
 const RING_COLOR := Color(1.0, 0.82, 0.20)
 const ARROW_COLOR := Color(0.40, 0.85, 0.45)
 const GLIDE_COLOR := Color(0.35, 0.80, 0.95)
+## POI 直飞走廊（D-073 P3）：沿规划航线每隔约 40 m 一个青色垂直环，玩家
+## 从中间穿过即可跟随；封顶 48 环，半径取净空的一半。
+const CORRIDOR_COLOR := Color(0.25, 0.85, 0.85)
+const CORRIDOR_STEP_M := 40.0
+const CORRIDOR_MAX_RINGS := 48
 
 var _craft: Node3D = null
 var _target_pos := Vector3.ZERO
@@ -21,6 +26,7 @@ var _target_group: Node3D = null
 var _target_mat: StandardMaterial3D = null
 var _target_label: Label3D = null
 var _runway_group: Node3D = null
+var _corridor_group: Node3D = null
 
 
 func setup(craft: Node3D, world_root: Node3D) -> void:
@@ -110,6 +116,65 @@ func clear_runway_guide() -> void:
 	if _runway_group != null:
 		_runway_group.queue_free()
 		_runway_group = null
+
+
+## POI 直飞走廊（D-073 P3）：沿航线（渲染坐标）每隔约 40 m 放一个青色垂直环，
+## 环的洞轴对准航线方向，玩家从中间穿过即跟随。航线点 < 2 时直接清空不画。
+func set_corridor(points: Array, clearance_m: float) -> void:
+	clear_corridor()
+	if points.size() < 2:
+		return
+	_corridor_group = Node3D.new()
+	_corridor_group.name = "PoiCorridor"
+	add_child(_corridor_group)
+	var radius := maxf(clearance_m * 0.5, 5.0)
+	var placed := 0
+	for i in range(points.size() - 1):
+		if placed >= CORRIDOR_MAX_RINGS:
+			break
+		var a: Vector3 = points[i]
+		var b: Vector3 = points[i + 1]
+		var seg_len := a.distance_to(b)
+		if seg_len < 0.01:
+			continue
+		var dir := Vector3(b.x - a.x, 0.0, b.z - a.z)
+		if dir.length_squared() < 1e-5:
+			continue
+		dir = dir.normalized()
+		var n := maxi(int(ceil(seg_len / CORRIDOR_STEP_M)), 1)
+		for k in range(n):
+			if placed >= CORRIDOR_MAX_RINGS:
+				break
+			var f := float(k) / float(n)
+			_make_ring(a.lerp(b, f), dir, radius)
+			placed += 1
+
+
+func clear_corridor() -> void:
+	if _corridor_group != null:
+		_corridor_group.queue_free()
+		_corridor_group = null
+
+
+## 单个青色垂直环：TorusMesh 默认洞轴沿 Z，仅绕 Y 转 atan2(dir.x, dir.z) 即把
+## 洞轴对齐到水平航线方向，形成「可穿过的竖直环」。
+func _make_ring(pos: Vector3, dir: Vector3, radius: float) -> void:
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = radius - 0.6
+	tm.outer_radius = radius
+	ring.mesh = tm
+	ring.rotation.y = atan2(dir.x, dir.z)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = CORRIDOR_COLOR
+	mat.emission_enabled = true
+	mat.emission = CORRIDOR_COLOR
+	mat.emission_energy_multiplier = 0.6
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color.a = 0.5
+	ring.material_override = mat
+	_corridor_group.add_child(ring)
+	ring.global_position = pos
 
 
 ## 每帧刷新（由 FlightInstrumentHUD.tick 经 register_view 调用）：距目标近时淡出。

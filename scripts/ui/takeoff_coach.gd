@@ -37,7 +37,7 @@ const COL_KEY := Color(1.0, 0.88, 0.35)
 ## 低于 CLmax，故必须明显快过失速速度才抬得起来。跟着 stall_speed 走而不是
 ## 写死 50 km/h——襟翼档位/载重变化时写死值会失准（早抬轮直接失速）。
 const VR_FACTOR := 1.2
-## 判定「起飞成功」的离地高度（m）：低于 mission 的 30 m 目标，早点给正反馈。
+## 判定「起飞成功」的离地高度（m）：低于 mission 的 40 m 目标，早点给正反馈。
 const TAKEOFF_ALT := 15.0
 ## 「起飞成功」停留时长（s），之后返回空字典让 HUD 收起教练区。
 const SUCCESS_HOLD := 3.5

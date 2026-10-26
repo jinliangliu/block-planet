@@ -37,6 +37,13 @@ var _route: RoutePlan = null
 ## 航线同步去重键：避免逐帧重复注入仪表、重复 queue_redraw 战术地图。
 ## 值变化才真正注入一次（绕点任务里绝大多数帧都应当命中这个短路）。
 var _nav_sync_key := ""
+## POI 直飞注册表（D-073 P3）：机场/降落场/村庄/港口的真实落点，由建造器在
+## 场景就绪时登记；数据来自世界真实坐标，不取经纬度地标（geo_projection 已否决）。
+var _poi_registry := PoiRegistry.new()
+## POI 直飞航线（自由飞行模式，不接任务绕场判定链）：main 持有，注入导航/标记/地图。
+var _poi_route: RoutePlan = null
+var _poi_nav_key := ""
+var _poi_active := false
 ## 飞行重置归位点（D-039）：_flight_spawn = 本次进图的初始出生点（跑道南段），
 ## _craft_park = 初始停机位（出生点以北、机头朝北）。坠机/卡住时按 Y 把玩家
 ## 与飞机送回这两点。无机场/降落场的区域 _craft_park 为零，飞机就地摆正。
@@ -87,6 +94,8 @@ func _ready() -> void:
 		# 进近引导世界侧标注实际不可见，且 APPROACH 模式对着地下点持续算
 		# 「低头」偏差（坠机直接嫌疑，见 D-072 根因②）。
 		mission_anchor = Vector3(center.x, float(builder.base_y + 1), center.z)
+		# D-073 P3：机场 POI（世界坐标，随浮动原点不变）。
+		_poi_registry.register("airport", "机场", PoiRegistry.Kind.AIRPORT, mission_anchor)
 	elif RegionAtlas.has_landing_field(region):
 		var site := _find_field_site()
 		field_site = site
@@ -95,9 +104,19 @@ func _ready() -> void:
 		craft_park = builder.parking_spot()
 		# 同 D-072：简易降落场锚点同样取道面高度（build_field 也走 _probe_base_y）。
 		mission_anchor = Vector3(site.x, float(builder.base_y + 1), site.z)
+		# D-073 P3：降落场 POI（以机场同义锚点登记）。
+		_poi_registry.register("field", "降落场", PoiRegistry.Kind.FIELD, mission_anchor)
 	# 村庄先于出生点生成：亚洲出生点锚定在村庄整平区内，扫描时读到的
 	# 必须是整平后的 GRASS+空气（set_block_deferred 的数据写入是同步的）。
 	_build_village()
+	# D-073 P3：村庄 POI（村庄广场世界落点；y 取地表 +1，与建造器真实坐标一致）。
+	for i in range(3):
+		var offs: Vector3i = [Vector3i.ZERO, Vector3i(128, 0, 16), Vector3i(16, 0, 128)][i]
+		var plaza: Vector3i = VillageBuilder.REGION_MIN + offs + VillageBuilder.PLAZA_ORIGIN
+		var w := _world.to_world(Vector3(plaza.x, 0, plaza.z))
+		var gy := float(_world.get_surface_height(int(floorf(w.x)), int(floorf(w.z)))) + 1.0
+		_poi_registry.register("village_%d" % i, "村庄", PoiRegistry.Kind.VILLAGE,
+			Vector3(float(plaza.x), gy, float(plaza.z)))
 	# 航海玩法（D-042）：四大洋在降落场所在的海岛边缘建港，默认提供一艘船。
 	# 注意时序：机场/降落场与村庄都已落数据，岸点搜索读到的是成岛后的地形。
 	if _is_ocean_region(region):
@@ -150,6 +169,9 @@ func _ready() -> void:
 		mission_anchor = Vector3(spawn_pos.x, spawn_pos.y, spawn_pos.z)
 	_mission_anchor = mission_anchor
 	_hud.set_mission_anchor(mission_anchor)
+	# D-073 P3：把世界真实设施登记为 POI，供「POI 直飞」消费；并接入直飞入口。
+	_hud.set_poi_list(_poi_registry.all())
+	_hud.set_poi_flight_handler(start_poi_flight)
 	# 探索模式飞行地图：开局即在跑道上摆一架可见飞机（停于出生点以北约 19 格、
 	# 机头朝 +Z 北端，沿跑道进近方向的反向即起飞方向），玩家走到跟前按 F 即可
 	# 登机，不必先打开背包、选中飞机右键放机——出生点已在跑道旁，落地即可起飞。
@@ -231,7 +253,15 @@ func _physics_process(delta: float) -> void:
 		"block_under": block_under,
 	}
 	_hud.feed_mission(delta, telemetry)
-	_sync_mission_navigation()
+	# 导航同步：POI 直飞优先于任务导航，但二者互斥——任务一旦进行，POI 航线
+	# 自动让位（clear 后落入 else 走任务导航），避免两套导航目标打架。
+	if _poi_active:
+		if _hud.is_mission_running():
+			_clear_poi_route(true)
+		else:
+			_sync_poi_navigation()
+	else:
+		_sync_mission_navigation()
 
 
 ## 航线 → 导航同步（D-066）：把「MissionManager 判定的当前航点」同步进 HSI/CDI、
@@ -281,6 +311,107 @@ func _sync_mission_navigation() -> void:
 	if _flight_markers != null:
 		_flight_markers.set_target(render_target, label)
 	_hud.set_tactical_route(pts, idx)
+
+
+## POI 直飞（D-073 P3）：用 RouteGenerator 按地形规划一条到目标 POI 的航线，交给
+## RoutePlan 自由飞行接管，并画出世界环廊 + 战术地图航线 + HSI 导航。
+##
+## 与任务绕场互斥：任务进行中不允许开始（start 时也拦截）；若任务在 POI 航行中
+## 被启动，_physics_process 的导航分支会令 POI 自动让位（见下方调用点）。
+##
+## 设计取舍：RouteGenerator 只接「POI 直飞」（自由航线），不接任务绕场判定链——
+## 谷内平坦、绕点判定真相在 MissionManager，这里再按 40 m 自己推进会造出双份
+## 真相。故 POI 航线走 RoutePlan.advance（按机体位置自由推进），任务链路走
+## set_current_index 对齐。
+func start_poi_flight(poi_id: String) -> void:
+	if not _player.is_riding():
+		Events.notice.emit("登机后才能直飞 POI")
+		return
+	if _hud.is_mission_running():
+		Events.notice.emit("任务进行中，先放弃任务再直飞 POI")
+		return
+	var poi := _poi_registry.by_id(poi_id)
+	if poi.is_empty():
+		return
+	var craft := _player.aircraft()
+	if craft == null or not is_instance_valid(craft):
+		return
+	# 关闭任务面板（它冻结玩家输入）；直飞中需要继续操纵飞机。
+	_hud.close_mission_panel()
+	var from := craft.global_position
+	var to: Vector3 = poi["pos"]
+	var pts := RouteGenerator.plan_between(_world, from, to, 30.0, 24)
+	if pts.size() <= 1:
+		Events.notice.emit("无法规划到该 POI 的航线")
+		return
+	# 丢弃首点（起飞机动点），避免 RoutePlan 首帧空推进；末点标记为 DEST。
+	var route_pts: Array = []
+	for i in range(pts.size()):
+		var p: Vector3 = pts[i]
+		var kind := RoutePlan.Kind.ENROUTE
+		var name := "航点 %d" % (i + 1)
+		if i == pts.size() - 1:
+			kind = RoutePlan.Kind.DEST
+			name = String(poi.get("title", "POI"))
+		route_pts.append({"pos": p, "name": name, "kind": int(kind)})
+	if _poi_route == null:
+		_poi_route = RoutePlan.new()
+	_poi_route.set_route(route_pts)
+	_poi_active = true
+	_poi_nav_key = ""
+	# 世界环廊用渲染坐标（飞行标注挂 main 下随 origin 平移）；战术地图用世界坐标。
+	var render_pts: Array[Vector3] = []
+	for p in pts:
+		render_pts.append(_world.to_render(p))
+	if _flight_markers != null:
+		_flight_markers.set_corridor(render_pts, 30.0)
+	_hud.set_tactical_route(pts, 0)
+	_sync_poi_navigation()
+
+
+## POI 直飞导航同步（D-073 P3）：自由飞行模式，按机体真实位置推进 RoutePlan，并把
+## 当前目标同步进 HSI/CDI、3D 标注与战术地图。到达终点（DEST 在捕获圈内）即自动收尾。
+func _sync_poi_navigation() -> void:
+	if not _poi_active or _poi_route == null:
+		return
+	var craft := _player.aircraft()
+	if craft == null or not is_instance_valid(craft):
+		return
+	var here := _world.to_world(craft.global_position)
+	_poi_route.advance(here)
+	if _poi_route.is_complete():
+		_clear_poi_route(true)
+		return
+	var idx := _poi_route.current_index()
+	var target := _poi_route.current_target()
+	if target == Vector3.ZERO:
+		return
+	var render_target := _world.to_render(target)
+	var key := "%d/%d/%s" % [idx, _poi_route.total(), str(target.round())]
+	if key == _poi_nav_key:
+		return
+	_poi_nav_key = key
+	var label := "POI %d/%d" % [idx + 1, _poi_route.total()]
+	_hud.set_flight_navigation(render_target, label)
+	if _flight_markers != null:
+		_flight_markers.set_target(render_target, label)
+
+
+## 清除 POI 直飞：环廊/标注/战术地图一并撤掉；reset_nav 时导航复位回机场锚点。
+func _clear_poi_route(reset_nav: bool) -> void:
+	_poi_active = false
+	_poi_nav_key = ""
+	if _poi_route != null:
+		_poi_route.clear()
+	if _flight_markers != null:
+		_flight_markers.clear_corridor()
+		_flight_markers.clear_target()
+	_hud.set_tactical_route([], -1)
+	if reset_nav and _player.is_riding():
+		var anchor_render := _world.to_render(_mission_anchor)
+		_hud.set_flight_navigation(anchor_render, "机场/任务")
+		if _flight_markers != null:
+			_flight_markers.set_target(anchor_render, "机场/任务")
 
 
 ## 登机 / 下机 → 飞行相机激活、轨迹录制起止、座舱 3D 面板与世界标注增删（D-033/D-034）。
@@ -340,6 +471,9 @@ func _on_flight_ride_changed(riding: bool) -> void:
 				_flight_markers.set_runway_guide(anchor_render, fwd)
 	else:
 		_flight_camera.set_active(false)
+		# D-073 P3：下机即清除 POI 直飞（环廊/导航/战术地图）；标记随后一并释放。
+		if _poi_active:
+			_clear_poi_route(false)
 		_recorder.stop()
 		# 释放座舱面板、3D 内装与世界标注，并从其屏幕 HUD 注销。
 		# 内装不需要 unregister_view——它不做读数刷新（register_view 只收有
@@ -396,6 +530,9 @@ func _on_origin_shifted(delta: Vector3) -> void:
 		_hud.set_flight_navigation(anchor_render, "机场/任务")
 		if _flight_markers != null and is_instance_valid(_flight_markers):
 			_flight_markers.set_target(anchor_render, "机场/任务")
+		# D-073 P3：origin 搬迁后 POI 导航渲染坐标失效，强制下一帧重注入。
+		if _poi_active:
+			_poi_nav_key = ""
 
 
 ## 飞行重置（D-039）：坠机 / 卡住的一键救援——玩家与飞机送回本地图初始
@@ -559,6 +696,8 @@ func _build_harbor(field_site: Vector3i, craft_park: Vector3) -> void:
 	var player_boat := Boat.spawn(self, harbor["dock_end"], facing, player_boat_id)
 	player_boat.harbor_pos = harbor["dock_end"]
 	player_boat.setup_world(_world, _day_night)
+	# D-073 P3：港口 POI（栈桥向海端水面泊位，世界坐标）。
+	_poi_registry.register("harbor", "港口", PoiRegistry.Kind.HARBOR, harbor["dock_end"])
 	# 港湾泊船：两艘异型船面朝港内（垂直栈桥、船尾朝海）。
 	var side_facing := facing + PI * 0.5
 	var moorings: Array = harbor["moorings"]

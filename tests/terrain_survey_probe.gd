@@ -11,7 +11,7 @@ extends Node
 const CX := 114          # 机场中心格（与 main._airport_center(ASIA) 有交叉断言）
 const CZ := 96
 const VALLEY_R := 260    # 谷地盘巡察半径（格）：< world.VALLEY_R(300) 的纯谷地
-const RING_IN := 950     # 环带内半径：> world.VALLEY_RAMP(900)，已是全量地形
+const RING_IN := 950     # 环带内半径：> world.VALLEY_RAMP(600, D-073)，已是全量地形
 const RING_OUT := 1500
 const RING_DIRS := 64
 const RING_STEP := 10

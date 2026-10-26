@@ -18,6 +18,8 @@ extends Control
 
 signal closed
 signal mission_reward(emeralds: int, success: bool, result: Dictionary)
+## POI 直飞请求（D-073 P3）：玩家在面板点「直飞」兴趣点时发出，HUD 转交 main。
+signal poi_flight_requested(poi_id: String)
 
 const PANEL_BG := Color(0.95, 0.92, 0.84)
 const PANEL_BORDER := Color(0.62, 0.47, 0.27)
@@ -32,6 +34,8 @@ var _missions: Array[MissionData] = []
 var _content: VBoxContainer
 var _status_label: Label
 var _result_label: Label
+## 世界 POI 列表（D-073 P3）：main 经 HUD 注入；非空时在面板列出可直飞的兴趣点。
+var _pois: Array = []
 
 
 func _ready() -> void:
@@ -149,6 +153,12 @@ func set_mission_anchor(center: Vector3) -> void:
 	refresh()
 
 
+## 注入世界 POI 列表（D-073 P3）：main 经 HUD 转发；非空时面板列出可直飞的兴趣点。
+func set_poi_list(pois: Array) -> void:
+	_pois = pois
+	refresh()
+
+
 ## 每物理帧喂遥测；仅在 RUNNING 时透传给 MissionManager，并刷新计时。
 func feed(dt: float, telemetry: Dictionary) -> void:
 	if _mm.status != MissionManager.Status.RUNNING:
@@ -168,6 +178,8 @@ func refresh() -> void:
 	else:
 		for i in _missions.size():
 			_content.add_child(_make_mission_card(i))
+		if not _pois.is_empty():
+			_build_poi_section()
 	_refresh_status()
 
 
@@ -236,6 +248,52 @@ func _make_mission_card(index: int) -> Control:
 	var idx := index
 	start_btn.pressed.connect(func(): start_mission(idx))
 	vbox.add_child(start_btn)
+	return box
+
+
+## POI 直飞区（D-073 P3）：任务未运行时，在任务卡下方列出可直飞的世界兴趣点。
+func _build_poi_section() -> void:
+	var header := Label.new()
+	header.text = "直飞兴趣点（POI）"
+	header.add_theme_font_size_override("font_size", 18)
+	header.add_theme_color_override("font_color", TITLE_COLOR)
+	_content.add_child(header)
+	for poi in _pois:
+		_content.add_child(_make_poi_card(poi))
+
+
+## 单个 POI 卡：类型中文名 + 标题 + 「直飞」按钮，按下发出 poi_flight_requested。
+func _make_poi_card(poi: Dictionary) -> Control:
+	var box := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(CARD_BG, 0.55)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(10)
+	box.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	box.add_child(vbox)
+
+	var kind_name := "兴趣点"
+	if poi.has("kind"):
+		kind_name = PoiRegistry.KIND_NAMES.get(int(poi["kind"]), "兴趣点")
+	var name_label := Label.new()
+	name_label.text = "%s · %s" % [kind_name, String(poi.get("title", ""))]
+	name_label.add_theme_font_size_override("font_size", 18)
+	name_label.add_theme_color_override("font_color", TITLE_COLOR)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(name_label)
+
+	var fly_btn := Button.new()
+	fly_btn.text = "直飞"
+	fly_btn.focus_mode = Control.FOCUS_NONE
+	fly_btn.custom_minimum_size = Vector2(120, 34)
+	fly_btn.add_theme_font_size_override("font_size", 16)
+	fly_btn.add_theme_color_override("font_color", TITLE_COLOR)
+	var pid := String(poi.get("id", ""))
+	fly_btn.pressed.connect(func(): poi_flight_requested.emit(pid))
+	vbox.add_child(fly_btn)
 	return box
 
 

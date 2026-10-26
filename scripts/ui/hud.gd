@@ -2998,6 +2998,23 @@ func open_mission_panel() -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
+## POI 列表转发到任务面板（POI 直飞 UI 由任务面板承载，D-073 P3）。
+func set_poi_list(pois: Array) -> void:
+	if _mission_panel != null:
+		_mission_panel.set_poi_list(pois)
+
+
+## 把任务面板的「直飞 POI」请求转交 main 的回调（main 在场景就绪时注入，D-073 P3）。
+func set_poi_flight_handler(cb: Callable) -> void:
+	if _mission_panel != null:
+		_mission_panel.poi_flight_requested.connect(cb)
+
+
+## 当前是否有飞行任务在运行（main 的 POI 直飞导航同步据此让位，D-073 P3）。
+func is_mission_running() -> bool:
+	return _mission_panel != null and _mission_panel.is_running()
+
+
 func close_mission_panel() -> void:
 	if _mission_panel == null:
 		return

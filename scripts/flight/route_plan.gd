@@ -87,6 +87,15 @@ func total() -> int:
 	return _points.size()
 
 
+## 全部航点（元素为拷贝，外部改写不污染状态机）。导航层注入战术地图 /
+## 世界环廊前用它取完整路径，避免直接暴露内部数组。
+func points() -> Array:
+	var out: Array = []
+	for p in _points:
+		out.append(p.duplicate())
+	return out
+
+
 ## 进度按已捕获航点数计算：首点前为 0，最后一点捕获后为 1。
 func progress() -> float:
 	if _points.is_empty():

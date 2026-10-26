@@ -2480,7 +2480,9 @@ full 档窗口段 3 项 FAIL（`flight_hud_shot` 1 + `takeoff_coach_shot` 2）�
 
 **② 地形前视预警（GPWS 式）**：新增纯逻辑类 `scripts/flight/terrain_warning.gd`（`TerrainWarning`）+ `FlightInstruments` 新告警两条（`terrain` 警告 / `terrain_caution` 注意，横幅+蜂鸣通道，优先级置顶 −1）。判据：沿 snapshot 速度矢量（地速航迹）线性外推 10 s、每 50 m 采一点（单点采样会漏掉两档之间的山脊——实测谷地外 44 m 墙距平地仅 8 m）。记两个量：`min_ahead` = 预测航迹最小余量；`rise` = 前方最高地表 − 脚下地表（**同一采样器**，源头一致——AGL 射线打低模、`get_surface_height` 是精确面，跨源比较有 ±15 m 抖动）。警告「前方有山！快拉升」= `min_ahead < 25`（绝对值：窗口内必撞，低空刺激飞也该拦）；注意「前方有山，准备拉升」= `min_ahead < 40` 且 `rise > 20`（rise 条件是「ALT 过低警告刻意要求下沉率」的同款教训——没有它，FD 封顶 100 m 巡航（谷地粗模 45 m → 余量 55 m）会全程黄牌，警报疲劳比没警报更糟）；清除带 +20 m 滞环。门控三原则：未离地（AGL≤2）不报（滑跑正前方永远有「山」）、失速中让位（StallCoach 是唯一权威文字通道，「推杆低头」与「拉升」实时冲突，同 D-071 范式，含 stall_warning）、着陆下降段屏蔽（AGL<60 且下沉——否则每次正常进近全程误报）。采样器由 hud.gd 登机时以 Callable 注入（`player.world_ref()` 惰性解析，换区不漂；探针可喂合成高度场构造式断言）。
 
-### P3 计划（待 dylan 确认后实施）
+### P3 计划（已确认，D-073 落地）
+
+> 四项决策 dylan 已于 2026-10-26 全部拍板：① 起飞任务成功高度 30→40 m；② 绕场半径 90/110→120 m；③ 山体（VALLEY_RAMP）900→600 m；④ P3（RouteGenerator 接线 + POI + 走廊）本轮做。落地细节见 **D-073**。
 
 **明确不做**（会破坏硬约束）：抬世界高度（256 m 预算 + 天花板撞毁前科，山 188 < 256 无需求）、扩 ±64 km（D-064 流式预算硬约束）、空气墙/隐形天花板（D-055 陡壁事故）、自动驾驶（只给指令不代飞）、改气动常量（flight_probe 146 条标定基线）、km 级航线（与内容分布矛盾，D-063）。
 
@@ -2489,4 +2491,38 @@ full 档窗口段 3 项 FAIL（`flight_hud_shot` 1 + `takeoff_coach_shot` 2）�
 
 **P2a 落地顺带修掉一个探针脆弱性（`stall_coach_probe` C10）**：谷地限高改变了探针飞行走廊的地形反馈相位，把「高度保持纯 P 控制器（增益 0.08）激励发散 phugoid」的隐患翻了出来——实测（`tmp/alt_hold`）飞机在 40 m 目标上下 ±20~50 m 振荡、俯仰冲到 +44°/−58°，周期性俯冲到 11~17 m AGL 接 50+ m/s；**新旧地形下都坠机**（旧地形 10.5 s 超速折翼），旧探针能过纯属振荡相位侥幸对齐（C10 入口恰在波峰 y≈125），不是稳定性。修法：高度保持改 PD（KP=0.10/KD=0.20，垂直速度阻尼；15 s 全程不坠机）。附带发现两条几何事实：① AGL 射线打的是低模网格（>64 m 后 coarse LOD、`LOW_SAMPLE=4` 采样，飞行时低模跳过窗比高模半径更保守），steep 区 coarse 插值可高出精确地表 ~17 m——探针 AGL 反馈的 ±15 m 噪声源，也是 C10 实际撞到的「墙」；② z=450 处 44 m 柱（谷地限高权重在 356 m 处仅 0.16）不在走廊采样线上（x=122 平坦），巡察要沿实际航迹采。另：U-10 呼号 Toast 会顶掉教学 Toast（F-13 设计内行为：取消→重演），C7 确认窗口 5→12 s 容纳重演链收敛（一次性事件，实测 5.8 s 收敛）。
 
-**待确认清单**（玩法专家提出）：① 起飞任务成功高度保持 30 m 还是 40 m；② 绕场距中心 90/110 m 是否扩到 120 m（第二局更耐飞，依赖 P2 封顶保障）；③ 山体推到 600 m 外的景观取舍（备选 inner 200/outer 450，但巡航保持高度须 ~110 m）；④ P3 范围（RouteGenerator 接线 + POI + 走廊）本轮还是留到探索模式迭代。
+**待确认清单（已全部确认，2026-10-26）**：① 起飞任务成功高度保持 30 m 还是 40 m → **40 m**；② 绕场距中心 90/110 m 是否扩到 120 m → **120 m**（第二局更耐飞，依赖 P2 封顶保障）；③ 山体推到 600 m 外的景观取舍 → **VALLEY_RAMP 900→600 m**（−Z/SW 700 m 墙在带外完整保留，山顶 188 距顶 248 余量）；④ P3 范围 → **本轮做**（RouteGenerator 接线 + POI + 走廊）。落地细节见 **D-073**。
+
+---
+
+## D-073（2026-10-26）起飞航线四项决策定稿 + P3「POI 直飞」落地
+
+### 决策依据（D-072 P3 计划四项）
+
+1. **起飞任务成功高度 30 → 40 m**（`mission_data.gd DEFAULT_TARGET_ALT`，D-073）：P2a 谷地限高 + P2b 前视预警落地后，谷地 260 m 内零山体、封顶 100 m 巡航有余量，40 m 已是安全余量内；30 m 过贴地，易与 FD 下滑道/地面干扰。
+2. **绕场半径 90/110 → 120 m**（`mission_data.gd` 绕场矩形），第二局更耐飞；仍在「机场 200 m 内」约束（FD 进近判定半区），依赖 P2 封顶保障不撞谷外地。
+3. **VALLEY_RAMP 900 → 600 m**（`world.gd`，D-073；注释记用户定稿 + −Z/SW 700 m 墙在带外保留）：把「可飞空域」从「700 m 起才有山」提前到「600 m 起」，与 P2a 谷地限高（300/600 候选）形成连贯起飞走廊；−Z 700 m 的 167 m 墙在 600 m 外完整保留（带外留 100 m 缓冲，山顶 188 距顶 248 余量）。
+4. **P3 本轮做**（见下）。
+
+### P3「POI 直飞」设计取舍
+
+**目标**：把世界真实设施（机场/降落场/村庄/港口）登记成可直飞兴趣点，用 `RouteGenerator`（地形感知航线生成）规划一条航线，交给 `RoutePlan` 自由飞行接管，并画出世界环廊 + 战术地图航线 + HSI 导航。
+
+**关键取舍**：
+- **POI 数据源 = 建造器真实落点**（`main` 在场景就绪时登记），**不取** `REGION_LANDMARKS` 经纬度地标（`geo_projection.gd:5-16` 已否决 lat_lon→world 映射——玩家活动范围仅原点数百米，真实比例换算落点无区块、世界内零地标建筑）。`poi_registry.gd` 注释明确此事。
+- **RouteGenerator 只接 POI 直飞（自由飞行），不接任务绕场判定链**：谷内平坦、绕点判定真相在 `MissionManager`（用任务自带 `radius()`），若这里再按 40 m 自己推进会造出双份真相（同 `route_plan.gd` 既有设计说明）。故 POI 航线走 `RoutePlan.advance`（按机体位置自由推进），任务链路走 `set_current_index` 对齐。
+- **导航分工（互斥）**：任务进行中拒绝开始 POI（发 `Events.notice` 提示）；POI 航行中任务被启动 → `_physics_process` 导航分支令 POI 自动让位（`_clear_poi_route` 后落回任务导航）；到达终点（`DEST` 捕获）/ 下机 / 任务接管 → 清除环廊+标注+战术地图并复位导航回机场锚点（同 D-072 范式）；浮动原点搬迁 → 清 `_poi_nav_key` 促下一帧重注入。
+- **走廊可视化**（`flight_markers.gd`）：沿规划航线（渲染坐标）每 ~40 m 一个青色垂直环（torus，洞轴对准航向），半径取净空一半，封顶 48 环；战术地图复用 `set_tactical_route`（世界坐标）。航线首点（起飞机动点）丢弃，避免 `RoutePlan` 首帧空推进；末点 `kind=DEST`、`name=POI` 标题。
+- **坐标口径**：POI/任务航点存**世界坐标**（浮动原点不变），导航层注入前统一 `to_render` 一次（与登机分支锚点注入同口径）；环廊标记随 `main` 挂 `WorldAnchor`，origin 搬迁自动平移。
+
+**新增 / 改动**：
+- 新增 `scripts/world/poi_registry.gd`（`PoiRegistry`：注册/查询/最近点/清空，含 `KIND_NAMES` 中文表）。
+- 新增 `tests/poi_route_probe.gd(+.tscn)`（24 断言：注册表/RouteGenerator 集成/points 拷贝/环廊几何/管线），纳入 daily 回归。
+- 改 `main.gd`：POI 成员 + 四处登记（机场/降落场/村庄×3/港口）+ `start_poi_flight` / `_sync_poi_navigation` / `_clear_poi_route` + 导航同步分支 + 下机/origin 清理。
+- 改 `mission_panel.gd`：`poi_flight_requested` 信号 + POI 区（直飞按钮）。
+- 改 `hud.gd`：`set_poi_list` / `set_poi_flight_handler` / `is_mission_running` 透传。
+- 改 `flight_markers.gd`：`set_corridor` / `clear_corridor` 青色环廊。
+- 改 `route_plan.gd`：`points()` 访问器（返回拷贝）。
+
+**验证**：daily **46 探针（45 + poi_route_probe 24 断言）全绿**；`poi_route_probe` 覆盖注册表/RouteGenerator 集成/points 拷贝/环廊几何/POI→航线→导航管线。
+**部署注意**：`poi_registry.gd` 带新 `class_name`，拉取后须跑一次 `godot --headless --editor --quit` 重建全局类缓存（同 D-072 踩坑 #24），否则 headless 解析连带失败。

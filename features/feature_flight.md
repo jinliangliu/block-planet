@@ -590,6 +590,18 @@ D-065 补了 `CockpitPanel` 之后，第一人称**低头能看到 3D 仪表台*
 - 每帧零分配（值类型 + 预分配点阵）
 - 鼠标模式切换、滚轮缩放；触屏跳过鼠标模式
 
+### 8.3b POI 直飞（D-073，P3）
+
+绕场任务之外的第二种导航玩法：把世界真实设施登记成可直飞兴趣点，用 `RouteGenerator`（地形感知航线）规划一条净空航线，交给 `RoutePlan` 自由飞行接管，并画出世界环廊 + 战术地图航线 + HSI 导航。
+
+- **数据来源 = 建造器真实落点**：`main` 在场景就绪时登记（`PoiRegistry`，含 `KIND_NAMES` 中文表：机场 / 降落场 / 村庄 / 港口），**不取** `REGION_LANDMARKS` 经纬度地标（玩家活动范围仅原点数百米，真实比例换算落点无区块、世界内零地标建筑）。
+- **入口 = 任务面板 POI 区**：`MissionPanel` 新增「直飞兴趣点（POI）」区块，每个 POI 一张卡 + 「直飞」按钮；点按 → `hud.poi_flight_requested` → `main.start_poi_flight(poi_id)`。
+- **航线规划**：`start_poi_flight` 取本机世界坐标（`_world.to_world(craft.global_position)`）→ `RouteGenerator.plan_between(_world, from, to, 30.0, 24)`（沿直线采样 `get_surface_height`，**不依赖区块加载**，不取 `get_block`）；丢弃首点（起飞机动点，避免首帧空推进），末点 `kind=DEST`、`name=POI` 标题。
+- **导航接管**：`RoutePlan.advance` 按机体位置自由推进（与任务绕场 `set_current_index` 对齐判定**互斥**——任务判定真相只在 `MissionManager`）；捕获 `DEST` → `_clear_poi_route(true)`（清环廊 + 标注 + 战术地图、复位导航回机场锚点）。
+- **走廊可视化**（`flight_markers.gd`）：沿规划航线（渲染坐标，统一 `to_render` 一次）每 ~40 m 一个青色垂直环（torus，洞轴对准航向 `atan2(dir.x,dir.z)`），半径取净空一半、封顶 48 环；战术地图复用 `set_tactical_route`（世界坐标）。环廊随 `WorldAnchor` 挂 `main`，浮动原点搬迁自动平移。
+- **互斥与让位**：任务进行中拒绝开始 POI（`Events.notice` 提示）；POI 航行中任务被启动 → `_physics_process` 导航分支使 POI 自动让位（落回任务导航）；下机 / origin 搬迁 → 清 `_poi_nav_key` 促下一帧重注入。
+- 探针 `poi_route_probe`（24 断言）覆盖注册表 / RouteGenerator 集成 / `RoutePlan.points()` 拷贝 / 环廊几何 / 管线。
+
 ### 8.4 飞行卡片（`hud.gd`）
 
 顶部居中（追尾）/ 左上（座舱），236 px 宽。内容：标题、空速（含失速速度）、离地高度、油门条（█/░ 字形）、视角、发动机状态、失速行、起飞教练区。
@@ -773,7 +785,7 @@ D-065 补了 `CockpitPanel` 之后，第一人称**低头能看到 3D 仪表台*
 
 ## 12. 任务 / 回放 / 成就
 
-- **任务**（`MissionData`，K 键面板）：三种 —— TAKEOFF（目标离地 30 m、最低安全空速 40 km/h）/ CIRCUIT（绕点，判定半径 30 m；**D-072 起航点锚定巡航层**：跑道面 + 80 m，此前 y=0 埋在地下，FD 下滑道与 3D 目标环全部错位）/ LANDING（降落区半径 50 m、触地垂直速度 ≤3 m/s、停稳滑跑速度 ≤25 km/h）。成功奖励 5 绿宝石，驱动零件解锁。D-061 起 LANDING 的 score 改为 `LandingQuality` 三项连续分（0~100，见 §8.5b），result 增带 `landing_quality` 明细。
+- **任务**（`MissionData`，K 键面板）：三种 —— TAKEOFF（目标离地 40 m、最低安全空速 40 km/h；**D-073 起 30→40 m**，给悬崖顶航点留余量）/ CIRCUIT（绕点，判定半径 30 m、航点绕场半径 **120 m**（**D-073 起 90/110→120**）；**D-072 起航点锚定巡航层**：跑道面 + 80 m，此前 y=0 埋在地下，FD 下滑道与 3D 目标环全部错位）/ LANDING（降落区半径 50 m、触地垂直速度 ≤3 m/s、停稳滑跑速度 ≤25 km/h）。成功奖励 5 绿宝石，驱动零件解锁。D-061 起 LANDING 的 score 改为 `LandingQuality` 三项连续分（0~100，见 §8.5b），result 增带 `landing_quality` 明细。
 - **回放**（`FlightReplay`，P 键）：机体重演而非纯相机秀（物理冻结，把真实机体按录制位姿摆放）。分镜 SHOT：ORBIT / COCKPIT / CHASE / TOPDOWN / WING，单镜头 3 s、末镜头最短 1.5 s、过渡 0.6 s；叠加幽灵轨迹条带（青蓝渐变，半宽 0.28 m）。
 - **成就数据源**：起飞边沿 `aircraft_took_off`、离地高度里程碑每 20 m、空中里程每 100 m（对应"展翅高飞 / 冲上云霄 / 空中漫游"）。
 
@@ -805,7 +817,7 @@ bash tmp/run_regression.sh          # 日常：无头逻辑探针（快）
 bash tmp/run_regression.sh full     # 验收：无头 + 窗口截图（须目检截图）
 ```
 
-当前 **45 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`、D-072 P2b 新增 `terrain_warning_probe`）；`full` 验收档共 **56 探针**（含窗口截图），最近一次全量 **2186 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-071 失速让位后）。
+当前 **46 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`、D-072 P2b 新增 `terrain_warning_probe`、2026-10-26 D-073 新增 `poi_route_probe` 含 24 断言）；`full` 验收档 = 46 无头 + 12 窗口截图探针，最近一次全量 **2186 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-071 失速让位后；D-073 起 daily 46 探针全绿，full 档待重验）。
 D-070（PC 操控定稿：鼠标 = 驾驶员视角，飞机只由键盘操纵）后：`flight_probe` 149 → **146**（拆鼠标杆 −4、新增「无隐性杆源」闸 +1）、`flight_view_probe` 47 → **55**（新增 ⑩ 段 8 条：视野跟随 / 杆量零写入 / 眼位刚性 / 偏航限幅 ±2.4 rad / 状态与视野均不自动回正 / recenter 归位），full 档总数相应变为 **56 探针 / 2179 PASS**（以 D-070 回归实测为准）。
 D-061 新增 `landing_quality_probe`（45 断言：A 评分边界 19 + B 任务改造 13 + C 呼号边沿 7 + D 端到端落地 6）。
 D-065 新增 `cockpit_interior_probe`（28 断言：装配预算 / 可见性状态机 / L3 符号 / 微颤 / 净空 / 相机吸附）、`cockpit_align_probe`（16 断言：材质绑定四闸 / 2D dash 未变形 / 四角投影 ±12 px / 可见性反转）、`cockpit3d_shot`（窗口 10 图 + 白屏像素闸）。
@@ -832,6 +844,7 @@ D-072 新增 `terrain_warning_probe`（43 断言：A 段 `TerrainWarning` 纯逻
 | `airport_probe`、`field_probe` | 机场与降落场 |
 | `terrain_block_probe`、`terrain_survey_probe` | D-055：新方块属性/纹理/掉落（22 条）；分层地形的数字验收（**24 条**，D-072 P2a 重写为环带采样 + 谷地安全区专闸 + 渐变带「限高不加剧陡壁」对比，含 ③b 全域无空气墙——最大单步落差 ≤ `MAX_SLOPE+SLOPE_SLACK`，地形改陡了立刻 FAIL） |
 | `terrain_warning_probe` | **43 条**（D-072 P2b）：地形前视预警纯逻辑 + 仪表集成 + 真实采样器接线端到端 |
+| `poi_route_probe` | **24 条**（D-073）：`PoiRegistry` 注册表 / `RouteGenerator` 集成 / `RoutePlan.points()` 拷贝 / 环廊几何 / POI→航线→导航管线 |
 
 ⚠️ 铁律：**探针严禁并行**（`user://` 竞态，已污染过两次结论）。`airport` / `field` / `rebuild_drain` 退出期偶发 `rc=139` 是已知良性（断言全 PASS 后发生在 Vulkan 清理段）。
 
