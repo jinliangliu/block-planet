@@ -60,6 +60,11 @@ func _run() -> void:
 	# 飞行设置钉死「标准/半开」：探针逐帧行为不再依赖开发者磁盘设置档
 	# （硬核档无辅助稳定，逐帧行为不同——违反探针可复现原则）。set_current 只改内存。
 	FlightSettings.set_current(FlightSettings.for_difficulty(FlightSettings.Difficulty.NORMAL))
+	# D-074 Gap B：被动高度保持随标准档默认开启，但它会在「松俯仰杆」时改俯仰，
+	# 扰动本探针 D 段手动高度保持的平衡态、连带抬升 E 段满油门爬升起点
+	# （实测 64 m → 113 m，越界失败）。本探针只量「裸气动模型」D-031 数字，
+	# 该辅助由 flight_assist_probe 单独验证，故此处关闭以免污染基线测量。
+	FlightSettings.current().passive_altitude_hold = false
 	# 领机一次性标记：同进程首次领取为真、再领为假（探索赠机不刷屏）。
 	var prev_mode: GameState.Mode = GameState.mode
 	GameState.mode = GameState.Mode.EXPLORE

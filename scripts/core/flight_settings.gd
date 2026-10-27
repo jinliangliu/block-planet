@@ -68,6 +68,9 @@ var beeper_enabled: bool
 ## 气象风场开关（D-067）：默认开。地面风 + 风梯度 + 低空风切变随机剧本；
 ## 关掉后 State.wind 恒零，气动行为与无气象版逐字节一致（探针/取证同用）。
 var wind_enabled: bool
+## 被动高度保持（D-074 Gap B）：默认开。玩家不主动推杆时，辅助层把俯仰柔和配平
+## 到「保持当前高度」（抵消垂直速度漂移）；主动输入即时接管。休闲/标准档开、硬核档关。
+var passive_altitude_hold: bool
 
 static var _current: FlightSettings = null
 
@@ -88,6 +91,7 @@ func reset_to_defaults() -> void:
 	auto_level = true
 	beeper_enabled = true
 	wind_enabled = true
+	passive_altitude_hold = true
 
 
 ## 全局生效实例：首次访问时从 SAVE_PATH 读档（无则默认）。
@@ -119,10 +123,12 @@ func gains() -> Dictionary:
 	return ASSIST_GAINS[Assist.OFF]
 
 
-## 切换难度会同时把辅助等级重置为该难度的默认（先设难度、再按需单独覆盖辅助）。
+## 切换难度会同时把辅助等级重置为该难度的默认（先设难度、再按需单独覆盖辅助）；
+## 被动高度保持随难度开关：休闲/标准开、硬核关（D-074 Gap B）。
 func set_difficulty(d: int) -> void:
 	difficulty = clampi(d, Difficulty.CASUAL, Difficulty.EXPERT)
 	assist_level = DIFFICULTY_ASSIST[difficulty]
+	passive_altitude_hold = (d != Difficulty.EXPERT)
 
 
 func set_assist_level(a: int) -> void:
@@ -156,6 +162,7 @@ func to_dict() -> Dictionary:
 		"auto_level": auto_level,
 		"beeper_enabled": beeper_enabled,
 		"wind_enabled": wind_enabled,
+		"passive_altitude_hold": passive_altitude_hold,
 	}
 
 
@@ -172,6 +179,7 @@ static func from_dict(d: Dictionary) -> FlightSettings:
 	s.auto_level = bool(d.get("auto_level", true))
 	s.beeper_enabled = bool(d.get("beeper_enabled", true))
 	s.wind_enabled = bool(d.get("wind_enabled", true))
+	s.passive_altitude_hold = bool(d.get("passive_altitude_hold", true))
 	return s
 
 

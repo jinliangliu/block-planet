@@ -39,7 +39,11 @@ const COL_KEY := Color(1.0, 0.88, 0.35)
 const VR_FACTOR := 1.2
 ## 判定「起飞成功」的离地高度（m）：低于 mission 的 40 m 目标，早点给正反馈。
 const TAKEOFF_ALT := 15.0
-## 「起飞成功」停留时长（s），之后返回空字典让 HUD 收起教练区。
+## 安全高度（m）：对齐 mission DEFAULT_TARGET_ALT（D-073 起 30→40）。离地超过
+## TAKEOFF_ALT 即播「起飞成功」给正反馈，但在爬到本高度前持续提醒「继续爬升」，
+## 绝不暗示降落（D-074 Gap A：原「慢慢落」会诱导新手在低空提前下降→重演装山）。
+const SAFE_AGL := 40.0
+## 「起飞成功」停留时长（s）：之后转为持续爬升提醒（未到安全高度时）或收起教练区。
 const SUCCESS_HOLD := 3.5
 ## 油门算「推满」的阈值。
 const FULL_THROTTLE := 0.85
@@ -127,16 +131,24 @@ func _step_of(snap: Dictionary) -> Dictionary:
 				"sub": "别一口气拉到底，会失速", "color": COL_GO,
 				"bar": _bar(alt_agl / TAKEOFF_ALT), "flash": false,
 			}
-		if not _finished:
-			_finished = true
-			_success_at = _elapsed
-		if _success_at >= 0.0 and _elapsed - _success_at <= SUCCESS_HOLD:
-			return {
-				"text": "🎉 起飞成功！",
-				"sub": "【H】看仪表 ·【M】地图 · 慢慢落", "color": COL_GO,
-				"bar": "", "flash": false,
-			}
-		return {}
+	if not _finished:
+		_finished = true
+		_success_at = _elapsed
+	if _success_at >= 0.0 and _elapsed - _success_at <= SUCCESS_HOLD:
+		return {
+			"text": "🎉 起飞成功！",
+			"sub": "【H】看仪表 ·【M】地图 · 继续爬升", "color": COL_GO,
+			"bar": "", "flash": false,
+		}
+	# 早庆祝过后仍未到安全高度：持续提醒继续爬升，绝不返回空字典（不收起教练区），
+	# 避免新手在谷地渐变带威胁区内松手提前下降（D-074 Gap A）。
+	if alt_agl < SAFE_AGL:
+		return {
+			"text": "继续爬升到安全高度（%.0f m）" % SAFE_AGL,
+			"sub": "保持上升，别急着下降", "color": COL_GO,
+			"bar": "", "flash": false,
+		}
+	return {}
 
 	# 地面滑跑：按顺序卡住——前一步没做完就不提示下一步。
 	var throttle := float(snap.get("throttle", 0.0))

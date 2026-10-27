@@ -182,12 +182,20 @@ func tick(delta: float) -> void:
 	# 与教案实时冲突，且「掉头」教失速中坡度有真实风险；恢复由 hud 推送
 	# false 自动完成。HSI/CDI/小地图/3D 标注不退场（无文字指令、无冲突），
 	# 玩家仍知道目标在哪，改出成功后指引即刻归位。
+	# D-074：把 FD 退场从「仅失速」扩到「拉升类 WARNING」——地形前视
+	# 「前方有山！快拉升」/过低「快拉升！」同样教「抬头/拉升」，与指引十字
+	# 的「低头/保持下滑道」字面相反（同 D-071「儿童一次只听一个声音」）。
+	# 只门 WARNING 级（==2）；caution（==1）不抢指令、不锁可见，FD 照常显示。
 	if _fd != null:
 		if _cockpit.visible and _craft != null:
 			_fd.refresh(_craft.global_position, _instruments)
+		# D-074：失速之外，地形/过低「拉升」类 WARNING 活跃时也退场（仅 ==2，
+		# caution 保留）。恢复由 terrain_warn/alt_warn 回退 <2 自动完成。
 		_fd.visible = (_cockpit.visible
 			and not _stall_coach_active
-			and _fd.current_mode() != FlightDirector.Mode.OFF)
+			and _fd.current_mode() != FlightDirector.Mode.OFF
+			and _instruments.terrain_warn < 2
+			and _instruments.alt_warn < 2)
 	if _panel.visible:
 		_refresh_panel()
 	_refresh_minimap(mode)

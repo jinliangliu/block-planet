@@ -583,7 +583,9 @@ func _physics_process(delta: float) -> void:
 		else Vector3.ZERO
 	# 辅助稳定增益（FlightSettings 单例）；无设置/关闭档即纯气动模型。
 	var assist := FlightSettings.current().gains()
-	AircraftFlight.integrate(_state, controls, delta, on_ground, assist, _level_timer)
+	# D-074 Gap B：被动高度保持随设置开关透传（休闲/标准开、硬核关）。
+	AircraftFlight.integrate(_state, controls, delta, on_ground, assist, _level_timer, \
+		FlightSettings.current().passive_altitude_hold)
 	_sync_livery()
 	if on_ground:
 		_apply_ground_forces(delta)

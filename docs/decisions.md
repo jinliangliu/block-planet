@@ -2526,3 +2526,67 @@ full 档窗口段 3 项 FAIL（`flight_hud_shot` 1 + `takeoff_coach_shot` 2）�
 
 **验证**：daily **46 探针（45 + poi_route_probe 24 断言）全绿**；`poi_route_probe` 覆盖注册表/RouteGenerator 集成/points 拷贝/环廊几何/POI→航线→导航管线。
 **部署注意**：`poi_registry.gd` 带新 `class_name`，拉取后须跑一次 `godot --headless --editor --quit` 重建全局类缓存（同 D-072 踩坑 #24），否则 headless 解析连带失败。
+
+## D-074（2026-10-26）起飞教练不诱导降落 + 被动高度保持 + FD 拉升告警让位（Gap A + B + UI）
+
+### 决策依据（D-070-followup 缺口调查收口）
+
+1. **D-071 已让 FD 在失速教案激活时整体退场**，根因是「儿童一次只听一个声音」——FD 的「掉头/低头」文字指令与教案实时冲突。同理由必须延伸到**地形前视「前方有山！快拉升」/过低「快拉升！」**：进近段 FD 教「保持 3° 下滑道」（字面「低头」），巡航/绕场段可能教「掉头/直飞」，与横幅「快拉升」**字面相反**；同一时刻两个声音教孩子做相反动作，比失速更隐蔽（孩子没在改出，正按指引飞）。
+2. **只门 WARNING 级（==2），caution（==1）保留 FD**：地形/过低 caution 是「准备」级（「前方有山，准备拉升」），不抢实时指令，FD 仍显示供孩子对着目标飞。若连 caution 也隐藏，会在贴地爬升/绕山常态飞行中频繁闪 FD，重现 D-072「警报疲劳」教训。
+3. **复用 D-071 同一条可见门**，不改失速逻辑：可见门是唯一真相源，D-071 的 `_stall_coach_active` 项原封不动，新增两项 `and _instruments.terrain_warn < 2 and _instruments.alt_warn < 2`。恢复由 terrain/alt_warn 回退 `<2` 自动完成（同 D-071 由 hud 推送 false 自动恢复范式，零重建成本）。
+
+### 设计取舍
+
+- **门的位置**：`flight_instrument_hud.gd` 的 FD 可见门（原 :188，D-071 落地处）。`refresh` 仍每帧照跑（切换零重建、`_mode` 不丢），只锁 `visible`——与 D-071 完全一致。
+- **不动 HSI/CDI/小地图/3D 标注**：它们无文字指令、无冲突，孩子仍知目标在哪（同 D-071 注释）。本次仅缩窄 `_fd` 这一枚覆盖层的可见条件。
+- **POI 直飞（D-073）/ 任务绕场**在拉升告警期同样退场：符合预期（不再给「低头/掉头」冲突指令），非回归。
+
+### 新增 / 改动
+
+- 改 `scripts/ui/flight_instrument_hud.gd`：FD 可见门追加 `and _instruments.terrain_warn < 2 and _instruments.alt_warn < 2`（仅 ==2 退场），并补 D-074 注释块（说明把 FD 退场从「仅失速」扩到「拉升类 WARNING」）。D-071 失速项未改动。
+- 新增 `tests/fd_yield_probe.gd(+.tscn)`（**28 断言**）：纯逻辑构造（`FakeCraft`/`FakeCamera` 不进场景树、不跑 `_ready`，只读合成快照 + 恒定第一人称），逐帧 `tick` 驱动可见门。含 **7 个 FD.visible 行为断言**覆盖要求的 6 条——地形 WARNING(2)→隐藏 / 地形<2→显示 / 过低 WARNING(2)→隐藏 / 过低<2(=0)→显示 / 地形 caution(1)→显示 / 过低 caution(1)→显示——外加 1 个无告警控制组；每条行为断言附 `terrain_warn`/`alt_warn` 取值 + `FD.mode != OFF` 前提诊断。尾哨兵 `FD_YIELD_PROBE_OK`。纳入 daily 回归。
+
+### 验证
+
+daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照/还原 + `_check`/`_finish` 范式）；不实例化 `main.tscn`，确定性高于真实世界探针。
+
+### 部署注意 / 回归风险
+
+- **座舱 FD 在真实拉升告警中应隐藏**：下机/坠机恢复路径（`_hide_all`、D-056）依赖 `_fd.visible` 状态，本次改动仅收窄可见条件，不改变隐藏/恢复触发；但接入 `terrain_warn`/`alt_warn`（由 `flight_instruments.update` 每帧算）后，须确认 `setup()` 的 `reset_terrain_warning()` 在登机时清零陈旧级别（已有，D-072 P2b 同款），否则上局残留 WARNING 会让新局开局 FD 不显示。
+- **caution 级 FD 仍显示**：确认与座舱顶部中央横幅「前方有山，准备拉升」不重叠遮挡（FD 在屏幕中心，横幅在顶，几何不交）。
+- **POI/任务绕场**：拉升告警期 FD 退场是预期行为；若某关卡因设计需要在拉升告警中仍显示指引，需回看本决策。
+
+### 缺口 A（Severe）：起飞教练在低空诱导降落 → 改「继续爬升」
+
+#### 决策依据
+- 旧 `takeoff_coach.gd` 在离地超过 `TAKEOFF_ALT`（15 m）即播「🎉 起飞成功！」后**立即收起教练区**；若玩家仍在谷地渐变带威胁区内（D-072 P2a/P2b：谷地近场限高 300/900 m、GPWS 前视预警），松手即开始下降 → 重演「起飞装山」。儿童向玩家没有「到安全高度再松杆」的本能，教练的沉默等于鼓励提前下降。
+- 修正：把「起飞成功」的庆祝与「到达安全高度」解耦。离地 >15 m 仍播庆祝（即时正反馈），但**只要 alt_agl < SAFE_AGL（40 m，对齐 mission 默认目标 40 m，D-073 起 30→40）就持续提醒「继续爬升到安全高度（40 m）/ 保持上升，别急着下降」**，绝不返回诱导降落的「慢慢落」措辞；≥40 m 才收起教练区。
+
+#### 设计取舍
+- **不引入新状态机**：复用既有 `_finished`/`_success_at` + `SUCCESS_HOLD(3.5 s)` 计时；只把「成功后收起」改为「成功后若未到安全高度则持续爬升提醒」，多一个 `SAFE_AGL` 常量与一条分支，零新字段。
+- **不碰地面四步阶梯**：地面滑跑/点火/推油门逻辑完全不动，仅空中爬升段措辞变化。
+
+#### 新增 / 改动
+- 改 `scripts/ui/takeoff_coach.gd`：新增 `const SAFE_AGL := 40.0`；成功后分支改为「≥40 m 才返回空字典收起；<40 m 返回『继续爬升到安全高度（40 m）』+ sub『保持上升，别急着下降』」；删除原「慢慢落」诱导措辞，并补 D-074 注释。
+- 新增 `tests/takeoff_coach_probe.gd(+.tscn)`（**6 断言**，尾哨兵 `TAKEOFF_COACH_PROBE_OK`）：纯逻辑 `TakeoffCoach.new()` + 合成 airborne snapshot 驱动 `step_for`，钉死 ① 20 m 持续「继续爬升」且 sub 不含「慢慢落」② ≥40 m 收起（空字典）③ 任何高度不出现诱导降落措辞。
+
+### 缺口 B（Long-tail）：无被动高度保持 → 儿童松杆后高度漂移
+
+#### 决策依据
+- 既有辅助稳定（`FlightSettings` assist 等级）只在**松杆时把坡度配平回水平 + 阻尼偏航**，**刻意不做俯仰自动配平**（flight_settings.gd 注释：会与爬升/失速等正常俯仰机动对抗，搅乱「满拉杆逼失速」改出）。故儿童松俯仰杆后，飞机俯仰角不变、但升力/重力不平衡会让高度缓慢漂移（爬升则越爬越高、下沉则越掉越低），没有「保持当前高度」的托底。
+- 这是长尾边界：多数儿童会一直推杆，但「松杆看风景」场景下高度会静默流失，体感像「飞机自己掉下去」，挫败感强。
+
+#### 设计取舍
+- **不新增 FD HOLD 模式、不碰手动 `auto_level`（双击改平）**：HOLD 模式是新交互面、需 UI；`auto_level` 是显式一键求助。本项做最小的「俯仰托底」——玩家不主动压俯仰杆（`|pitch| < PITCH_DEADZONE=0.15`）时，辅助层把俯仰角速度柔和配平到「抵消当前垂直速度」（目标 = 零垂直速度，非追目标高度，故不抢手动输入、不引入高度捕获逻辑），主动输入即时接管。增益 `ALT_HOLD_GAIN=0.4` 柔和、不硬拉平。
+- **难度联动**：休闲/标准档开、硬核档关（`set_difficulty` 里 `passive_altitude_hold = (d != EXPERT)`），与既有辅助等级一致；设置面板可单独覆盖，落盘 `settings.json`（to_dict/from_dict 已含该键）。
+
+#### 新增 / 改动
+- 改 `scripts/core/flight_settings.gd`：新增字段 `passive_altitude_hold: bool`，`reset_to_defaults` 默认 `true`，`set_difficulty` 按难度开关，`to_dict`/`from_dict` 含该键。
+- 改 `scripts/vehicles/aircraft_flight.gd`：`integrate`/`_update_rates` 新增 `passive_alt_hold: bool = false` 形参；`_update_rates` 内加「松俯仰杆且未失速且离地」时 `target_pitch += -climb_angle * ALT_HOLD_GAIN * authority`（`climb_angle = clamp(vy/v_horiz, -0.5, 0.5)`），新增常量 `PITCH_DEADZONE/ALT_HOLD_GAIN`。
+- 改 `scripts/vehicles/aircraft.gd`：`integrate(...)` 调用透传 `FlightSettings.current().passive_altitude_hold`。
+- 新增 `tests/flight_assist_probe.gd(+.tscn)`（**6 断言**，尾哨兵 `FLIGHT_ASSIST_PROBE_OK`）：纯逻辑驱动 `AircraftFlight.integrate`，钉死 ① 难度联动（标准开/硬核关）② 单步符号（爬升→低头、下沉→抬头）③ 关闭保持对照（无俯仰修正）④ 收敛（1 s 开启保持 |VS| 减半以上）。
+
+### 验证 / 回归
+- daily 回归新增 3 探针：`fd_yield_probe`（28 断言）/ `takeoff_coach_probe`（6）/ `flight_assist_probe`（6）；均为纯逻辑构造，不实例化 `main.tscn`，确定性高于真实世界探针。
+- D-010 铁律：SaveGuard 快照/还原，探针严禁并行；本批无新 `class_name`（`fd_yield_probe`/`takeoff_coach_probe`/`flight_assist_probe` 均 `extends Node` 无 `class_name`），无需重建全局类缓存（但已跑过 `--editor --quit` 归一化 `.uid`）。
+- 全量回归：daily **49 探针（含本批 3 新）全绿、0 FAIL、RESTORED_OK**。

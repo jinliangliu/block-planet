@@ -92,6 +92,11 @@ const CONTROL_AUTHORITY_MIN := 0.12
 const YAW_STABILITY := 1.1
 ## 转弯协调：坡度自然带出偏航角速度，不踩舵也能转出协调转弯。
 const TURN_COORDINATION_RATE := 0.5
+## 被动高度保持（D-074 Gap B）：玩家松俯仰杆（|pitch| 低于此死区）时，辅助层柔和
+## 把俯仰配平到「保持当前高度」——目标俯仰角速度按当前爬升角（VS/水平速度）反向、
+## 每秒约 40% 收敛，手感是轻配平而非硬拉平；主动推杆（超死区）该帧立即失效。
+const PITCH_DEADZONE := 0.15
+const ALT_HOLD_GAIN := 0.4
 ## 俯仰角限制（rad），约 ±83°：不限制就拉成后空翻。
 const PITCH_LIMIT := 1.45
 # ── 地面 ───────────────────────────────────────────────────
@@ -326,11 +331,13 @@ static func acceleration(state: State, controls: Controls) -> Vector3:
 ## 与重构前完全一致——既有 flight_probe 断言守护，不在此分支被改动。
 static func integrate(
 	state: State, controls: Controls, delta: float, on_ground: bool,
-	assist: Dictionary = {}, level_time: float = 0.0) -> void:
+	assist: Dictionary = {}, level_time: float = 0.0,
+	passive_alt_hold: bool = false) -> void:
 	var q_dyn := dynamic_pressure(state)
 	var authority := clampf(
 		q_dyn / CONTROL_Q_REF, CONTROL_AUTHORITY_MIN, 1.0) if not on_ground else 1.0
-	_update_rates(state, controls, delta, authority, on_ground, assist, level_time)
+	_update_rates(state, controls, delta, authority, on_ground, assist, level_time, \
+		passive_alt_hold)
 	_integrate_attitude(state, delta, on_ground)
 	state.throttle = controls.throttle
 
@@ -343,7 +350,8 @@ static func integrate(
 
 static func _update_rates(
 	state: State, controls: Controls, delta: float, authority: float, on_ground: bool,
-	assist: Dictionary = {}, level_time: float = 0.0
+	assist: Dictionary = {}, level_time: float = 0.0,
+	passive_alt_hold: bool = false
 ) -> void:
 	var blend := clampf(RATE_RESPONSE * delta, 0.0, 1.0)
 	var beta := sideslip(state)
@@ -382,6 +390,18 @@ static func _update_rates(
 			var bank := asin(clampf(state.basis.x.y, -1.0, 1.0))
 			target_roll += bank * roll_level * authority
 			target_yaw += -state.yaw_rate * yaw_damp * authority
+
+	# 被动高度保持（D-074 Gap B）：独立于上面的松杆配平——**只**在玩家不主动
+	# 压俯仰杆（|pitch| < 死区）时，把俯仰角速度柔和配平到「保持当前高度」，
+	# 即抵消当前垂直速度漂移（目标 = 零垂直速度，非追目标高度，故不抢手动输入、
+	# 不引入高度捕获逻辑）。与 auto_level（手动双击）完全独立、互不冲突。
+	if passive_alt_hold and not on_ground and not state.stalled \
+			and absf(controls.pitch) < PITCH_DEADZONE:
+		var v_horiz := maxf(sqrt(state.velocity.x * state.velocity.x \
+				+ state.velocity.z * state.velocity.z), 1.0)
+		# 当前爬升角（rad）≈ 垂直速度 / 水平速度；要平飞就把它压回 0。
+		var climb_angle := clampf(state.velocity.y / v_horiz, -0.5, 0.5)
+		target_pitch += -climb_angle * ALT_HOLD_GAIN * authority
 
 	# 自动改平（D-034 双击左键）：显式指令，**优先于杆量**——时限内以增强增益
 	# 把坡度与俯仰一并摆回水平。与上面的松杆配平刻意区分：这里故意含俯仰，
