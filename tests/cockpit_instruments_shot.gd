@@ -277,11 +277,15 @@ func _run() -> void:
 			_dbg_state("bank_wrecked")
 			break
 		var agl := float(_craft.snapshot()["altitude_agl"])
-		_craft.controls.pitch = clampf((cruise_alt - agl) * 0.08, -0.35, 0.5)
+		# 转弯需随坡度补俯仰（升力随 cos(bank) 减小）：只靠 (cruise-alt) 比例项在
+		# 坡度下压不住高度，会一路掉到失败门限。补 +bank·K 让水平转弯保持高度，
+		# 既建得起 22° 坡度、又不触发掉高度兜底。K 取接近 1（小角近似 pitch≈bank）。
+		var bank_rad := asin(clampf(_craft._state.basis.x.y, -1.0, 1.0))
+		_craft.controls.pitch = clampf((cruise_alt - agl) * 0.08 + bank_rad * 0.9, -0.5, 0.5)
 		if absf(_hud.instrument_hud().instruments_ref().roll_deg) > 22.0:
 			banked = true
 			break
-		if agl < 40.0:
+		if agl < 18.0:
 			_dbg_state("bank_low")
 			break
 		if i % 30 == 0:

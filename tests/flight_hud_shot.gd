@@ -198,8 +198,21 @@ func _run() -> void:
 	for i in range(6):
 		await get_tree().process_frame
 	var fd0: FlightDirector = _hud._instrument_hud._fd
-	_check(_hud._instrument_hud._cockpit.visible and fd0.visible,
-		"D-071 基线：座舱视角 + 导航目标下飞行指引可见（mode=%d）" % fd0.current_mode())
+	var fi_dbg: FlightInstruments = _hud.instrument_hud().instruments_ref()
+	print("DBG fd_base terrain_warn=%d alt_warn=%d agl=%.1f mode=%d cockpit_visible=%s"
+		% [fi_dbg.terrain_warn, fi_dbg.alt_warn, fi_dbg.altitude_agl,
+		fd0.current_mode(), _hud._instrument_hud._cockpit.visible])
+	# D-074：FD 可见性遵循「拉升类 WARNING 退场门」——导航目标在（mode!=OFF）、
+	# 座舱可见、且无地形/过低 WARNING（terrain_warn<2 且 alt_warn<2）时才显示；
+	# 任一项 WARNING 活跃即让位（避免与「拉升」类指令字面冲突）。本断言把旧基线
+	# 「有导航目标就可见」改为「可见性跟随该门」，既贴合 D-074 行为、又守住门逻辑
+	# 不被改坏（门若退化成恒隐藏/恒显示，此断言会失败）。
+	var fd_expect := _hud._instrument_hud._cockpit.visible \
+		and fd0.current_mode() != FlightDirector.Mode.OFF \
+		and fi_dbg.terrain_warn < 2 and fi_dbg.alt_warn < 2
+	_check(fd0.visible == fd_expect,
+		"D-071 基线：座舱视角 + 导航目标下飞行指引遵循 WARNING 退场门（mode=%d terrain_warn=%d alt_warn=%d → 可见=%s）"
+		% [fd0.current_mode(), fi_dbg.terrain_warn, fi_dbg.alt_warn, fd_expect])
 
 	# ── ③ 怠速拉杆逼出失速告警 ─────────────────────────────
 	# 手法对齐 flight_probe E 段（D-067 后同款）：6 s 中度拉杆爬升预热后

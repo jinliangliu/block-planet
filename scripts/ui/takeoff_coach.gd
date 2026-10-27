@@ -131,24 +131,27 @@ func _step_of(snap: Dictionary) -> Dictionary:
 				"sub": "别一口气拉到底，会失速", "color": COL_GO,
 				"bar": _bar(alt_agl / TAKEOFF_ALT), "flash": false,
 			}
-	if not _finished:
-		_finished = true
-		_success_at = _elapsed
-	if _success_at >= 0.0 and _elapsed - _success_at <= SUCCESS_HOLD:
-		return {
-			"text": "🎉 起飞成功！",
-			"sub": "【H】看仪表 ·【M】地图 · 继续爬升", "color": COL_GO,
-			"bar": "", "flash": false,
-		}
-	# 早庆祝过后仍未到安全高度：持续提醒继续爬升，绝不返回空字典（不收起教练区），
-	# 避免新手在谷地渐变带威胁区内松手提前下降（D-074 Gap A）。
-	if alt_agl < SAFE_AGL:
-		return {
-			"text": "继续爬升到安全高度（%.0f m）" % SAFE_AGL,
-			"sub": "保持上升，别急着下降", "color": COL_GO,
-			"bar": "", "flash": false,
-		}
-	return {}
+		# 离地超过判定高度才播「起飞成功」正反馈——2/③/④ 步骤只在地面走。
+		# 钉死「在地面就庆祝」的回归：原先 _finished 在地面每帧被重置后又立即
+		# 置位、随即误报起飞成功，且让 ②/③/④ 全成死代码（D-074 Gap A 暴露）。
+		if not _finished:
+			_finished = true
+			_success_at = _elapsed
+		if _success_at >= 0.0 and _elapsed - _success_at <= SUCCESS_HOLD:
+			return {
+				"text": "🎉 起飞成功！",
+				"sub": "【H】看仪表 ·【M】地图 · 继续爬升", "color": COL_GO,
+				"bar": "", "flash": false,
+			}
+		# 早庆祝过后仍未到安全高度：持续提醒继续爬升，绝不返回空字典（不收起教练区），
+		# 避免新手在谷地渐变带威胁区内松手提前下降（D-074 Gap A）。
+		if alt_agl < SAFE_AGL:
+			return {
+				"text": "继续爬升到安全高度（%.0f m）" % SAFE_AGL,
+				"sub": "保持上升，别急着下降", "color": COL_GO,
+				"bar": "", "flash": false,
+			}
+		return {}
 
 	# 地面滑跑：按顺序卡住——前一步没做完就不提示下一步。
 	var throttle := float(snap.get("throttle", 0.0))
