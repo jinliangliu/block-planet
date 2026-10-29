@@ -48,13 +48,23 @@ const WALK_BUDGET_MS := 10.0
 const BOOTSTRAP_CHUNKS_PER_FRAME := 4
 const BOOTSTRAP_BUDGET_MS := 220.0
 # ── 飞行流式加载（D-035）────────────────────────────────────────────────
-# 徒步的 5×5 区块 = 40 m 见方对步行够用；飞行满油门 50 m/s 时每 0.16 s 就要
-# 换一行区块，前方地形会永远慢半拍。故飞行时把预算集中到真正会被看到的
-# 方向：以机头为 +u 轴的偏置矩形——前方 5 块（48 m）、侧向 2 块、后方 1 块，
-# 共 35 块，比各向同性的 9×9（81 块）省一半以上，前方视距反而更远。
-const FLIGHT_FORWARD := 5
+# 徒步是 LOAD_RADIUS=4 的方形 = ±4 区块 = ±64 m（9×9=81 块），对步行够用；
+# 飞行满油门 50 m/s 时每 0.32 s 就要换一行区块（一行 16 m），前方地形会永远
+# 慢半拍。故飞行时把预算集中到真正会被看到的方向：以机头为 +u 轴的偏置
+# 矩形——前方 8 块（8×16=128 m）、侧向 2 块（32 m）、后方 1 块（16 m），
+# 共 56 块，比各向同性的 9×9（81 块）省一半以上，前方视距反而更远。
+# （旧注释的「40 m / 48 m」是 D-063「1 格 = 1 m」落成前的遗留，已按 16 m/块
+#  重算；比例结论不变。FLIGHT_FORWARD 由 D-035 飞行流式前瞻修复（B1）从 5 提到 8。）
+const FLIGHT_FORWARD := 8
 const FLIGHT_SIDE := 2
 const FLIGHT_BACK := 1
+## 碰撞环（区块）：飞行器只与高模 trimesh 碰撞体相撞，故只有「离机体足够近」
+## 的区块才需要碰撞体。B1（D-035 飞行流式前瞻修复）：更远的区块先只生成数据
+## + 网格，推迟 trimesh 碰撞体与碰撞面数组累加（约 D-064 单块 41 ms 中的
+## 6~11 ms），等它飞进 u ≤ 本阈（3 区块 = 48 m）时再补建（见 _update_chunks
+## 的碰撞补全）。安全硬要求：只推迟远处碰撞、绝不移除已有碰撞体，故不产生
+## 隐形墙；无空气墙约束与 low_ring_probe C1（低模 0 碰撞体）都保持成立。
+const FLIGHT_COLLIDE_FORWARD := 3
 ## 卸载滞后（区块）：超出加载范围再外扩这么多圈才卸载。飞行时中心区块随速度
 ## 频繁变化，没有滞后会在边界反复装卸，每次卸载还要触发邻居补面重建。
 const UNLOAD_PAD := 1
@@ -129,6 +139,9 @@ var _edited_coords: Dictionary[Vector2i, bool] = {}
 var _modified_data: Dictionary[Vector2i, PackedByteArray] = {}
 # 卸载区块后需要补面的邻居重建队列，每帧限量处理以平滑卡顿。
 var _pending_rebuilds: Array[Vector2i] = []
+# B1：飞行期推迟了碰撞体的区块，飞进碰撞环（u ≤ FLIGHT_COLLIDE_FORWARD）后
+# 入此队列，由 _update_chunks 每帧优先补建（安全不变量：环内不得缺碰撞体）。
+var _pending_collide: Array[Vector2i] = []
 var _atlas_material: StandardMaterial3D
 var _emissive_material: StandardMaterial3D
 var _noise := FastNoiseLite.new()
@@ -215,7 +228,9 @@ func _update_low_ring(center: Vector2i) -> int:
 	if _flight_stream:
 		# 飞行窗口是沿机头的偏置矩形，低模按它的 AABB 整体让位：宁可让高模
 		# 多承担几块，也不让 4 m 粗网格从精细地形里穿出来（穿出来会看到尖刺）。
-		skip = FLIGHT_FORWARD + FLIGHT_SIDE
+		# B1/M1：skip 取 max(前向, 侧向)，使低模起点紧贴高模前向边缘（正前
+		# 洞口从 ~48 m 压到 ~8 m）；侧向洞口仍保留给高模覆盖。
+		skip = maxi(FLIGHT_FORWARD, FLIGHT_SIDE)
 	return _low_terrain.update_window(center, skip)
 
 
@@ -975,6 +990,9 @@ func _update_chunks() -> void:
 	if _bootstrap:
 		budget_us = int(BOOTSTRAP_BUDGET_MS * 1000.0)
 	var t0 := Time.get_ticks_usec()
+	# B1：碰撞补全优先于新加载（安全硬要求：碰撞环内不得缺碰撞体）。与下方
+	# 加载共享同一 t0/budget_us 预算时钟，紧急档（u≤1）无视预算同步补完。
+	_drain_collisions(center, budget_us, t0)
 	var loaded := 0
 	for key in keys:
 		if loaded >= max_chunks:
@@ -1040,6 +1058,13 @@ func set_flight_stream(enabled: bool) -> void:
 	_flight_stream = enabled
 	if enabled:
 		_update_stream_dir()
+	else:
+		# B1：下机后把飞行期被推迟碰撞的区块一次性入队补回，避免站立/步行时
+		# 身躯落在缺碰撞体的地形上（地面模式本就需要全量碰撞）。
+		for key in _chunks.keys():
+			var ch: Chunk = _chunks.get(key)
+			if ch != null and not ch.collision_built:
+				_enqueue_collision(key)
 
 
 ## 取当前机头的水平方向作为流式窗口的 +u 轴（未骑乘时保持上一次方向，
@@ -1088,6 +1113,48 @@ func _load_priority(coord: Vector2i, center: Vector2i) -> float:
 	return absf(u) + absf(v) - 0.6 * u
 
 
+## B1：区块相对机头方向的前向偏移（u 沿机头 +u 轴，区块）。非飞行时返回 0 —
+## 徒步窗口各方向都需碰撞，不区分前后。
+func _flight_forward_u(coord: Vector2i) -> float:
+	if not _flight_stream or _player == null:
+		return 0.0
+	var c := chunk_at(_player.global_position)
+	var off := coord - c
+	return float(off.x) * _stream_dir.x + float(off.y) * _stream_dir.z
+
+
+## B1：把被推迟碰撞的区块入队，等进入碰撞环时补建。去重。
+func _enqueue_collision(coord: Vector2i) -> void:
+	if not _pending_collide.has(coord):
+		_pending_collide.append(coord)
+
+
+## B1：碰撞补全——优先级高于新加载。帧开始时「已在碰撞环内却缺碰撞体」的区块
+## 必须尽快补完（安全硬要求：碰撞环内不得缺碰撞体）。紧急档（u ≤ 1 区块 =
+## 16 m，机体随时贴到）无视预算同步补完；非紧急档在预算内补，余下留给下一帧。
+## 碰撞只增不删，故不产生隐形墙；用同一个 t0/budget_us 与后续加载共享预算。
+func _drain_collisions(center: Vector2i, budget_us: int, t0: int) -> void:
+	if not _flight_stream:
+		# 徒步模式：把飞行期被推迟的区块一次性补回（下机后的过性性补齐），
+		# 不再受每帧预算约束——本就不该长时间缺失，且只在此切换帧发生一次。
+		for key in _chunks.keys():
+			var ch: Chunk = _chunks.get(key)
+			if ch != null and not ch.collision_built:
+				ch.enable_collision()
+		_pending_collide.clear()
+		return
+	for key in _pending_collide.duplicate():
+		var ch: Chunk = _chunks.get(key)
+		if ch == null or ch.collision_built:
+			_pending_collide.erase(key)
+			continue
+		var urgent := _flight_forward_u(key) <= 1.0
+		if not urgent and Time.get_ticks_usec() - t0 >= budget_us:
+			continue  # 非紧急留给下一帧
+		ch.enable_collision()
+		_pending_collide.erase(key)
+
+
 func _load_chunk(coord: Vector2i, with_rebuild: bool = true) -> void:
 	if _chunks.has(coord):
 		return
@@ -1113,7 +1180,14 @@ func _load_chunk(coord: Vector2i, with_rebuild: bool = true) -> void:
 		chunk.end_bulk()
 	_prepare_columns(coord, chunk)
 	if with_rebuild:
-		chunk.rebuild(_atlas_material, _emissive_material, _neighbor_lookup)
+		# B1：飞行时远离机体的区块（u > FLIGHT_COLLIDE_FORWARD）只生成数据+网格，
+		# 推迟 trimesh 碰撞体，待飞进碰撞环后由 _update_chunks 补建；碰撞只增不删。
+		var want_collision := true
+		if _flight_stream:
+			want_collision = _flight_forward_u(coord) <= FLIGHT_COLLIDE_FORWARD
+		chunk.rebuild(_atlas_material, _emissive_material, _neighbor_lookup, want_collision)
+		if _flight_stream and not chunk.collision_built:
+			_enqueue_collision(coord)
 	_chunks[coord] = chunk
 
 

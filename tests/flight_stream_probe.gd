@@ -62,18 +62,31 @@ func _run() -> void:
 	_settle(world, 200)
 	center = world.world_to_chunk(player.global_position)
 	var front_missing := 0
-	for u in range(0, 6):
-		for v in range(-2, 3):
+	for u in range(0, World.FLIGHT_FORWARD + 1):
+		for v in range(-World.FLIGHT_SIDE, World.FLIGHT_SIDE + 1):
 			if not world._chunks.has(center + _offset(u, v)):
 				front_missing += 1
 	_check(front_missing == 0,
-		"② 飞行窗口前方 5 / 侧向 2 的全部区块已加载（缺 %d 块）" % front_missing)
-	_check(world._chunks.has(center + _offset(-1, 0)),
-		"② 飞行窗口保留机身后方 1 区块")
-	_check(not world._chunks.has(center + _offset(-3, 0)),
-		"② 机身后方 3 区块外不再保留（预算不浪费在看不见的地方）")
-	_check(not world._chunks.has(center + _offset(0, 4)),
-		"② 侧向 4 区块外不再保留")
+		"② 飞行窗口前方 %d / 侧向 %d 的全部区块已加载（缺 %d 块）" % [World.FLIGHT_FORWARD, World.FLIGHT_SIDE, front_missing])
+	_check(world._chunks.has(center + _offset(-World.FLIGHT_BACK, 0)),
+		"② 飞行窗口保留机身后方 %d 区块" % World.FLIGHT_BACK)
+	_check(not world._chunks.has(center + _offset(-World.FLIGHT_BACK - 2, 0)),
+		"② 机身后方 %d 区块外不再保留（预算不浪费在看不见的地方）" % (World.FLIGHT_BACK + 2))
+	_check(not world._chunks.has(center + _offset(0, World.FLIGHT_SIDE + 2)),
+		"② 侧向 %d 区块外不再保留" % (World.FLIGHT_SIDE + 2))
+
+	# ②b 碰撞环不变量（B1 安全硬要求）：u ≤ FLIGHT_COLLIDE_FORWARD 的已加载区块
+	# 必须持有碰撞体（地形全空、无需碰撞者也已置 collision_built=true）。
+	var collide_missing := 0
+	for key in world._chunks.keys():
+		var off: Vector2i = key - center
+		var u := float(off.x) * world._stream_dir.x + float(off.y) * world._stream_dir.z
+		if u <= float(World.FLIGHT_COLLIDE_FORWARD):
+			var ch: Object = world._chunks.get(key)
+			if ch != null and not ch.collision_built:
+				collide_missing += 1
+	_check(collide_missing == 0,
+		"②b 碰撞环（u≤%d）内全部区块持有碰撞体（缺 %d 块）" % [World.FLIGHT_COLLIDE_FORWARD, collide_missing])
 
 	# ── ③ 加载优先级：脚下先落地，同距离档内前方优先 ────────────
 	_teleport(player, Vector3(1600.0, 48.0, 1600.0))
@@ -104,7 +117,7 @@ func _run() -> void:
 			samples += 1
 	var avg := miss_sum / float(samples)
 	_check(avg < 3.0,
-		"④ 50 m/s 巡航：前方 3 区块窗口内平均缺 %.2f 块（峰值 %d）" % [avg, max_miss])
+		"④ 50 m/s 巡航：前方 %d 区块窗口内平均缺 %.2f 块（峰值 %d）" % [World.FLIGHT_FORWARD, avg, max_miss])
 
 	# 对照组：同样的巡航，但用徒步方形窗口（半径 World.LOAD_RADIUS）——这正是
 	# D-035 之前的行为。只作诊断输出，不作断言（数值随机器性能浮动）。
@@ -164,12 +177,13 @@ func _settle(world: World, frames: int) -> void:
 			break
 
 
-## 前方窗口（u ∈ [0,3]、|v| ≤ 1，共 12 块）中尚未加载的区块数。
+## 前方窗口（u ∈ [0, FLIGHT_FORWARD]、|v| ≤ FLIGHT_SIDE）中尚未加载的区块数。
+## 窗口已扩到完整前锋（B1 后 FLIGHT_FORWARD=8）：巡航时前方持续留缺即判失败。
 func _front_gap(world: World) -> int:
 	var center := world.world_to_chunk(world._player.global_position)
 	var miss := 0
-	for u in range(0, 4):
-		for v in range(-1, 2):
+	for u in range(0, World.FLIGHT_FORWARD + 1):
+		for v in range(-World.FLIGHT_SIDE, World.FLIGHT_SIDE + 1):
 			if not world._chunks.has(center + _offset(u, v)):
 				miss += 1
 	return miss

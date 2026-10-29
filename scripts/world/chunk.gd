@@ -62,6 +62,14 @@ var grounds_ext := PackedInt32Array()
 var _mesh_instance: MeshInstance3D
 var _emissive_mesh_instance: MeshInstance3D
 var _collision_body: StaticBody3D
+# B1（D-035 飞行流式前瞻修复）：碰撞体是否已建。true 即「本区块已处理碰撞」
+# （含地形全空、无需碰撞的情形）。只增不删，配合 World 的推迟/补建逻辑保证
+# 「碰撞环内不得缺碰撞体」的安全不变量，且绝不新增隐形墙。
+var collision_built: bool = false
+# 推迟碰撞时缓存的碰撞顶点/索引，供飞进碰撞环后 enable_collision() 直接复用，
+# 避免为补碰撞而整块重扫。补建后立即清空。
+var _collide_v: PackedVector3Array = PackedVector3Array()
+var _collide_i: PackedInt32Array = PackedInt32Array()
 # 越界邻居查询回调，由 World 注入（get_block），用于跨界面的正确剔除。
 var _neighbor_lookup := Callable()
 
@@ -156,7 +164,8 @@ static func _ensure_tables() -> void:
 func rebuild(
 	atlas_material: Material,
 	emissive_material: Material,
-	neighbor_lookup: Callable = Callable()
+	neighbor_lookup: Callable = Callable(),
+	want_collision := true
 ) -> void:
 	_neighbor_lookup = neighbor_lookup
 	_ensure_tables()
@@ -275,7 +284,17 @@ func rebuild(
 
 	_assign_mesh(atlas_v, atlas_n, atlas_uv, atlas_i, atlas_material)
 	_assign_emissive_mesh(ems_v, ems_n, ems_uv, ems_i, ems_c, emissive_material)
-	_assign_collision(collide_v, collide_i)
+	if want_collision:
+		# 建碰撞体并清空缓存（碰撞只增不删）。
+		_assign_collision(collide_v, collide_i)
+		_collide_v = PackedVector3Array()
+		_collide_i = PackedInt32Array()
+		collision_built = true
+	else:
+		# B1：推迟碰撞——缓存碰撞数组，待飞进碰撞环后由 World.enable_collision() 复用，
+		# 避免为补碰撞而整块重扫。
+		_collide_v = collide_v
+		_collide_i = collide_i
 
 
 func get_block_local(pos: Vector3i) -> int:
@@ -516,6 +535,18 @@ func _assign_emissive_mesh(
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	mesh.surface_set_material(0, material)
 	_emissive_mesh_instance.mesh = mesh
+
+
+## B1（D-035 飞行流式前瞻修复）：飞进碰撞环时由 World 补建碰撞体。复用 _rebuild
+## 时缓存的碰撞顶点/索引，创建 trimesh 碰撞体；只增不删，绝不移除已有碰撞，
+## 故不产生隐形墙。已建过则直接返回（碰撞单调性）。
+func enable_collision() -> void:
+	if collision_built:
+		return
+	_assign_collision(_collide_v, _collide_i)
+	_collide_v = PackedVector3Array()
+	_collide_i = PackedInt32Array()
+	collision_built = true
 
 
 func _assign_collision(vertices: PackedVector3Array, indices: PackedInt32Array) -> void:
