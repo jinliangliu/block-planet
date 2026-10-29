@@ -96,6 +96,26 @@ const LANDING_STOP_MPS := 1.5
 ## 避免 pending 挂到下次起飞、把两次落地混成一笔。
 const LANDING_ROLL_TIMEOUT := 15.0
 
+# ── 体感抖动包络（D-075）───────────────────────────────────────
+## 空速衰减区间（m/s）：低于 SHAKE_V_LOW **完全不衰减**（地面滑跑/起飞/着陆保留
+## 满幅，也保住 cockpit3d_shot ⑦「满油门连拍」取证），到 SHAKE_V_HIGH 衰减到
+## 1−SHAKE_SPEED_FALLOFF。VNE=55、巡航约 35~45，故高端取 38：巡航稳进满衰减区，
+## 起飞抬轮（25~30）仍保留大部分。
+const SHAKE_V_LOW := 12.0
+const SHAKE_V_HIGH := 38.0
+const SHAKE_SPEED_FALLOFF := 0.85
+## 失速抖振增益：与 AircraftFlight.STALL_WARN_ALPHA(0.27) 触发的告警同源。
+const SHAKE_BUFFET_GAIN := 0.55
+## 风切变瞬态增益（D-067；WindModel.is_shear_active() 为真期间）。
+const SHAKE_SHEAR_GAIN := 0.45
+## 地面滑跑颠簸增益与「颠满」地速（m/s）：随**地速**上升，停稳即归零。
+const SHAKE_ROLL_GAIN := 0.35
+const SHAKE_ROLL_V_FULL := 25.0
+## 过载抖振：载荷系数从 SHAKE_G_ON 起抖、到 SHAKE_G_FULL 抖满。
+const SHAKE_G_GAIN := 0.30
+const SHAKE_G_ON := 1.2
+const SHAKE_G_FULL := 2.5
+
 @export var use_player_input := true
 
 var controls := AircraftFlight.Controls.new()
@@ -402,6 +422,52 @@ func is_wrecked() -> bool:
 ## 油门归一化值（机模螺旋桨转速用）。
 func throttle() -> float:
 	return controls.throttle
+
+
+## 体感抖动包络（0..1，已钳位）：回答「此刻**该抖多少**」；相机只负责「一单位
+## 包络 = 多少米 / 多少赫兹」（D-075）。两者分开是为了让本函数保持纯函数性质，
+## 无头探针可直接构造 State 断言（tests/cockpit_shake_probe.gd）。
+##
+## 修「座舱一直在抖」的核心：旧版相机只有 `engine_running` 一个布尔门 + 油门一个
+## 标量（`0.25 + 0.75*throttle`），等于「发动机一转就以恒定幅度抖到底」——停放、
+## 滑行、巡航、俯冲四态只有幅度差、没有性质差，眼睛对永不停歇的周期信号最敏感。
+## 这里把幅度改成五路**有物理理由**的分量之和：
+##   ① 发动机/螺旋桨：随油门↑、随空速↓（真机巡航座舱最平稳，抖振集中在低速段）
+##   ② 失速抖振：与 HUD 失速告警同源，手先感觉到、再听见蜂鸣
+##   ③ 风切变瞬态（D-067）：气象是唯一「平飞也该抖」的正当理由
+##   ④ 地面滑跑颠簸：随**地速**↑，停稳即归零
+##   ⑤ 过载：拉升/盘旋 G 越大越抖
+## **上界恒为 1.0** ⇒ 单轴峰值恒 ≤ SHAKE_AMP×1.5 = 0.075 m，与改动前满幅一致，
+## 既有探针容差因此只松不紧。零分配、无副作用，每帧可安全调用。
+## 不含时间平滑——平滑在调用方（AircraftCamera.SHAKE_GAIN_RATE）做。
+func shake_envelope() -> float:
+	if _wrecked:
+		return 0.0
+	var v_air := _state.airspeed
+	# ① 发动机项。**刻意没有怠速地板**：油门收到底就没有功率抖动——停机坪上停着
+	#    和空中收油门滑翔都归零，这正是「一直在抖」投诉里最刺眼的场景。旧版的
+	#    0.25 地板让发动机一转就永不停歇地抖。「发动机在转」的存在感交给座舱杆的
+	#    微颤去表达（CockpitInterior.TREMOR_AMP 仍保留怠速地板），不该由整个座舱
+	#    承担。空速衰减用手写的 smoothstep 而非线性：低速段不衰减，保住最有戏剧
+	#    性的起飞/着陆段，也让「地面满油门」仍是包络的最坏点（取证⑦ 依赖这点）。
+	var k := clampf((v_air - SHAKE_V_LOW) / (SHAKE_V_HIGH - SHAKE_V_LOW), 0.0, 1.0)
+	var atten := 1.0 - SHAKE_SPEED_FALLOFF * (k * k * (3.0 - 2.0 * k))
+	var gain := clampf(controls.throttle, 0.0, 1.0) * atten
+	# ② 失速抖振。_state.stall_warning 已自带「speed>3 且非地面」门
+	#    （AircraftFlight._refresh_readings），此处不重复判——同源即不会漂移。
+	if _state.stall_warning:
+		gain += SHAKE_BUFFET_GAIN
+	# ③ 风切变瞬态（wind_enabled=false 时 WindModel 永不置位，逐位退回无风）。
+	if _wind.is_shear_active():
+		gain += SHAKE_SHEAR_GAIN
+	# ④ 地面滑跑颠簸：随**地速**上升，停稳（地速 0）即归零。
+	if is_on_floor():
+		var gs := Vector2(velocity.x, velocity.z).length()
+		gain += SHAKE_ROLL_GAIN * clampf(gs / SHAKE_ROLL_V_FULL, 0.0, 1.0)
+	# ⑤ 过载抖振：拉升/盘旋的体感反馈；平飞 load_factor≈1.0 < SHAKE_G_ON ⇒ 不触发。
+	gain += SHAKE_G_GAIN * clampf(
+		(_state.load_factor - SHAKE_G_ON) / (SHAKE_G_FULL - SHAKE_G_ON), 0.0, 1.0)
+	return clampf(gain, 0.0, 1.0)
 
 
 ## 座位变换：驾驶时玩家节点被贴到此处，相机随之跟随机体姿态。

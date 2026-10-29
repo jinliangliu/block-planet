@@ -64,8 +64,23 @@ const LOOK_YAW_LIMIT := 2.4
 ## 松手自动回正速率（1/s）：τ ≈ 0.4 s。
 const RECENTER_RATE := 2.5
 # ── 抖动 ─────────────────────────────────────────────────────
-## 抖动幅度（m）与频率基数：发动机运转时按油门/空速缩放的微量平移噪声。
+## 抖动幅度（m）与频率基数：**外部视角**的满幅；座舱内视再乘 COCKPIT_SHAKE_SCALE。
+## 实际缩放量由 Aircraft.shake_envelope()（0..1）给出——旧版只用油门，那句
+## 「按油门/空速缩放」的注释从来没在代码里兑现过（D-075 补回）。
 const SHAKE_AMP := 0.05
+## 座舱内视抖动衰减。依据 D-065：座舱相机**刚性吸附**到眼位，眼与机体是刚性关系
+## ——真人把头靠在头枕上时看到的仪表台是不抖的。而 3D 面板沿视线深度只有 0.702 m
+## （590 px/m，是 13 m 追尾视角的 18 倍），同样的世界位移在座舱里被放大一个数量
+## 级。0.40 = 保留「发动机在转」的存在感，同时把巡航段压到 1 px 量级。
+const COCKPIT_SHAKE_SCALE := 0.40
+## 座舱内视**沿视线（机体系 −Z）分量**的再衰减：旧版 0.075 m / 0.702 m = ±10.7%
+## 的深度涨落会让仪表台「忽大忽小」±57 px——呼吸比平移更廉价，故单独再打五折。
+const COCKPIT_SHAKE_AXIAL := 0.50
+## 包络平滑速率（1/s，τ ≈ 0.33 s）：开关发动机、接地、进出风切变都不许突变——
+## 旧版是布尔门，一帧之内从 0 跳到满幅，那个「啪」本身就很廉价。
+const SHAKE_GAIN_RATE := 3.0
+## 包络低于此值直接跳过 6 个 sin（中低端安卓上省一点算一点）。
+const SHAKE_GAIN_EPS := 0.002
 
 var _craft: Aircraft = null
 var _player: Node3D = null
@@ -84,6 +99,9 @@ var map_height := MAP_HEIGHT_DEFAULT
 var camera_shake_enabled := true
 var _auto_recenter := true
 var _shake_t := 0.0
+## 当前抖动包络（0..1，已按 SHAKE_GAIN_RATE 平滑）：发动机启停、接地、进出风切变
+## 都不做开关式突变。熄火或关设置时**立即**归零（防晕动症开关要一键到底，不淡出）。
+var _shake_gain := 0.0
 ## 复用的射线查询（禁止每帧 new 分配；10 Hz 节流，见 _update_occlusion）。
 var _ray_query := PhysicsRayQueryParameters3D.new()
 var _ray_exclude: Array = []
@@ -455,18 +473,37 @@ func _mode_fov() -> float:
 	return FOV_FLIGHT
 
 
-## 镜头抖动：发动机运转时的微量平移噪声（幅度 < 8 cm，低频），可整项关闭。
-## 在阻尼之后的最终位姿上叠加，不参与下一帧阻尼（不累积）。
+## 镜头抖动：幅度由 Aircraft.shake_envelope() 调制的微量平移噪声，座舱内视再乘
+## COCKPIT_SHAKE_SCALE。在阻尼之后的最终位姿上叠加，不参与下一帧阻尼（座舱模式
+## 每帧硬吸附，本来就不会累积）。
+##
+## 旧版门控只有 `engine_running` + `0.25 + 0.75*throttle`，等于「发动机一转就以
+## 恒定幅度抖到底」——停放、滑行、巡航、俯冲四种状态看不出区别，这就是用户报的
+## 「一直在抖」（D-075）。现在幅度改由飞行状态驱动：收油门 0、巡航约 0.09（座舱
+## ≈1.6 px，不可见）、起飞滑跑/接地颠簸/失速抖振/风切变才明显。满幅上界不变
+## （包络钳在 1.0 ⇒ 单轴峰值恒 ≤0.075 m）。
 func _apply_shake(delta: float) -> void:
 	if not camera_shake_enabled or not is_instance_valid(_craft) or not _craft.engine_running:
+		# 关设置 / 熄火：立即归零，不淡出（防晕动症开关要的就是一键到底）。
+		_shake_gain = 0.0
+		return
+	_shake_gain = _damp(_shake_gain, _craft.shake_envelope(), SHAKE_GAIN_RATE, delta)
+	if _shake_gain < SHAKE_GAIN_EPS:
 		return
 	_shake_t += delta
 	var t := _shake_t
-	var power := 0.25 + 0.75 * _craft.controls.throttle
-	global_position += Vector3(
-		sin(t * 37.1) + 0.5 * sin(t * 71.3),
-		sin(t * 53.7) + 0.5 * sin(t * 83.1),
-		sin(t * 29.3) + 0.5 * sin(t * 61.9)) * (SHAKE_AMP * power)
+	var amp := SHAKE_AMP * _shake_gain
+	var axial := 1.0
+	if is_cockpit_view():
+		amp *= COCKPIT_SHAKE_SCALE
+		axial = COCKPIT_SHAKE_AXIAL
+	# 机体系而不是世界系：发动机装在机体上，抖动方向必须随姿态转——旧版直接加世界
+	# Vector3，盘旋 60° 坡度时所谓「竖直」其实沿着机翼，滚转中还多出一段莫名的
+	# 平移。机体系 −Z 即机头 ≈ 视线方向，故 axial 就是「沿视线分量」的折扣。
+	global_position += _craft.global_transform.basis * Vector3(
+		(sin(t * 37.1) + 0.5 * sin(t * 71.3)) * amp,
+		(sin(t * 53.7) + 0.5 * sin(t * 83.1)) * amp,
+		(sin(t * 29.3) + 0.5 * sin(t * 61.9)) * amp * axial)
 
 
 ## 指数阻尼步长（帧率无关）：1 − e^(−rate·dt)。

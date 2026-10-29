@@ -158,11 +158,14 @@ func _run() -> void:
 	await _wait(8)
 	_cam.set_free_look(false)
 
-	# ⑥ 满油门抖动连拍：仪表台在 0.85 m 处会抖 20~36 px——看底角会不会把 2D 簇
-	# 下沿的亮边漏出来（DASH_RIM 0.09 的取舍就靠这三张判）。
+	# ⑥ 满油门抖动连拍：新包络下「地面满油门静止」仍是 envelope=1.0 的最坏点，但
+	# 座舱内视只取 40%（沿视线分量再打五折），故仪表台横向峰值约 18 px、呼吸 ±2%——
+	# 看底角会不会把 2D 簇下沿的亮边漏出来（DASH_RIM 0.09 的取舍就靠这三张判）。
+	# 连拍前等 90 物理帧（1.5 s）：包络平滑 τ≈0.33 s，30 帧只走到 78% 会让三连拍
+	# 呈「越来越抖」的假象，故拉到 settled 再拍。
 	_craft.set_engine(true)
 	_craft.controls.throttle = 1.0
-	await _wait_physics(30)
+	await _wait_physics(90)
 	for k in range(3):
 		await _snap("cockpit3d_throttle_shake%d.png" % (k + 1))
 		await _wait_physics(6)
