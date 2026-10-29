@@ -18,6 +18,7 @@ config/features=PackedStringArray("4.6")
 
 Events="*res://scripts/core/events.gd"
 GameState="*res://scripts/core/game_state.gd"
+Profile="*res://scripts/core/profile_manager.gd"
 Progress="*res://scripts/systems/progress_manager.gd"
 BestiaryData="*res://scripts/systems/bestiary_data.gd"
 FishingSystem="*res://scripts/systems/fishing_system.gd"

@@ -2590,3 +2590,45 @@ daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照
 - daily 回归新增 3 探针：`fd_yield_probe`（28 断言）/ `takeoff_coach_probe`（6）/ `flight_assist_probe`（6）；均为纯逻辑构造，不实例化 `main.tscn`，确定性高于真实世界探针。
 - D-010 铁律：SaveGuard 快照/还原，探针严禁并行；本批无新 `class_name`（`fd_yield_probe`/`takeoff_coach_probe`/`flight_assist_probe` 均 `extends Node` 无 `class_name`），无需重建全局类缓存（但已跑过 `--editor --quit` 归一化 `.uid`）。
 - 全量回归：daily **49 探针（含本批 3 新）全绿、0 FAIL、RESTORED_OK**。
+
+## D-075（2026-10-27）座舱恒定抖动 → 飞行状态调制包络（Gap：座舱一直在抖）
+
+### 决策依据
+- 旧 `aircraft_camera.gd:_apply_shake()` 抖动幅度仅由 `engine_running`（布尔）× `0.25 + 0.75*throttle` 驱动——停放怠速也恒有 0.25 地板幅度，与飞行状态完全脱钩，表现为「座舱一直在抖」。L67 注释「按油门/空速缩放」从未兑现空速维度。
+- 儿童向座舱需要「飞机平稳时不抖、真有扰动时才抖」，而非恒定背景噪声。
+
+### 设计取舍
+- 抖动改为五路物理分量叠加的 `shake_envelope()`（油门×空速衰减 smoothstep、失速抖振、风切变瞬态、地面地速颠簸、过载 G），上界恒 ≤1.0；**去掉 0.25 怠速地板**——停放/收油门即归零（比初版方案更优）。
+- 机体系叠加：`_craft.global_transform.basis * Vector3(...)` 而非世界系；座舱内视乘 `COCKPIT_SHAKE_SCALE=0.40` + 沿视线 `COCKPIT_SHAKE_AXIAL=0.50`。
+
+### 新增 / 改动
+- `scripts/vehicles/aircraft.gd`：9 常量 + `shake_envelope() -> float`。
+- `scripts/vehicles/aircraft_camera.gd`：4 常量 + `_shake_gain` 平滑 + 座舱内视衰减 + 机体系 `basis *` 叠加。
+- `tests/cockpit_shake_probe.gd(+.tscn)`：纯逻辑 12 断言（idle=0/巡航≤0.02/失速≥0.015/切变≥0.015/上界≤0.075/包络≤1.0）+ 3 反向对照。
+
+### 验证 / 回归
+- daily 回归 0 FAIL；`cockpit_shake_probe` 0 FAIL（含反向对照，去掉修复确会报错）。
+
+## D-076（2026-10-29）档案系统：多存档槽（M7.4）
+
+### 决策依据
+- M7.2~M7.4「探索课堂任务页签 + 档案系统（多存档槽）」中，档案系统指**多玩家档案**：同一设备多孩子各持独立进度，互不覆盖。
+- 当前仅 `Progress` 单文件 `user://progress.json` 持久化（成就/任务计数）；世界地形/背包不落盘（世界存档属 M10）。故多槽先包裹进度档，M10 世界存档可顺势接入同一槽目录。
+
+### 设计取舍
+- **不引入 `class_name`**：`profile_manager.gd` 以路径形式注册为 Autoload「Profile」（与 `Progress` 同模式），避 `global_script_class_cache` 失配导致无头解析失败（踩坑 #24）。注册顺序须在 `Progress` 之前，使 `Progress._ready` 读到的已是当前槽路径。
+- **向后兼容、零启动副作用**：`current` 为空（尚未建槽）时 `slot_save_path()` 退回旧 `user://progress.json`——启动流程与回归基线的 `user://` 完全不变；任何新文件只在玩家通过档案选择器建槽时产生。
+- **至少保留一个槽**：`delete_slot` 拒绝删最后一个，避免空槽态。
+- **首槽迁移旧进度**：`create_slot` 在首个槽且旧 `progress.json` 存在时将其改名进首槽；`migrate_legacy()` 亦提供显式迁移（默认槽名「玩家1」）。
+- **切换即重载**：`Progress.set_slot(id)` → `Profile.select_slot` + `_load()`，且 `_load` 先清空内存态，杜绝上一槽计数残留在新槽。
+
+### 新增 / 改动
+- 新增 `scripts/core/profile_manager.gd`（Autoload `Profile`）：槽清单/当前槽/CRUD/`slot_save_path()`/`migrate_legacy()`/`reload()`。
+- 改 `scripts/systems/progress_manager.gd`：删 `SAVE_PATH` 常量，`_save/_load` 取 `Profile.slot_save_path()`；`_load` 先清空内存态；新增 `set_slot(id)`。
+- 改 `project.godot`：`[autoload]` 在 `Progress` 前加 `Profile`。
+- 新增 `tests/profile_slot_probe.gd(+.tscn)`（**21 断言**）：槽隔离（A1~A4）/ CRUD（B1~B5，含拒绝删最后槽）/ 迁移（C0~C7）/ 路径退回（D1）；末尾快照还原 `user://progress.json`，不污染共享回归基线。
+
+### 验证 / 回归
+- `profile_slot_probe` 0 FAIL；全量 headless 回归（含本探针）全绿、0 FAIL。
+- 已知 `[user://] DIFF` 为环境态产物：`progress.json` 本就是现有 `Progress` 在 notify 时落盘的文件（改版前后路径一致），仅当回归基线备份不含该文件时才被 diff 标出，非本改动引入。
+- 待续：档案选择器 UI（ProfilePicker）与「探索课堂」任务页签（M7.2~M7.3）下一批落地。

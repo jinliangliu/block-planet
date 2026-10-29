@@ -13,7 +13,9 @@ signal quiz_reward_earned(item: int, count: int)
 
 enum State { ACTIVE, DONE, CLAIMED }
 
-const SAVE_PATH := "user://progress.json"
+## 进度落盘路径取自 Profile.slot_save_path()：建槽后落到 user://profiles/<id>/progress.json，
+## 未建槽（current 为空）时退回旧的 user://progress.json（M7.4 多存档槽，向后兼容）。
+## 因此这里不再写死路径常量。
 ## 存档防抖间隔（ms）：notify 只标记脏位，由 _process 至多每这么长时间落一次盘。
 ## 原先每次 notify 都同步 JSON 序列化 + 写盘（实测 ~1.1 ms/次），而挖/放一块方块
 ## 就是两次 notify——连续挖矿时每块都吃一次磁盘写入尖峰。竞速结算等批量事件同理。
@@ -107,6 +109,15 @@ func goal_progress(goal: Dictionary) -> Vector2i:
 func is_complete(entry: Dictionary) -> bool:
 	var cur := goal_progress(entry["goal"])
 	return cur.x >= cur.y
+
+
+## 切换到指定存档槽并重新载入其进度（档案系统切换玩家时调用）。
+## 返回 false 表示该槽不存在、未切换。
+func set_slot(id: String) -> bool:
+	if not Profile.select_slot(id):
+		return false
+	_load()
+	return true
 
 
 ## 领取已达成条目的奖励，返回奖励字典（发放由 HUD 监听 quest_claimed 执行）。
@@ -238,7 +249,7 @@ func _on_race_record_beaten(_track_id: String, _record_type: String) -> void:
 func _save() -> void:
 	var data := {"counters": counters, "states": states,
 		"quiz_streak": _quiz_correct_since_reward}
-	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	var file := FileAccess.open(Profile.slot_save_path(), FileAccess.WRITE)
 	if file == null:
 		return
 	file.store_string(JSON.stringify(data))
@@ -247,9 +258,14 @@ func _save() -> void:
 
 
 func _load() -> void:
-	if not FileAccess.file_exists(SAVE_PATH):
+	# 切换槽时先清空内存态，避免上一槽的计数残留在新槽里（set_slot 依赖此行为）。
+	counters = {}
+	states = {}
+	_quiz_correct_since_reward = 0
+	var path := Profile.slot_save_path()
+	if not FileAccess.file_exists(path):
 		return
-	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		return
 	var parsed: Variant = JSON.parse_string(file.get_as_text())
