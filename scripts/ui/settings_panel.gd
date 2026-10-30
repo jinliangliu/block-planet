@@ -1,15 +1,19 @@
 class_name SettingsPanel
 extends Control
 
-## 飞行设置面板（与任务面板同款的模态窗口，ESC/关闭键退出）。
+## 设置面板（与任务面板同款的模态窗口，ESC/关闭键退出）。
+## 标题叫「设置」（D-078 前是「飞行设置」）：本面板已经不止管飞行——
+## 「世界」区的和平开关是每档案一份的世界设定，与飞行无关。
 ## 三行分段按钮：
 ##   - 难度：休闲 / 标准 / 硬核（预设决定默认辅助等级）
 ##   - 辅助稳定：关闭 / 半开 / 全开（可单独覆盖难度的默认值）
 ##   - 涂装：四套 AircraftLivery
-## 两组开关行（两格分段按钮，D-057 补齐入口）：
+## 三组开关行（两格分段按钮，D-057 补齐入口，D-067 / D-078 各补一组）：
 ##   「相机与提示」- 镜头抖动 / 松手回正 / HUD 模式（简单|详细）/ 双击改平 / 警告蜂鸣
 ##   「气象」- 风（D-067 的 wind_enabled：关掉后 State.wind 恒零，气动行为与
 ##   无气象版逐字节一致）
+##   「世界」- 和平模式（D-078 的 GameState.peaceful：每**档案**一份，落在当前槽的
+##   world.json，**不走** FlightSettings）——关闭要一次确认，开启则即时生效。
 ## 改动即时生效（飞机每帧读 FlightSettings.current().gains()）并落盘
 ## user://settings.json；面板本身只做展示与改写，不直接碰飞行动力学。
 ## 9 键全部有面板入口（D-057 补 5 开关、D-067 的风闸同款补行）；标题行带
@@ -36,6 +40,10 @@ var _recenter_buttons: Array[Button] = []
 var _hud_buttons: Array[Button] = []
 var _level_buttons: Array[Button] = []
 var _beeper_buttons: Array[Button] = []
+## 「世界」区的和平开关行（D-078）：[0]=开，[1]=关。数值不来自 FlightSettings。
+var _peaceful_buttons: Array[Button] = []
+## 关闭和平模式的一次性确认层（D-078 非对称确认；懒建后复用）。
+var _confirm_layer: Control = null
 ## 「气象」风开关行（D-067 的 wind_enabled，与 D-057 五行同款两格分段）。
 var _wind_buttons: Array[Button] = []
 ## 「恢复默认」按钮（D-058，标题行；探针经此点它）。
@@ -81,7 +89,7 @@ func _ready() -> void:
 	var header := HBoxContainer.new()
 	vbox.add_child(header)
 	var title := Label.new()
-	title.text = "飞行设置"
+	title.text = "设置"
 	title.add_theme_font_size_override("font_size", 24)
 	title.add_theme_color_override("font_color", TITLE_COLOR)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -100,6 +108,25 @@ func _ready() -> void:
 	var close_btn := UiKit.make_close()
 	close_btn.pressed.connect(close)
 	header.add_child(close_btn)
+
+	# ── 「世界」区（D-078）：和平模式开关 ──
+	# 位置刻意排在**难度之前**：本面板包了 ScrollContainer（高度 = min(视口高×0.8,
+	# 760)）且已有十余个键，再往下会被滑出视野，而这是「夜里有没有怪物」这类
+	# 安全相关设置，孩子和家长都得在第一屏就够得到。
+	vbox.add_child(_make_row_label("世界"))
+	var peaceful_box := VBoxContainer.new()
+	peaceful_box.add_theme_constant_override("separation", 2)
+	peaceful_box.add_child(_make_row_label("和平模式"))
+	peaceful_box.add_child(_make_segment(
+		["开", "关"], 0 if GameState.is_peaceful() else 1,
+		func(i: int): _on_peaceful(i), _peaceful_buttons))
+	var peaceful_hint := Label.new()
+	peaceful_hint.text = "夜里不会有怪物、怪物也打不到你；但仍然会饿、会摔、飞机会摔坏。"
+	peaceful_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	peaceful_hint.add_theme_font_size_override("font_size", 13)
+	peaceful_hint.add_theme_color_override("font_color", BODY_COLOR)
+	peaceful_box.add_child(peaceful_hint)
+	vbox.add_child(peaceful_box)
 
 	vbox.add_child(_make_row_label("难度"))
 	vbox.add_child(_make_segment(
@@ -205,6 +232,8 @@ func open() -> void:
 func close() -> void:
 	if not visible:
 		return
+	# 未完成的确认随面板一起收起：下一次打开不该凭空冒出一层对话框。
+	_hide_peaceful_confirm()
 	visible = false
 	closed.emit()
 
@@ -226,6 +255,9 @@ func refresh() -> void:
 	_sync(_level_buttons, 0 if _settings.auto_level else 1)
 	_sync(_beeper_buttons, 0 if _settings.beeper_enabled else 1)
 	_sync(_wind_buttons, 0 if _settings.wind_enabled else 1)
+	# 和平开关的真值在 GameState（由 Profile 按档灌入），不在 FlightSettings
+	# ——这里只读不写，保证换槽/切换后回到面板看到的就是当前档的值。
+	_sync(_peaceful_buttons, 0 if GameState.is_peaceful() else 1)
 	if _status_label != null:
 		_status_label.text = "当前：难度 %s · 辅助 %s · 涂装 %s" % [
 			_settings.difficulty_name(), _settings.assist_name(), _settings.livery_name()]
@@ -273,9 +305,103 @@ func _on_toggle(key: String, index: int) -> void:
 ## 「恢复默认」（D-058）：9 键一次性回到默认值（默认值唯一定义在
 ## FlightSettings.reset_to_defaults，含 wind_enabled），随后走统一落盘 + Toast 通道
 ## （changed="reset"，HUD 文案「已恢复默认设置」）。
+## 注意它**不管**和平开关——那是另一个存储体系（档案 vs 设备），改成一起复位
+## 会让「恢复默认」悄悄改动别的孩子的档。
 func _on_reset() -> void:
 	_settings.reset_to_defaults()
 	_after_change("reset")
+
+
+## 和平开关回调（D-078）：落盘走 Profile 的档案通道，**绝不进 _after_change**——
+## 后者是 FlightSettings.save()，写的是设备级 user://settings.json。和平每档案
+## 一份，写过去就成了两套真值：换档不跟随、两边还可能给出矛盾的答案。
+func _on_peaceful(index: int) -> void:
+	var wanted := (index == 0)
+	if wanted == GameState.is_peaceful():
+		# 点了当前已选中的那一格：状态没变，只需把选中态拉回来。
+		_sync(_peaceful_buttons, 0 if wanted else 1)
+		return
+	if wanted:
+		_commit_peaceful(true)
+		return
+	# 关要确认（非对称）：开错一次零成本（再关掉即可）；关错则夜里怪物回来，
+	# 而且孩子未必知道该去哪儿把它开回去。
+	_show_peaceful_confirm()
+
+
+## 真正改值：先写档（失败也继续——内存态照常生效，玩家当下不至于「点了没反应」，
+## 只由 push_warning 记录），再推 GameState 发信号给 HUD，最后同步选中态。
+func _commit_peaceful(value: bool) -> void:
+	var settings := Profile.read_slot_settings()
+	settings["peaceful"] = value
+	if not Profile.write_slot_settings(settings):
+		push_warning("SettingsPanel: 和平模式保存失败（磁盘写入被拒？）")
+	_hide_peaceful_confirm()
+	GameState.set_peaceful(value)
+	_sync(_peaceful_buttons, 0 if value else 1)
+
+
+func _show_peaceful_confirm() -> void:
+	if _confirm_layer == null:
+		_confirm_layer = _build_peaceful_confirm()
+	_confirm_layer.visible = true
+
+
+func _hide_peaceful_confirm() -> void:
+	if _confirm_layer != null:
+		_confirm_layer.visible = false
+
+
+## 确认层现场搭在同一面板里而不新建场景：它只服务于「关和平」这一种情境，
+## 没有第二个调用方，独立成 scene 反而多一处要同步配色与布局的地方。
+func _build_peaceful_confirm() -> Control:
+	var layer := Control.new()
+	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# 必须吃掉鼠标：确认没结束之前，底下的开关、恢复默认与 ✕ 都不该能被点到。
+	layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.0, 0.0, 0.0, 0.45)
+	layer.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(center)
+	var box := PanelContainer.new()
+	box.add_theme_stylebox_override("panel", _panel_style())
+	center.add_child(box)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	box.add_child(vbox)
+	var question := Label.new()
+	question.text = "关掉后，夜里会重新出现怪物，确定要关掉和平模式吗？"
+	question.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	question.custom_minimum_size = Vector2(340, 0)
+	question.add_theme_font_size_override("font_size", 16)
+	question.add_theme_color_override("font_color", BODY_COLOR)
+	vbox.add_child(question)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	vbox.add_child(row)
+	# 「取消」在前且用主色：不确定时随手一点 = 什么也不发生，这才是默认选项。
+	var cancel := Button.new()
+	cancel.text = "取消"
+	cancel.custom_minimum_size = Vector2(120, 40)
+	cancel.focus_mode = Control.FOCUS_NONE
+	cancel.add_theme_font_size_override("font_size", 16)
+	UiKit.apply_warm_style(cancel)
+	cancel.pressed.connect(_hide_peaceful_confirm)
+	row.add_child(cancel)
+	var ok := Button.new()
+	ok.text = "确定"
+	ok.custom_minimum_size = Vector2(120, 40)
+	ok.focus_mode = Control.FOCUS_NONE
+	ok.add_theme_font_size_override("font_size", 16)
+	ok.pressed.connect(func(): _commit_peaceful(false))
+	row.add_child(ok)
+	add_child(layer)
+	layer.visible = false
+	return layer
 
 
 func _after_change(changed: String = "") -> void:

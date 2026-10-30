@@ -9,12 +9,17 @@ extends Node
 ## 以路径形式注册为 Autoload「Profile」（不引入 class_name，避免
 ## global_script_class_cache 失配导致无头解析失败，见项目踩坑 #24），
 ## 必须排在 Progress 之前初始化，使 Progress._ready 读到的就是当前槽路径。
+##
+## D-078 起本槽还承载「世界设置」 world.json（当前只有 peaceful 一键），并为
+## GameState 提供 push 式灌值——GameState 排在 Profile 之前，它不能反查这里。
 
 signal slot_changed(id: String)
 
 const PROFILES_DIR := "user://profiles"
 const INDEX_FILE := "user://profiles/index.json"
 const LEGACY_FILE := "user://progress.json"
+## 槽内的世界设置文件名（D-078）：落在槽目录里，与 progress.json 同槽隔离。
+const SLOT_WORLD_FILE := "world.json"
 const DEFAULT_NAME := "玩家1"
 
 var _slots: Array[Dictionary] = []   # 每项 {id:String, name:String, created:int}
@@ -23,6 +28,9 @@ var _current: String = ""            # 当前槽 id；"" 表示尚未选择（�
 
 func _ready() -> void:
 	_load_index()
+	# 把本槽的世界设置灌给 GameState（D-078）。push 而非 pull：GameState 排在
+	# Profile 之前初始化，它若反过来读 Profile 会撞上空 current。
+	_push_world_settings()
 
 
 func _load_index() -> void:
@@ -69,6 +77,55 @@ func slot_save_path() -> String:
 	if _current.is_empty():
 		return LEGACY_FILE
 	return "%s/%s/progress.json" % [PROFILES_DIR, _current]
+
+
+## 当前槽目录。刻意从 slot_save_path() 派生而非重写 _current.is_empty() 判定——
+## 一路复用同一处 legacy 回退：无槽时得到 user://（世界设置退化为 user://world.json，
+## 与改版前「一切都落在 user://」的形态一致），不会出现两套判据各自漂移。
+func slot_dir() -> String:
+	return slot_save_path().get_base_dir()
+
+
+## 当前槽的世界设置文件路径（D-078：和平模式开关存在这里）。
+func slot_world_path() -> String:
+	return "%s/%s" % [slot_dir(), SLOT_WORLD_FILE]
+
+
+## 读当前槽的世界设置：文件不存在 / JSON 损坏一律返回空字典，由调用方各自取
+## 默认值（与 FlightSettings.load_or_new 的兜底风格一致）。
+## ⚠️ 只读路径绝不写文件——默认关的和平模式在整局游戏中都不会被脚本触碰，
+## 探针跑完不该多出 world.json（D-010 铁律 3）。
+func read_slot_settings() -> Dictionary:
+	if not FileAccess.file_exists(slot_world_path()):
+		return {}
+	var f := FileAccess.open(slot_world_path(), FileAccess.READ)
+	if f == null:
+		return {}
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {}
+	var data: Dictionary = parsed
+	return data
+
+
+## 整份写回当前槽的世界设置；失败（只读 / 磁盘满 / 目录不存在）返回 false，
+## 不抛异常——调用方据此 push_warning，游戏本进程继续可用。
+## 只在「玩家主动切换」时调用（设置面板），读路径一律不写。
+func write_slot_settings(d: Dictionary) -> bool:
+	var f := FileAccess.open(slot_world_path(), FileAccess.WRITE)
+	if f == null:
+		return false
+	f.store_string(JSON.stringify(d))
+	f.close()
+	return true
+
+
+## 把槽内世界设置灌给 GameState（D-078）。autoload 顺序决定了只能是 Profile
+## 主动 push；这里同时进行键名→语义的一次映射，GameState 不必认识 JSON 结构。
+func _push_world_settings() -> void:
+	var settings := read_slot_settings()
+	GameState._hydrate_peaceful(bool(settings.get("peaceful", false)))
 
 
 ## 逐级创建目录（Godot 4 的 make_dir_recursive 是实例方法，需先 open）。
@@ -124,6 +181,8 @@ func select_slot(id: String) -> bool:
 		if s["id"] == id:
 			_current = id
 			_save_index()
+			# 换槽 = 换一套世界设置：重新灌值（同样静默，不弹 Toast）。
+			_push_world_settings()
 			slot_changed.emit(id)
 			return true
 	return false

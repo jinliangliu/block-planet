@@ -20,6 +20,14 @@ var _saved_progress := ""
 var _saved_counters: Dictionary = {}
 var _saved_states: Dictionary = {}
 var _saved_quiz_streak := 0
+## 和平模式段（Q-8，D-078）的存档隔离（D-010 铁律 3）：world.json 的存在性与
+## 文本快照。该开关只在玩家主动点面板时才写档，探针从不点面板 ⇒ 正常路径下
+## 这个文件从头到尾都不该出现；一旦将来代码在「读」路径上写了档，这里的还原
+## 与对比就是第一道警报。还原由 _restore_world_settings 负责（含 _exit_tree 兜底）。
+var _world_existed := false
+var _world_text := ""
+var _world_restored := false
+var _world_snapshotted := false
 ## 受保护名录里「不算图鉴物种」的三项：村民是人不是物种；蜻蜓、蝴蝶是游戏里
 ## 陪伴玩家的益虫，图鉴未收录它们的资料。给它们补条目时请一并删掉这条豁免。
 const PROTECTED_WITHOUT_ENTRY := [
@@ -36,6 +44,11 @@ func _ready() -> void:
 func _run() -> void:
 	# 存档隔离（D-010 铁律 3）：在任何 Progress.notify 之前快照，quit 前还原。
 	_saved_progress = _read_user_text("user://progress.json")
+	# world.json 与进度同步在「任何写操作之前」快照（D-078 段会用，见 §Q-8）——
+	# 提前到 _run() 开头，是因为探针若在 Q-8 之前就崩掉，_exit_tree 的还原也不该
+	# 把一个玩家真实存在的 world.json 当成「探针多出来的」删掉。
+	_snapshot_world_settings()
+
 	_saved_counters = Progress.counters.duplicate()
 	_saved_states = Progress.states.duplicate()
 	_saved_quiz_streak = Progress._quiz_correct_since_reward
@@ -1978,6 +1991,115 @@ func _run() -> void:
 	)
 	_check(hud._mode_label.text == "生存", "回到生存模式后徽章复位为「生存」")
 
+	# ── Q-8 和平模式（D-078）：正交开关，只管怪物 ──────────────────────
+	# 产品语义边界：**和平 ≠ 无敌**。本段四件事——夜里不刷敌对、开关当下清场、
+	# 生物伤害免疫；以及反向对照：饥饿 / 跌落 / 卡死一条都不许放水。
+	# 存档纪律（D-010 铁律 3）：本段不写档；world.json 的快照已在 _run() 开头取好，
+	# 段末比对存在性是否一致再还原。
+	GameState.set_mode(GameState.Mode.SURVIVAL)
+	_check(not GameState.is_peaceful(), "和平模式默认关闭（既有默认行为不变）")
+	_check(not player._dead and player.health > 0, "和平段前提：玩家存活")
+
+	# Q-8.1 开和平 → 夜晚不刷敌对
+	# 注：这一条是**守门**而非主证据——本探针的自然刷怪链路未被证明可用，怎么跑
+	# 都是 0。真正证明「和平夜里没怪」的是 Q-8.2（清场）与 Q-8.5（反向对照）。
+	day_night._time = DayNightCycle.DAY_LENGTH + 10.0
+	_check(not day_night.is_day(), "和平段：先把时钟拨到夜晚")
+	spawner._despawn_all()
+	GameState.set_peaceful(true)
+	_check(GameState.is_peaceful(), "打开和平模式开关（仍留在生存模式）")
+	var q8_spawned := false
+	for i in range(40):
+		spawner._spawn_timer = 0.0
+		spawner._process(1.0)
+		if spawner._hostile_count() > 0:
+			q8_spawned = true
+			break
+	_check(not q8_spawned, "和平模式夜晚不生成敌对生物")
+	_check(hud._mode_label.text == "生存·和平",
+		"HUD 徽章在模式名后追加「·和平」（实际「%s」）" % hud._mode_label.text)
+
+	# Q-8.2 开和平 → 场上敌对立刻清空（与探索模式同款写法）
+	var q8_wolf := _spawn_mob(main_scene, Mob.MobType.WOLF, player, day_night,
+		player.global_position + Vector3(4.0, 1.0, 0.0))
+	spawner._mobs.append(q8_wolf)
+	_check(spawner._hostile_count() > 0, "先手动放入一只敌对生物（前提）")
+	spawner._spawn_timer = 0.0
+	spawner._process(1.0)
+	_check(spawner._hostile_count() == 0, "开和平的当下立刻清空场上敌对生物")
+	_check(not is_instance_valid(q8_wolf) or q8_wolf.is_queued_for_deletion(),
+		"清出来的敌对生物确实被移除")
+
+	# Q-8.3 开和平 → 生物攻击不掉血（take_damage 是怪物打的入口）
+	player.health = Player.MAX_HEALTH
+	player._hurt_invuln = 0.0
+	player.take_damage(2, "僵尸")
+	_check(player.health == Player.MAX_HEALTH, "和平模式下被怪物打不掉血")
+
+	# Q-8.4 和平 ≠ 无敌：饥饿 / 跌落 / 卡死三条路照常（一行都不许放水）
+	player.hunger = float(Player.MAX_HUNGER)
+	player._tick_survival(1.0, false)
+	_check(player.hunger < float(Player.MAX_HUNGER),
+		"和平模式饥饿照常消耗（满 20 → %.1f）" % player.hunger)
+	player.hunger = float(Player.MAX_HUNGER)
+	player._starvation_timer = 0.0
+	player.health = Player.MAX_HEALTH
+	player._apply_fall_damage(Player.FALL_DAMAGE_THRESHOLD + 4.0)
+	_check(player.health < Player.MAX_HEALTH,
+		"和平模式跌落照样受伤（%d → %d）" % [Player.MAX_HEALTH, player.health])
+	# 卡死脱困走 _force_unstuck（不经 _damage：创造模式也要能脱困）。可观测量取
+	# 「死亡流程照走」+「来源广播卡住」+「重生复位」三件事：
+	# ⚠️ 不能断言出口 health == 0——health 在函数返回前就被紧随的 _respawn() 补满了；
+	# ⚠️ 也不看 stuck_rescues——那个计数器加在 _check_stuck()（检测器）里，
+	#    _force_unstuck() 从头到尾没碰过它（player.gd:593 vs 602-610）。
+	# 真实嵌入态 → _check_stuck 那一跳由 stuck_rescue_probe 覆盖；本探针构造嵌入
+	# 地形成本高且易抖，按评审结论不做。
+	var q8_stuck_seen := _damage_reasons.count(Player.REASON_STUCK)
+	var q8_box := {"died": 0}
+	player.died.connect(func(): q8_box["died"] += 1)
+	player._stuck_frames = 9
+	player._force_unstuck()
+	_check(
+		int(q8_box["died"]) > 0 and player._stuck_frames == 0
+		and _damage_reasons.count(Player.REASON_STUCK) > q8_stuck_seen,
+		"和平模式卡死照付代价：死亡流程照走、来源广播「%s」、重生已复位（和平 ≠ 无敌）"
+			% Player.REASON_STUCK,
+	)
+	player.health = Player.MAX_HEALTH
+	player.hunger = float(Player.MAX_HUNGER)
+	player._starvation_timer = 0.0
+	player._hurt_invuln = 0.0
+
+	# Q-8.5 关和平 → 一切照旧（这条保证「默认 OFF」的语义没有暗中被改成常开）
+	GameState.set_peaceful(false)
+	_check(not GameState.is_peaceful(), "关闭和平模式开关")
+	_check(hud._mode_label.text == "生存", "关闭后徽章去掉「·和平」")
+	player.health = Player.MAX_HEALTH
+	player._hurt_invuln = 0.0
+	player.take_damage(2, "僵尸")
+	_check(player.health == Player.MAX_HEALTH - 2, "关闭后被怪物打照常扣血")
+	player.health = Player.MAX_HEALTH
+	# 反向对照与 Q-8.2 **严格对称**：手动放一只敌对，跑一帧看它还在不在。
+	# 不改自然刷怪——本探针里自然刷怪从未被证明可用（既有探索模式段
+	# 1809-1812 行同样靠手动放入），依赖它只会得到一条恒真的弱对照。
+	spawner._despawn_all()
+	var q8_wolf2 := _spawn_mob(main_scene, Mob.MobType.WOLF, player, day_night,
+		player.global_position + Vector3(4.0, 1.0, 0.0))
+	spawner._mobs.append(q8_wolf2)
+	_check(spawner._hostile_count() > 0, "关和平后手动放入一只敌对生物（前提）")
+	spawner._spawn_timer = 0.0
+	spawner._process(1.0)
+	_check(spawner._hostile_count() > 0,
+		"关掉和平后清场分支不再触发，敌对生物留在场上（%d 只）" % spawner._hostile_count())
+	spawner._despawn_all()
+	spawner._spawn_timer = 9999.0
+	spawner._passive_timer = 9999.0
+	day_night._time = 0.0
+	# 存在性必须与段首快照一致：既不能凭空多出来，也不该被写坏。
+	_check(FileAccess.file_exists(Profile.slot_world_path()) == _world_existed,
+		"探针全程没有动过 %s（读路径绝不写档）" % Profile.slot_world_path())
+	_restore_world_settings()
+
 	# ── 阶段 R：资产完整性守门（新增物种/方块/物品/图鉴时先看这一节） ──
 	# 这一节不测玩法，只测「代码里的表与实现是否还对得上」。
 	# 新增内容若漏改某张表，这里会直接红出来——比在游戏里慢慢发现便宜得多。
@@ -2809,6 +2931,33 @@ func _write_user_text(path: String, text: String) -> void:
 		return
 	f.store_string(text)
 	f.close()
+
+
+## D-078 段（Q-8）的存档隔离（D-010 铁律 3）：记录档案世界设置 world.json
+## 的存在性与文本。开关默认 OFF、探针又从不点面板，正常路径下不该有任何写档。
+func _snapshot_world_settings() -> void:
+	_world_snapshotted = true
+	_world_existed = FileAccess.file_exists(Profile.slot_world_path())
+	_world_text = _read_user_text(Profile.slot_world_path())
+
+
+## 还原 world.json 快照（幂等；正常路径与 _exit_tree 安全网都走它）。
+## 没取过快照就一律不动手：探针若在 Q-8 之前崩掉，玩家的真实档不能被当成
+## 「探针多出来的文件」删掉（这是 D-010 铁律 3 的一半——另一半是「不许残留」）。
+func _restore_world_settings() -> void:
+	if _world_restored or not _world_snapshotted:
+		return
+	_world_restored = true
+	if _world_existed:
+		_write_user_text(Profile.slot_world_path(), _world_text)
+	elif FileAccess.file_exists(Profile.slot_world_path()):
+		_write_user_text(Profile.slot_world_path(), "")
+
+
+## D-010 铁律 3 的退出兜底：协程被脚本错误猝杀时末尾的还原不会执行，
+## 退出期再兜一层——探针多写出来的 world.json 会污染共享回归基线。
+func _exit_tree() -> void:
+	_restore_world_settings()
 
 
 func _check(cond: bool, label: String) -> void:

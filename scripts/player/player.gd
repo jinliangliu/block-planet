@@ -1462,7 +1462,12 @@ func _finish_death() -> void:
 
 ## 外部（生物近战、箭矢）打玩家走这里：带来源 + 受击无敌帧。
 ## 无敌帧只拦这条路，不走 _damage，因此卡死脱困与探针直接扣血不受影响。
+## 和平模式（D-078）在**无敌帧判定之前**就 return：开关 ON 时连无敌帧都不该
+## 被消耗（否则关掉开关的瞬间会被攒下的连击瞬间结算），「被怪物打不到」这条
+## 语义由这里独家负责——饥饿 / 跌落 / 坠机 / 卡死一律不看它，见 GameState.is_peaceful。
 func take_damage(amount: int, source: String = "") -> void:
+	if GameState.is_peaceful():
+		return
 	if _dead or _hurt_invuln > 0.0:
 		return
 	_hurt_invuln = HURT_INVULN_TIME

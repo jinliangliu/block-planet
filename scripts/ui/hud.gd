@@ -193,6 +193,7 @@ func setup(player: Player) -> void:
 	# 背包变化时若合成台开着，同步刷新按钮可用态，避免「攒够材料按钮却还灰着」。
 	_player.inventory.changed.connect(_on_inventory_changed_for_craft)
 	GameState.mode_changed.connect(_on_mode_changed)
+	GameState.peaceful_changed.connect(_on_peaceful_changed)
 	Events.player_mode_changed.connect(_on_player_flying_changed)
 	Events.request_trade.connect(set_trade_open.bind(true))
 	# 通用提示通道：狩猎拦截、矿石等级不足、垂钓结果等都以 Toast 呈现。
@@ -3602,9 +3603,22 @@ func _on_mode_changed(_mode: int) -> void:
 	_refresh_stats()
 
 
+## 和平开关变更（D-078）：徽章追加「·和平」+ 一次 Toast。这里直调 _show_toast
+## 而不走 Events.notice——那条通道的另一端是 _on_settings_changed，会把文案拼进
+## 「飞行设置：…」的汇总里；和平不属于飞行设置，两件事别串味。
+func _on_peaceful_changed(enabled: bool) -> void:
+	_refresh_mode_badge()
+	if enabled:
+		_show_toast("🕊 和平模式已开启，夜里不会有怪物")
+	else:
+		_show_toast("怪物会在夜里回来")
+
+
 ## 刷新模式徽章：只取两个字（生存/创造/探索），颜色按模式区分——
 ## 草绿=生存、金黄=创造、天青=探索。文字与判据都取自 GameState，
 ## HUD 只负责呈现，免得这里再长出第二套说法。
+## 和平开关开启时在模式名后追加「·和平」——它是正交开关而非第四种模式，
+## 模式本身的字与色都不变。
 func _refresh_mode_badge() -> void:
 	if _mode_label == null:
 		return
@@ -3613,5 +3627,8 @@ func _refresh_mode_badge() -> void:
 		color = Color(1.0, 0.86, 0.42)
 	elif GameState.is_explore():
 		color = Color(0.62, 0.92, 1.0)
-	_mode_label.text = GameState.mode_name()
+	var badge := GameState.mode_name()
+	if GameState.is_peaceful():
+		badge += "·和平"
+	_mode_label.text = badge
 	_mode_label.add_theme_color_override("font_color", color)
