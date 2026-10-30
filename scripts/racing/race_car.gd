@@ -8,6 +8,14 @@ extends Node3D
 
 const WHEEL_R := 0.45
 const WHEEL_W := 0.34
+## 地形粒子（M9 粒子反馈）：沙石扬尘 / 湿地水花各一路。数据侧 `terrain.json`
+## 的 dust / wet 标志早已写就但一直无人消费，这里是它唯一的消费方。
+## 中低端 Android 硬约束：CPU 粒子（与 BreakFx 同族，不依赖 GPU 特性）、
+## 数量压到 12、不投影、寿命 0.5 s——单帧开销可忽略。
+const FX_AMOUNT := 12
+const FX_LIFETIME := 0.5
+## 低于该速度比例不出特效：慢速挪车扬尘会显得莫名其妙。
+const FX_MIN_RATIO := 0.22
 
 var spec: Dictionary = {}
 var body_color := Color.WHITE
@@ -20,6 +28,8 @@ var _lamp_mat: StandardMaterial3D
 var _spin := 0.0
 var _steer_vis := 0.0
 var lights_on := false
+var _dust_fx: CPUParticles3D
+var _splash_fx: CPUParticles3D
 
 
 ## 按车辆数据拼装。tint 用于把机器人车染成区分色（默认不染）。
@@ -33,9 +43,12 @@ func build(p_spec: Dictionary, tint: Color = Color.WHITE) -> void:
 	_wheels.clear()
 	_front_wheels.clear()
 	_lamps.clear()
+	_dust_fx = null
+	_splash_fx = null
 	_body = Node3D.new()
 	_body.name = "Body"
 	add_child(_body)
+	_build_fx()
 
 	var kind := String(spec.get("kind", "buggy"))
 	match kind:
@@ -134,6 +147,59 @@ func set_lights(on: bool) -> void:
 	lights_on = on
 	if _lamp_mat != null:
 		_lamp_mat.emission_enabled = on
+
+
+## 地形粒子开关（M9）：由当前地形数据的 dust / wet 标志 + 车速比例驱动。
+## speed_ratio 为该车当前车速 / 本车极速（0~1）。两路特效互斥（数据里不会
+## 同时为真，但这里也按「湿优先」处理，避免将来数据写错时两层粒子叠加）。
+func set_terrain_fx(terrain: Dictionary, speed_ratio: float) -> void:
+	var ratio := clampf(speed_ratio, 0.0, 1.0)
+	var fast := ratio >= FX_MIN_RATIO
+	var wet := fast and bool(terrain.get("wet", false))
+	var dust := fast and not wet and bool(terrain.get("dust", false))
+	if _splash_fx != null:
+		_splash_fx.emitting = wet
+	if _dust_fx != null:
+		_dust_fx.emitting = dust
+
+
+func _build_fx() -> void:
+	# 扬尘：沙土色，从车底往后上方翻起。
+	_dust_fx = _make_fx(Color(0.80, 0.72, 0.56, 0.55), 0.24, 0.5)
+	_dust_fx.name = "DustFx"
+	add_child(_dust_fx)
+	# 水花：淡青白，更碎更快地溅开。
+	_splash_fx = _make_fx(Color(0.70, 0.88, 0.98, 0.55), 0.18, 0.9)
+	_splash_fx.name = "SplashFx"
+	add_child(_splash_fx)
+
+
+func _make_fx(color: Color, size: float, up_bias: float) -> CPUParticles3D:
+	var particles := CPUParticles3D.new()
+	particles.amount = FX_AMOUNT
+	particles.lifetime = FX_LIFETIME
+	# 关闭 emitting 起步：只有真的跑到沙石/湿地上才开，柏油路面一路零开销。
+	particles.emitting = false
+	particles.local_coords = false
+	particles.direction = Vector3(0.0, up_bias, 0.0).normalized()
+	particles.spread = 38.0
+	particles.initial_velocity_min = 1.8
+	particles.initial_velocity_max = 3.6
+	particles.gravity = Vector3(0.0, -4.5, 0.0)
+	particles.scale_amount_min = 0.55
+	particles.scale_amount_max = 1.35
+	particles.position = Vector3(0.0, 0.10, 0.0)
+	particles.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3.ONE * size
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.roughness = 1.0
+	mesh.material = material
+	particles.mesh = mesh
+	return particles
 
 
 ## 把纯逻辑体的位姿搬到节点上。

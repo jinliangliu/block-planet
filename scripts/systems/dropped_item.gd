@@ -39,7 +39,11 @@ func _process(delta: float) -> void:
 	if _player == null or not is_instance_valid(_player):
 		return
 	if global_position.distance_to(_player.global_position) < 2.4:
-		if _player.inventory.add_item(item_id, count) == 0:
+		var left := _player.inventory.add_item(item_id, count)
+		# 背包只收下一部分时也报实收数量（M9 反馈层：拾取音与飘字按实收发）。
+		if left < count:
+			Events.item_picked.emit(item_id, count - left)
+		if left == 0:
 			queue_free()
 
 

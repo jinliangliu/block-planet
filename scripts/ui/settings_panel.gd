@@ -42,6 +42,9 @@ var _level_buttons: Array[Button] = []
 var _beeper_buttons: Array[Button] = []
 ## 「世界」区的和平开关行（D-078）：[0]=开，[1]=关。数值不来自 FlightSettings。
 var _peaceful_buttons: Array[Button] = []
+## 音效总开关行（M9 反馈层）：真值在 Sfx 单例（user://audio.json，**设备级**），
+## 与上面和平模式的每档案 world.json 不是同一套持久化，故不并进同一行。
+var _sfx_buttons: Array[Button] = []
 ## 关闭和平模式的一次性确认层（D-078 非对称确认；懒建后复用）。
 var _confirm_layer: Control = null
 ## 「气象」风开关行（D-067 的 wind_enabled，与 D-057 五行同款两格分段）。
@@ -127,6 +130,20 @@ func _ready() -> void:
 	peaceful_hint.add_theme_color_override("font_color", BODY_COLOR)
 	peaceful_box.add_child(peaceful_hint)
 	vbox.add_child(peaceful_box)
+
+	# ── 音效总开关（M9 反馈层）──
+	# 同样排在第一屏：孩子/家长要能一眼找到「怎么关声音」。注意它是**设备级**
+	# （Sfx 落 user://audio.json），与上面每档案的和平模式分属两套存储。
+	vbox.add_child(_make_row_label("音效"))
+	vbox.add_child(_make_segment(
+		["开", "关"], 0 if Sfx.is_enabled() else 1,
+		func(i: int): _on_sfx(i), _sfx_buttons))
+	var sfx_hint := Label.new()
+	sfx_hint.text = "破坏方块、拾取、合成、受击、钓鱼咬钩都会有声音提示。"
+	sfx_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sfx_hint.add_theme_font_size_override("font_size", 13)
+	sfx_hint.add_theme_color_override("font_color", BODY_COLOR)
+	vbox.add_child(sfx_hint)
 
 	vbox.add_child(_make_row_label("难度"))
 	vbox.add_child(_make_segment(
@@ -258,6 +275,8 @@ func refresh() -> void:
 	# 和平开关的真值在 GameState（由 Profile 按档灌入），不在 FlightSettings
 	# ——这里只读不写，保证换槽/切换后回到面板看到的就是当前档的值。
 	_sync(_peaceful_buttons, 0 if GameState.is_peaceful() else 1)
+	# 音效开关同理：真值在 Sfx 单例（设备级 user://audio.json）。
+	_sync(_sfx_buttons, 0 if Sfx.is_enabled() else 1)
 	if _status_label != null:
 		_status_label.text = "当前：难度 %s · 辅助 %s · 涂装 %s" % [
 			_settings.difficulty_name(), _settings.assist_name(), _settings.livery_name()]
@@ -266,6 +285,16 @@ func refresh() -> void:
 func _sync(buttons: Array[Button], current: int) -> void:
 	for i in buttons.size():
 		buttons[i].button_pressed = (i == current)
+
+
+## 音效总开关（M9 反馈层）：设备级设置，落 user://audio.json，**绝不走
+## _after_change()**——后者是 FlightSettings.save()（另一个文件），混用会互相覆盖。
+func _on_sfx(index: int) -> void:
+	var wanted := index == 0
+	if wanted == Sfx.is_enabled():
+		return
+	Sfx.set_enabled(wanted)
+	_sync(_sfx_buttons, index)
 
 
 func _on_difficulty(index: int) -> void:

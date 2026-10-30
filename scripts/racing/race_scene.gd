@@ -35,6 +35,11 @@ var _finalized := false
 ## 跑完一整场比赛、验证流程与排名，而不必模拟真实按键。
 var autopilot := false
 var _player_ai: AiRacer = null
+## 倒计时滴答的音效游标：记录上一次响过的 ceil(countdown) 值。
+## -1 表示尚未开始（begin_countdown 后重置）。COUNTDOWN_SECONDS 是 3.2，
+## 首帧 ceil 得 4，本游标配合「只响 1~3」自动跳过那个 4（HUD 的「4」闪帧
+## 是既有显示问题，不在本轮范围）。
+var _countdown_tick := -1
 
 
 func _ready() -> void:
@@ -57,6 +62,7 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_ui()
 	_session.begin_countdown(COUNTDOWN_SECONDS)
+	_countdown_tick = -1
 	RaceSystem.race_started.emit(tid)
 
 
@@ -173,6 +179,13 @@ func _physics_process(delta: float) -> void:
 	_session.tick(delta)
 	if was_counting and not _session.is_counting():
 		_on_countdown_finished()
+	elif _session.is_counting():
+		# 倒计时滴答（M9 音效）：3-2-1 各响一声，孩子不用盯着屏幕也知道要出发了。
+		var tick_sec := int(ceilf(_session.countdown))
+		if tick_sec != _countdown_tick:
+			_countdown_tick = tick_sec
+			if tick_sec >= 1 and tick_sec <= 3:
+				Sfx.play("race_beep")
 	_tick += 1
 
 	var counting := _session.is_counting()
@@ -213,6 +226,8 @@ func _physics_process(delta: float) -> void:
 		_clamp_arena(r.car)
 		_session.update_progress(r, _off_road[i])
 		_cars[i].sync_from(r.car, delta)
+		# 地形粒子（M9）：跑到沙石扬尘、湿地溅水花——速度感的主要来源之一。
+		_cars[i].set_terrain_fx(terr, r.car.speed() / maxf(r.car.max_speed(), 1.0))
 
 	_session.refresh_rankings()
 	_update_camera(delta, false)
@@ -309,6 +324,7 @@ func _update_camera(delta: float, snap: bool) -> void:
 
 func _on_countdown_finished() -> void:
 	_hud.banner("出发！", Color(0.55, 0.95, 0.60))
+	Sfx.play("race_go")
 	_log("race_start")
 	_teaching.enqueue("first_checkpoint")
 
@@ -318,12 +334,14 @@ func _on_lap_completed(racer_id: String, lap: int, lap_time: float) -> void:
 		return
 	_hud.banner("第 %d 圈完成  %s" % [lap, RaceSystem.format_time(lap_time)],
 		Color(0.55, 0.95, 0.60))
+	Sfx.play("race_lap")
 	_log("lap_complete")
 	_teaching.enqueue("first_lap")
 
 
 func _on_gate_passed(racer_id: String, _gate: int) -> void:
 	if racer_id == "player":
+		Sfx.play("race_checkpoint")
 		_log("checkpoint")
 
 

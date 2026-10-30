@@ -19,6 +19,10 @@ const MODE_BADGE_HEIGHT := 32.0
 const MODE_BADGE_GAP := 4.0
 ## 饥饿低于该值时提示一次「该吃东西了」（满值 20，即剩 1/5 时提醒）。
 const HUNGER_WARN_LEVEL := 4
+## 受击红闪（M9 反馈层）：全屏极淡红一闪再淡出。0.30 足够被余光捕捉，
+## 又不至于像「流血滤镜」那样吓到 6 岁孩子；0.5 s 内淡完，不挡视线。
+const PAIN_FLASH_ALPHA := 0.30
+const PAIN_FLASH_TIME := 0.5
 
 var _player: Player
 var _root: Control
@@ -38,6 +42,12 @@ var _hearts: Control
 var _minimap: MiniMap
 var _time_label: Label
 var _mode_label: Label
+## 受击红闪层（M9）：root 最底层的全屏 ColorRect，alpha 由 tween 淡出。
+var _pain_flash: ColorRect
+var _pain_tween: Tween
+## 咬钩大字（M9）：屏幕中线偏下的一条提示带，默认全透明。
+var _fish_callout: Label
+var _fish_callout_tween: Tween
 var _map_name_label: Label
 var _map_selector: MapSelector
 var _manual: ManualPanel
@@ -233,6 +243,8 @@ func _build() -> void:
 	add_child(root)
 	_root = root
 
+	_build_pain_flash(root)
+	_build_fish_callout(root)
 	_build_stats(root)
 	_build_crosshair(root)
 	_build_log(root)
@@ -467,6 +479,68 @@ func _process(delta: float) -> void:
 
 
 ## 屏幕中心准星 + 破坏进度条：破坏需按住左键，准星与进度提供必要反馈。
+## 受击红闪层（M9 反馈层）：全屏极淡红闪烁一下再淡出。
+## 刻意放在 root 的**最早**一位：3D 画面被染色，但其后所有 HUD 元素都压在上面，
+## 不会把爱心/快捷栏糊成一片红。比「数字掉 3 点」直观得多，是 6 岁孩子最先
+## 感知到的受击信号（配合 Sfx 的受击音形成视听双通道）。
+func _build_pain_flash(root: Control) -> void:
+	_pain_flash = ColorRect.new()
+	_pain_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pain_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pain_flash.color = Color(0.78, 0.10, 0.10, 0.0)
+	root.add_child(_pain_flash)
+	Events.player_hurt.connect(_on_player_hurt)
+
+
+func _on_player_hurt(_amount: int) -> void:
+	if _pain_flash == null:
+		return
+	# 连击时先杀掉上一段 tween 重新叠满，否则第二下会被正在淡出的旧 tween 吞掉。
+	if _pain_tween != null and _pain_tween.is_valid():
+		_pain_tween.kill()
+	_pain_flash.color.a = PAIN_FLASH_ALPHA
+	_pain_tween = create_tween()
+	_pain_tween.tween_property(_pain_flash, "color:a", 0.0, PAIN_FLASH_TIME)
+
+
+## 咬钩大字（M9 反馈层）：全工程唯一「没看见就失败」的时刻。
+## 原来只有一条 32 px 的角落 Toast，小屏 + 儿童注意力偏移时极易错过；
+## 这里在屏幕中线偏下补一条 34 px 亮黄描边大字，覆盖整个咬钩窗口
+## （FISH_BITE_WINDOW 1.6 s）后再淡出。与 Sfx 的双响提醒构成视听双通道。
+func _build_fish_callout(root: Control) -> void:
+	_fish_callout = Label.new()
+	_fish_callout.text = "🎣 咬钩了！按右键收竿"
+	_fish_callout.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_fish_callout.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_fish_callout.anchor_left = 0.0
+	_fish_callout.anchor_right = 1.0
+	_fish_callout.anchor_top = 0.5
+	_fish_callout.anchor_bottom = 0.5
+	_fish_callout.offset_top = 56.0
+	_fish_callout.offset_bottom = 116.0
+	_fish_callout.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fish_callout.add_theme_font_size_override("font_size", 34)
+	_fish_callout.add_theme_color_override("font_color", Color(1.0, 0.88, 0.30))
+	_fish_callout.add_theme_color_override("font_outline_color", Color(0.10, 0.06, 0.02))
+	_fish_callout.add_theme_constant_override("outline_size", 8)
+	_fish_callout.modulate.a = 0.0
+	root.add_child(_fish_callout)
+	Events.fish_hooked.connect(_on_fish_hooked)
+
+
+func _on_fish_hooked() -> void:
+	if _fish_callout == null:
+		return
+	if _fish_callout_tween != null and _fish_callout_tween.is_valid():
+		_fish_callout_tween.kill()
+	_fish_callout.modulate.a = 1.0
+	_fish_callout_tween = create_tween()
+	# 1.7 s 常亮（略长于 1.6 s 的咬钩窗口）再 0.3 s 淡出：窗口关掉的瞬间
+	# 提示正好开始退场，孩子不会以为「还能按」。
+	_fish_callout_tween.tween_interval(1.7)
+	_fish_callout_tween.tween_property(_fish_callout, "modulate:a", 0.0, 0.3)
+
+
 func _build_crosshair(root: Control) -> void:
 	var overlay := Control.new()
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

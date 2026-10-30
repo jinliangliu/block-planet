@@ -2770,3 +2770,118 @@ daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照
 3. **`create_slot()` / `migrate_legacy()` / `delete_slot()` 刻意不灌值**（主理人裁决）：理由与「绝不在读路径上写档」同一条纪律——建槽/迁移时额外读写 `world.json` 会在回归里凭空产生文件（D-010 事故）。无槽时 `slot_dir()` 与 legacy 路径都落在 `user://`，实际行为就是继承的；**只有「已有 `profiles/<id>` 目录又删档重开」这类边缘场景才会出现差异**，日后若做「每槽独立默认值」再一并处理。
 4. **「饿而不死」等进一步放松**：按本节设计取舍 5 显式列后续，需与饥饿/烹饪循环一并评估。
 5. `README.md` 的 M9 勾选项：待 M9 的音效/粒子反馈一并落地时再勾。
+
+## D-079（2026-10-31）M9 反馈层：统一音效 `Sfx` + 竞速地形粒子
+
+- 路线图 M9「音效/粒子反馈」的落地。此前**全工程唯一有声音的地方是飞行告警蜂鸣**
+  （`scripts/flight/alert_beeper.gd`，D-034 的程序化蜂鸣码）；破坏方块、放置方块、合成成功、
+  冶炼完成、拾取掉落物、被怪打中、钓鱼咬钩——孩子做了动作却听不到任何回应，正反馈密度近零。
+
+### 1. 新建 `scripts/core/sfx.gd`（Autoload `Sfx`），而不是扩展 `AlertBeeper`
+
+两者生命周期与用途不同，合并会把两套不相干的东西缠在一起：
+
+| | `AlertBeeper`（不动） | `Sfx`（新增） |
+|---|---|---|
+| 用途 | 飞行**告警码**（失速/超速/超速收油…） | 通用**短音效**（反馈） |
+| 驱动 | `FlightInstruments.take_voice_cues` 的边沿 + 重放节奏 | `Events` 总线信号 |
+| 形态 | 可变音高序列，同一时刻只该有一股 | 多路并发（破坏 + 拾取 + 受击同帧） |
+| 实现 | `AudioStreamGenerator` 逐帧 `push_buffer` | 预渲染 `AudioStreamWAV` + 播放器池 |
+| 扩展 | 带 `user://voice/<id>.wav` 采样覆写接口 | 无资产依赖，纯合成 |
+
+关键差别在**并发模型**：`AlertBeeper` 是单缓冲队列（同一时刻只能推进一段），告警码连发时
+互相排队是对的；音效需要同帧多路，因此改用「预渲染成 `AudioStreamWAV` 后缓存 + 8 路
+`AudioStreamPlayer` 池」。渲染只在某条音效**首次被播放**时发生一次，之后只是换 `stream` 播放，
+中低端 Android 上开销可忽略。
+
+### 2. 为什么继续程序化合成而非引入音频资产
+
+- **包体 0 增量**：工程此前零音频文件，APK 体积对中低端 Android 是硬约束。
+- **音效不是音乐**：正弦 / 方波 / 三角 / 噪声四族 + 简包络（3 ms 淡入防爆音、指数衰减）
+  足以让七种事件在听感上互相区分。
+- 沿用 D-034 已验证的容错范式：无头 / 无声卡时 `AudioServer` 为 dummy，`play()` 静默成功，
+  **绝不影响逻辑与探针**。
+
+### 3. 零侵入：只监听总线，不改各系统
+
+`Sfx._connect_events()` 监听 `Events` 上**已有**的信号，另补 3 个此前缺失的信号：
+
+| 信号 | 状态 | 音效 |
+|---|---|---|
+| `block_broken` / `block_placed` | 既有 | 破坏（噪声，音高 ±8% 随机）/ 放置（三角波） |
+| `craft_done` / `smelt_done` | 既有 | 上行双音 / 金属长尾 |
+| `mob_killed` | 既有 | 下行双音 |
+| `race_record_beaten` / `race_finished` | 既有 | 胜利号角 / 夺冠号角或完圈双音 |
+| `item_picked(item_id, count)` | **新增** | 拾取（音高 1.0~1.12 微升，连捡听成上行小琶音） |
+| `player_hurt(amount)` | **新增** | 受击（132 Hz 方波短促） |
+| `fish_hooked` | **新增** | 咬钩双响（660/660/990） |
+
+新增信号的三处发射点刻意选在**语义最窄**的位置：
+
+- `item_picked` 发在 `dropped_item.gd:42`，且只在 `left < count` 时发——背包满时一个都没收进去
+  就不该响「捡到了」。参数是**实收数量**而非掉落数量。
+- `player_hurt` 只发在 `player.take_damage()`（生物近战 / 箭矢）里，**饥饿掉血、跌落、坠机、
+  卡死一律不走**——`take_damage` 里第一条就是 `if GameState.is_peaceful(): return`（D-078），
+  与「和平只拦外部攻击」的语义天然对齐。若图省事发在 `_damage()` 里，掉血与受击音就会被
+  无端绑死。
+- `fish_hooked` 发在 `player.gd` 的 `FISH_WAITING → FISH_BITING` 转换处，每竿至多一次。
+
+同一音效有 45 ms 节流（`MIN_GAP`）：连挖方块、连捡掉落物时不会糊成一片噪音。
+
+### 4. 音效偏好是**设备级**，且读档路径绝不写盘
+
+落 `user://audio.json`（`{enabled, volume}`），**不并进** `FlightSettings` 的
+`user://settings.json`：后者是飞行/相机的键表，混进去会让「恢复默认」按钮误伤音效开关，
+且 `FlightSettings` 已声明为纯飞行语义。`Sfx._load()` 在文件不存在时**只赋默认值、不写盘**，
+只有玩家真的在设置面板拨了开关才 `_save()`——这是 D-010 的直接推论，也已在回归里验证：
+**跑完 51 个探针，`audio.json` 不存在、`[user://] RESTORED_OK`、零 DIFF。**
+
+### 5. UI 侧两处新增反馈
+
+- **受击红闪**（`hud.gd` `_build_pain_flash`）：全屏 `ColorRect`，alpha 0.30 → 0.5 s 淡出。
+  刻意放在 HUD `root` 的**最底层**——3D 画面被染色，但其后所有 HUD 元素压在上面，
+  不会把爱心/快捷栏糊成一片红。连击时先 `kill()` 旧 tween 再叠满，否则第二下会被正在淡出的
+  旧 tween 吞掉。
+- **咬钩大字**（`hud.gd` `_build_fish_callout`）：屏幕中线偏下一条 34 px 亮黄描边
+  「🎣 咬钩了！按右键收竿」。这是全工程**唯一「没看见就失败」的时刻**（1.6 s 窗口），
+  原来只有一条 32 px 角落 Toast，小屏 + 儿童注意力偏移时极易错过。常亮 1.7 s（略长于窗口）
+  再 0.3 s 淡出：窗口关掉的瞬间提示正好退场，不会让孩子以为「还能按」。
+
+### 6. 竞速地形粒子：`dust` / `wet` 从死数据变成消费方
+
+`data/racing/terrain.json` 的 `dust` / `wet` 两个布尔**自写入起就无任何消费方**。本轮在
+`race_car.gd` 加两路 `CPUParticles3D`（`DustFx` 沙土色 / `SplashFx` 淡青白），由
+`set_terrain_fx(terrain, speed_ratio)` 驱动：
+
+- `speed_ratio = car.speed() / car.max_speed()`，**低于 0.22 不出特效**（慢速挪车扬尘很莫名其妙）；
+- 两路互斥，且「湿优先」——数据里不会同时为真，但将来数据写错时也不会有两层粒子叠加；
+- 硬约束照旧：**CPU 粒子**（与 `BreakFx` 同族，不依赖 GPU 特性）、`amount = 12`、
+  寿命 0.5 s、不投影（赛道本身已关阴影）；`emitting` 起步为 false，柏油路面一路零开销。
+
+竞速音效额外接在 `race_scene.gd` 的四个时刻（场景内直接调 `Sfx.play`，不走总线——
+这些事件不跨场景）：倒计时 3/2/1 滴答（用 `ceil(countdown)` 游标，首帧的 4 被
+`1..3` 过滤掉）、出发、玩家过门、玩家完圈。
+
+### 7. 验证 / 回归
+
+- 全量日常回归 **51 探针 0 FAIL，PASS 合计 2147**——与 D-078 后的既有基线**逐值一致**。
+- 受影响的探针数字全部对齐：`racing_probe 82/0`、`settings_panel_probe 62/0`（新增的
+  「音效」行未改动其断言）、`flight_settings_probe 35/0`（`FlightSettings` 一字未改）、
+  `interaction_probe 15/0`（`dropped_item` 改动）、`fishing_probe 87/0`、`life_probe 440/0`。
+- `[user://] RESTORED_OK`，`audio.json` 未产生。
+- 前置自测：`tmp/sfx_check.tscn` 13/13 PASS（音色表 14 条、未收录键静默忽略、
+  只读不写、拨开关才落盘、音量上钳 1.0）。
+
+### 8. 待办（不阻塞本轮）
+
+1. **`life_probe` 的「松手射出一支箭且蓄力归零」是既有 flaky 断言**：本轮首次跑 FAIL=1，
+   `git stash` 后在干净 HEAD 上复跑同样 FAIL，随后全量回归里又 PASS。属机会性断言
+   （`main_scene.get_children()` 里数 `ArrowProjectile` + 一帧后读蓄力），需按坑 #15 的
+   构造式喂帧重写，本轮不扩大范围。
+2. **音色未做主观调音**：音高/时长是按「能区分」而非「好听」定的，需真机试听再调。
+   音量 0.7 缺省 + 单音 0.3~0.62 相对值，可能对儿童偏轻或偏响。
+3. **钓鱼侧其余 P0 未做**（见 D-080 预留）：咬钩窗口温和化（木 1.6→3.0 s / 铁 3.8 s）、
+   稀有度×重量的回报差异（`max_weight_kg` 只写不读）、移动端卸力 ± 按钮。
+4. **竞速侧 P0 未做**：触屏操控（`_apply_player_input` 只读键盘，Android 上开不动车）、
+   AI 速度归一与橡皮筋。二者已由只读调研定案，因成员被 429 限流中断而未落代码。
+5. `README.md` 的 M9 勾选项：等音效调音与竞速触屏落地后再一并勾。

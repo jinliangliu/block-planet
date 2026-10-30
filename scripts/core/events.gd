@@ -76,6 +76,20 @@ signal smelt_done(item_id: int)
 ## 由 HUD 以 Toast 呈现，避免各模块各自持有界面引用。
 signal notice(text: String)
 
+## 玩家把地面掉落物收进背包后广播（M9 反馈层）：拾取音效由 Sfx 监听，
+## 拾取飘字由 HUD 监听。count 为本次实际收进的数量（背包满时只进一部分）。
+signal item_picked(item_id: int, count: int)
+
+## 玩家被**外部攻击**击中后广播（生物近战、箭矢；M9 反馈层）：Sfx 放受击音，
+## HUD 打一次屏幕红闪。amount 为实际结算的扣血量。
+## 饥饿 / 跌落 / 坠机 / 卡死**不走这条**——那是自身损耗不是「被攻击」，
+## 走这条路会让掉血与受击音无端绑死（D-078 同理：和平只拦外部攻击）。
+signal player_hurt(amount: int)
+
+## 垂钓进入「咬钩」瞬间广播，每竿至多一次（M9 反馈层）：咬钩是全工程唯一
+## 「不听不看就会错过」的时刻，Sfx 由它放双响提醒，HUD 由它弹大字。
+signal fish_hooked
+
 ## 生物长大一个阶段后广播，进度核心据此累计「观察成长」类成就。
 signal mob_grown(mob_type: int, stage: int)
 

@@ -1472,6 +1472,8 @@ func take_damage(amount: int, source: String = "") -> void:
 		return
 	_hurt_invuln = HURT_INVULN_TIME
 	_damage(amount, source)
+	# M9 反馈层：只报「被外部攻击」这一条路（饥饿/跌落/坠机/卡死不走 take_damage）。
+	Events.player_hurt.emit(amount)
 
 
 func _respawn() -> void:
@@ -1693,6 +1695,7 @@ func _update_fishing(delta: float) -> void:
 		_fishing = FISH_BITING
 		_fish_timer = FISH_BITE_WINDOW
 		_bobber.set_biting(true)
+		Events.fish_hooked.emit()
 		Events.notice.emit("咬钩了！快按右键收竿。")
 	else:
 		# 咬钩窗口错过：鱼儿脱钩，回到等待状态。
