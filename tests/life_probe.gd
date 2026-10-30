@@ -1134,6 +1134,17 @@ func _run() -> void:
 		"可打开任务面板且玩家被冻结（J 键路径）")
 	hud._quest_panel.set_tab(1)
 	_check(hud._quest_panel.get_tab() == 1, "可切换到成就页签")
+	hud._quest_panel.set_tab(QuestPanel.Tab.LESSONS)
+	_check(hud._quest_panel.get_tab() == QuestPanel.Tab.LESSONS,
+		"可切换到探索课堂页签（第三页签）")
+	# 页签按钮文案统一取自 QuestPanel.TAB_TITLES，测试按常量比对，避免写死中文。
+	var lesson_tab_shown := false
+	for node in hud._quest_panel.find_children("*", "Button", true, false):
+		var btn := node as Button
+		if btn != null and btn.text == QuestPanel.TAB_TITLES[int(QuestPanel.Tab.LESSONS)]:
+			lesson_tab_shown = true
+	_check(lesson_tab_shown and QuestPanel.TAB_TITLES[2] == "探索课堂",
+		"第三页签按钮文案为探索课堂")
 	hud.close_quest_panel()
 	_check(not hud._quest_panel.is_open() and player.is_physics_processing(),
 		"关闭任务面板后玩家恢复物理处理")

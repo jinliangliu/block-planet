@@ -2651,4 +2651,43 @@ daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照
 - 修复后 4 个探针数字与干净基线逐一对齐：`interaction_probe` 15/0、`life_probe` 419/0、`flight_probe` 146/0、`stuck_rescue_probe` 14/0；`profile_slot_probe` 21/0。
 - 全量 headless **51 个探针 2126 PASS / 0 FAIL**，无 SCRIPT ERROR / Parse Error；`[user://] RESTORED_OK`（存档逐字节一致，仅排除 logs / 引擎二进制缓存）。
 - `rc=139` 属已记录的良性现象（Godot 退出期 Vulkan 清理段崩溃），断言全 PASS 即视为通过。
-- 工程环境备注：本轮后台任务持续以 exit 125 失败（Godot 无法在后台沙箱拉起），改为**前台分段串行**执行同一套探针后恢复正常； Godsot 二进制与 `user://` 本身完好，非工程缺陷。
+- 工程环境备注：本轮后台任务持续以 exit 125 失败（Godot 无法在后台沙箱拉起），改为**前台分段串行**执行同一套探针后恢复正常；Godot 二进制与 `user://` 本身完好，非工程缺陷。
+
+## D-077（2026-10-30）探索课堂：M7.2~M7.3 任务面板第三页签
+
+### 决策依据
+- 路线图 M7.2~M7.4「探索课堂任务页签 + 档案系统」，其中档案系统（D-076）已完成；本次落地**探索课堂页签**，把 `game-design.md` §12「探索目标」从一张学科表变成**游戏内可追踪的目标**。
+- 调研发现 §12 只有「学科 × 载体」映射表，**没有成文的课程清单、没有年龄分级、没有完成判据**；规划里提过的 `HISTORY_CARDS` 代码中并不存在。故由策划补拟课程骨架，主理人裁决后定型。
+
+### 设计取舍（主理人裁决）
+- **新增 `Category.CLASSROOM`**（而非复用 `EXPLORE`）**：课程是「引导去做」，成就是「事后表彰」，混在同一组会让孩子找不到课。已有 EXPLORE 成就 10 枚不受影响。
+- **接受判据与既有成就重合**（如 `cls_region3` 与 `a_exp_region3`、`cls_blocks8` 与 `a_exp_blocks`、`cls_quiz5` 与 `a_quiz_2`）：两条链并行是既有设计（`game-design.md:616-618`），去重需引入复合判据，成本远大于收益。
+- **本轮零新增埋点**：7 节课判据 100% 落在现有可观测计数上（`regions_*` / `distinct_mined` / `grown_any` / `quiz_correct` / `smelted` / `flew_distance`）。
+- **第三页签沿用既有两颗页签的全部几何参数**（120×38 / font 18 / 同色板），由 `TAB_TITLES` 常量数组驱动循环，避免硬编码页签数。
+
+### 两个必须补的隐性坑（漏掉功能会静默失效）
+1. **`QuestData.entry_by_id()` 不遍历课程表** → `Progress.claim()` 取不到 reward，**课程永远领不到奖**。
+2. **`Progress._reevaluate()` 不遍历课程表** → 课程**永远停在 ACTIVE**，不发完成信号。
+> 两者都不会报错，只会「功能看起来没生效」，属最易漏的一类缺陷。
+
+### 顺带修复的 latent bug
+- goal 类型 `prefix_count` 已在 `quest_data.gd`（`q_fish_oceans`）使用，但 `progress_manager.goal_progress()` **没有该分支**，会落 default 访问不存在的 `goal["key"]`，导致该钓鱼任务无法可靠判定。已补分支（复用现成 `_count_prefix()`）。`fishing_probe` 87/0 验证无副作用。
+
+### 新增 / 改动
+- `scripts/core/quest_data.gd`：枚举末位追加 `CLASSROOM`；`category_title()` 返回「探索课堂」；新增 `static var _lessons` + `lessons()`（照抄既有惰性 `_build()` 模式）；`entry_by_id()` 追加 lessons 遍历；7 条 `cls_*` 课程数据（奖励沿用既有 `{"item": 204, "count": 2}` 写法，未臆造 id）。**既有 quests/achievements 条目一字未改**，成就仍 28 枚（`life_probe` 红线）。
+- `scripts/systems/progress_manager.gd`：`_reevaluate()` 纳入 `lessons()`（传 `is_achievement=false`，走任务完成/领奖通路）；补 `prefix_count` 分支。`_count_claimed_quests()` 天然只遍历 quests，「新手毕业」口径不受影响。
+- `scripts/ui/quest_panel.gd`：`enum Tab` 末位追加 `LESSONS`（0/1 数值不变，不破坏 `tests/quest_shot.gd:36` 与既有 `set_tab(1)` 引用）；`TAB_TITLES` 常量驱动；`clampi` 上界改用 `TAB_TITLES.size()-1`；`refresh()` 改 `match` 三分支；新增 `_build_lesson_page()` 复用 `_make_entry(entry, true)`（自动继承进度条/奖励/领奖），不嵌套 ScrollContainer。`_build_achievement_page()` 分类白名单未动，CLASSROOM 不会串进成就页。
+- `tests/life_probe.gd`：新增两条断言（第三页签可切换、按钮文案取自 `TAB_TITLES` 而非写死中文）。
+- 文档：`game-design.md` §12.1 补课程表与取舍，路线图 M7.2~M7.4 状态改「已实施」。
+
+### 验证 / 回归
+- 全量 headless **51 个探针 2128 PASS / 0 FAIL**，无 SCRIPT ERROR / Parse Error，`[user://] RESTORED_OK`。
+- **增量完全可解释**：改动前基线 2126 PASS，改动后 2128 PASS，差值 +2 恰为新增的两条第三页签断言；其余探针数字与基线逐一对齐。
+
+### 已做的集成风险自查
+- 全工程**没有任何地方全量遍历 `Category` 枚举**（`grep` 确认，唯一一处是 `quest_panel.gd:166-167` 的显式白名单），故新增枚举值不会在别处多渲染一组。
+
+### 待办（不阻塞本轮）
+1. **`cards_read` 埋点**：`game-design.md` 声称「读过卡片 → 答得出题」闭环成立，但读侧无观测点，该设计意图目前无法验证。需 1~2 行埋点 + 「地理知识」类课程。
+2. **移动端无法打开任务面板**：J 键是唯一入口，触屏面板行（`hud.gd:603-640`）没有「任务」按钮——手机上现在就打不开任务面板，属**既有缺口非本次引入**。补一个 76×76 按钮即可，但会改动 HUD 布局（有截图探针基线），故单列。
+3. 环保课勿复用 `protected_blocked`（语义是「试图伤害保护动物被拦截」，做成就等于鼓励孩子去打），建议改走「浏览保护动物图鉴条目」。既有成就 `a_protect_1` 存在同一问题，一并报备。

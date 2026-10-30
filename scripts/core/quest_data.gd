@@ -12,7 +12,7 @@ extends RefCounted
 ## 状态机：任务按 prerequisite 顺序解锁（前序领奖后下一环可见）；
 ## 成就无链式依赖，全部默认可见。ACTIVE → DONE（达成）→ CLAIMED（领奖）。
 
-enum Category { QUEST, QUIZ, SURVIVAL, EXPLORE, CHALLENGE }
+enum Category { QUEST, QUIZ, SURVIVAL, EXPLORE, CHALLENGE, CLASSROOM }
 
 const QUIZ_REWARD_EVERY := 3
 const QUIZ_REWARD_ITEM := 208   # BREAD
@@ -20,6 +20,7 @@ const QUIZ_REWARD_COUNT := 2
 
 static var _quests: Array[Dictionary] = []
 static var _achievements: Array[Dictionary] = []
+static var _lessons: Array[Dictionary] = []
 
 ## 新手引导链：按 prerequisite 串成 8 步，教会全部基础操作。
 static func quests() -> Array[Dictionary]:
@@ -35,11 +36,21 @@ static func achievements() -> Array[Dictionary]:
 	return _achievements
 
 
+## 探索课堂：用已有行为计数引导孩子认识世界、生物、工艺与飞行。
+static func lessons() -> Array[Dictionary]:
+	if _lessons.is_empty():
+		_build()
+	return _lessons
+
+
 static func entry_by_id(id: String) -> Dictionary:
 	for entry in quests():
 		if String(entry["id"]) == id:
 			return entry
 	for entry in achievements():
+		if String(entry["id"]) == id:
+			return entry
+	for entry: Dictionary in lessons():
 		if String(entry["id"]) == id:
 			return entry
 	return {}
@@ -57,6 +68,8 @@ static func category_title(category: int) -> String:
 			return "地图探索"
 		Category.CHALLENGE:
 			return "游戏闯关"
+		Category.CLASSROOM:
+			return "探索课堂"
 	return "其他"
 
 
@@ -218,6 +231,51 @@ static func _build() -> void:
 			"title": "三轮车冠军", "desc": "骑着自己的三轮车，赢得一场竞速比赛。",
 			"goal": {"type": "count", "key": "race_win_vehicle_tricycle", "count": 1},
 			"reward": {"item": 204, "count": 5},
+		},
+	]
+
+	_lessons = [
+		{
+			"id": "cls_region3", "category": Category.CLASSROOM, "prerequisite": "",
+			"title": "走遍三个家", "desc": "我们的世界分成许多片区，先去认识三个不同的家。",
+			"goal": {"type": "regions", "count": 3},
+			"reward": {"item": 204, "count": 2},
+		},
+		{
+			"id": "cls_region5", "category": Category.CLASSROOM, "prerequisite": "cls_region3",
+			"title": "半个地球", "desc": "世界还有更多样的风景，再去认识两个新的家吧。",
+			"goal": {"type": "regions", "count": 5},
+			"reward": {"item": 204, "count": 2},
+		},
+		{
+			"id": "cls_blocks8", "category": Category.CLASSROOM, "prerequisite": "cls_region5",
+			"title": "收藏家入门", "desc": "不同地方会产出不同的石头，带上工具去认识它们。",
+			"goal": {"type": "distinct_mined", "count": 8},
+			"reward": {"item": 204, "count": 2},
+		},
+		{
+			"id": "cls_grow1", "category": Category.CLASSROOM, "prerequisite": "",
+			"title": "生命的魔法", "desc": "小动物会慢慢长大，有的还会变成全新的模样，静静观察生命的变化吧。",
+			"goal": {"type": "count", "key": "grown_any", "count": 1},
+			"reward": {"item": 204, "count": 2},
+		},
+		{
+			"id": "cls_quiz5", "category": Category.CLASSROOM, "prerequisite": "cls_grow1",
+			"title": "图鉴小学者", "desc": "学到的东西能够答出来，才会记得更牢，去知识问答里检验新知识吧。",
+			"goal": {"type": "count", "key": "quiz_correct", "count": 5},
+			"reward": {"item": 204, "count": 2},
+		},
+		{
+			"id": "cls_smelt3", "category": Category.CLASSROOM, "prerequisite": "",
+			"title": "炉火与金属", "desc": "有些石头放进炉子里，会在火焰中变成有用的金属，去看看冶炼的变化吧。",
+			"goal": {"type": "count", "key": "smelted", "count": 3},
+			"reward": {"item": 204, "count": 2},
+		},
+		{
+			"id": "cls_fly300", "category": Category.CLASSROOM, "prerequisite": "cls_smelt3",
+			"title": "从天上看看", "desc": "飞高一点再向远处飞，脚下的地形就会慢慢变成一张地图。",
+			"goal": {"type": "count", "key": "flew_distance", "count": 300},
+			"reward": {"item": 204, "count": 2},
 		},
 	]
 

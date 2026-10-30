@@ -102,6 +102,8 @@ func goal_progress(goal: Dictionary) -> Vector2i:
 			return Vector2i(_count_prefix("mined_"), target)
 		"quests_done":
 			return Vector2i(_count_claimed_quests(), target)
+		"prefix_count":
+			return Vector2i(_count_prefix(String(goal["prefix"])), target)
 		_:
 			return Vector2i(mini(int(counters.get(String(goal["key"]), 0)), target), target)
 
@@ -140,6 +142,8 @@ func _reevaluate() -> void:
 		_check_entry(entry, false)
 	for entry in QuestData.achievements():
 		_check_entry(entry, true)
+	for entry: Dictionary in QuestData.lessons():
+		_check_entry(entry, false)
 
 
 func _check_entry(entry: Dictionary, is_achievement: bool) -> void:

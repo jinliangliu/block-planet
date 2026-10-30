@@ -2,12 +2,14 @@ class_name QuestPanel
 extends Control
 
 ## 任务与成就面板：J 键唤出的模态窗口（冻结玩家），配色与储物箱同色系。
-## 左侧页签「任务 / 成就」；任务页含新手引导链与知识问答区，
-## 成就页按五类分组。达成条目可点「领取奖励」，发放由 HUD 执行。
+## 左侧页签「任务 / 成就 / 探索课堂」；任务页含新手引导链与知识问答区，
+## 成就页按四类分组，探索课堂页按 prerequisite 链呈现课程。达成条目可点「领取奖励」，发放由 HUD 执行。
 
 signal closed
 
-enum Tab { QUESTS, ACHIEVEMENTS }
+enum Tab { QUESTS, ACHIEVEMENTS, LESSONS }
+
+const TAB_TITLES: Array[String] = ["任务", "成就", "探索课堂"]
 
 const PANEL_BG := Color(0.95, 0.92, 0.84)
 const PANEL_BORDER := Color(0.62, 0.47, 0.27)
@@ -71,9 +73,9 @@ func _ready() -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 8)
 	vbox.add_child(tabs)
-	for i in 2:
+	for i in TAB_TITLES.size():
 		var btn := Button.new()
-		btn.text = "任务" if i == Tab.QUESTS else "成就"
+		btn.text = TAB_TITLES[i]
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(120, 38)
 		btn.add_theme_font_size_override("font_size", 18)
@@ -119,7 +121,7 @@ func get_tab() -> int:
 
 
 func set_tab(tab: int) -> void:
-	_tab = clampi(tab, 0, 1)
+	_tab = clampi(tab, 0, TAB_TITLES.size() - 1)
 	refresh()
 
 
@@ -134,10 +136,13 @@ func refresh() -> void:
 		var style := _btn_style(TAB_ACTIVE if i == _tab else TAB_BG)
 		_tab_buttons[i].add_theme_stylebox_override("normal", style)
 		_tab_buttons[i].add_theme_stylebox_override("pressed", style)
-	if _tab == Tab.QUESTS:
-		_build_quest_page()
-	else:
-		_build_achievement_page()
+	match _tab:
+		Tab.QUESTS:
+			_build_quest_page()
+		Tab.LESSONS:
+			_build_lesson_page()
+		_:
+			_build_achievement_page()
 
 
 func _build_quest_page() -> void:
@@ -170,6 +175,35 @@ func _build_achievement_page() -> void:
 			if int(entry["category"]) != category:
 				continue
 			_content.add_child(_make_entry(entry, true))
+
+
+## 探索课堂页：课程按 prerequisite 链顺序解锁，复用同一条目渲染（进度条/奖励/领奖）。
+func _build_lesson_page() -> void:
+	var header := Label.new()
+	header.text = "◆ " + QuestData.category_title(QuestData.Category.CLASSROOM)
+	header.add_theme_font_size_override("font_size", 19)
+	header.add_theme_color_override("font_color", TITLE_COLOR)
+	_content.add_child(header)
+
+	var intro := Label.new()
+	intro.text = "按顺序完成课程，达成后可领取奖励并解锁下一课。"
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	intro.add_theme_font_size_override("font_size", 15)
+	intro.add_theme_color_override("font_color", BODY_COLOR)
+	_content.add_child(intro)
+
+	var any_visible := false
+	for entry in QuestData.lessons():
+		if not Progress.is_visible(entry):
+			continue
+		any_visible = true
+		_content.add_child(_make_entry(entry, true))
+	if not any_visible:
+		var empty := Label.new()
+		empty.text = "暂无开放的课程"
+		empty.add_theme_font_size_override("font_size", 15)
+		empty.add_theme_color_override("font_color", BODY_COLOR)
+		_content.add_child(empty)
 
 
 ## 单条任务/成就行：标题 + 描述 + 进度条 + 状态按钮。
