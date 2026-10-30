@@ -204,6 +204,11 @@ func _ready() -> void:
 	# 无头环境（探针 / CI）不自动弹出：模态界面会冻结玩家，阻塞自动化流程。
 	if GameState.needs_region_pick and DisplayServer.get_name() != "headless":
 		_hud.open_map_selector()
+	# 档案选择器（M7.4 多存档槽）：首次进入且无任何档案、或多档案未选定当前时，
+	# 启动即弹出引导玩家建/选档案；无头环境不自动弹出（同 needs_region_pick 守卫：
+	# 模态界面会冻结玩家，阻塞探针 / CI 的自动化流程）。手动入口为 F3（toggle_profile）。
+	if (Profile.list_slots().is_empty() or Profile.needs_choice()) and DisplayServer.get_name() != "headless":
+		_hud.open_profile_picker()
 	# 从竞速场景返回：RaceSystem 里的一次性标记要求「回来就直接再开赛道选择器」，
 	# 省得「比完 → 想换条赛道」还要先绕回地图页。标记无论是否开窗都要清掉，
 	# 无头环境下只清标记不开窗（同 needs_region_pick 的守卫）。

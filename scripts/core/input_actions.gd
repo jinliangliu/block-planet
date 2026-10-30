@@ -23,6 +23,8 @@ const ACTIONS := {
 	"toggle_missions": [KEY_K],
 	# 飞行设置面板（O）：难度与辅助稳定（D-032 Phase 5-b）。
 	"toggle_settings": [KEY_O],
+	# 档案选择器（M7.4 多存档槽）：F3 打开/关闭；模态冻结玩家。F3 全工程空闲。
+	"toggle_profile": [KEY_F3],
 	# 飞行器驾驶：飞机只由键盘（触屏由 HUD 摇杆）操纵——方向键拉杆压杆，
 	# D-070 起鼠标不再接飞机，座舱内只环顾驾驶员视角（aircraft_camera.gd）；
 	# W/S 复用 move_forward/back（油门），A/D 复用 move_left/right（方向舵），

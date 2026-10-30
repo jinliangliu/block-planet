@@ -3,6 +3,8 @@ class_name HUD
 ## 移动端触屏 HUD：左侧摇杆、右侧视角滑动、右下角动作按钮。
 ## 桌面环境显示键位提示。
 
+const ProfilePickerScript := preload("res://scripts/ui/profile_picker.gd")
+
 ## 生命爱心条：5 颗心换算 20 点生命，每颗 4 点。
 const HEART_COUNT := 5
 const HEARTS_PER_POINT := 4
@@ -43,6 +45,8 @@ var _bestiary: BestiaryUI
 var _quest_panel: QuestPanel
 var _mission_panel: MissionPanel
 var _settings_panel: SettingsPanel
+## 档案选择器（M7.4 多存档槽）：模态窗口，冻结玩家，列出并切换玩家档案。
+var _profile_picker = null
 ## 钓鱼三件套（feature_fishing）：钓具界面 → 渔猎界面 → 教学浮层。
 ## 层级依次升高，教学盖在最上面（z_index 40）。
 var _fishing_gear: FishingGearUI
@@ -256,6 +260,7 @@ func _build() -> void:
 	_build_quest_panel(root)
 	_build_mission_panel(root)
 	_build_settings_panel(root)
+	_build_profile_picker(root)
 	_build_fishing(root)
 	_build_racing(root)
 	# 航海模式主界面（D-042）：登船后显形，替代徒步 HUD 关注方位/海况/航向/油量。
@@ -366,6 +371,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			close_settings_panel()
 			get_viewport().set_input_as_handled()
 		return
+	# 档案选择器同为模态窗口：ESC / F3 关闭，其余热键让位。
+	if _profile_picker != null and _profile_picker.is_open():
+		if event is InputEventKey and event.pressed and not event.echo \
+				and (event.keycode == KEY_ESCAPE or event.keycode == KEY_F3):
+			close_profile_picker()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		# ── 飞行视角键（D-033，仅驾驶中）────────────────────────
 		# C 切第一/三人称、V 自由观察（消费事件以阻止建造界面打开）、
@@ -413,6 +425,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			open_mission_panel()
 		elif event.is_action_pressed("toggle_settings"):
 			open_settings_panel()
+		elif event.is_action_pressed("toggle_profile"):
+			open_profile_picker()
 		elif event.keycode == KEY_ESCAPE and _box_overlay != null and _box_overlay.visible:
 			set_box_open(false)
 			get_viewport().set_input_as_handled()
@@ -2912,6 +2926,40 @@ func close_quest_panel() -> void:
 func _on_quest_panel_closed() -> void:
 	_set_player_frozen(false)
 	_on_manual_closed()
+
+
+## 档案选择器（M7.4 多存档槽）：列出并切换玩家档案，模态冻结玩家。
+func _build_profile_picker(root: Control) -> void:
+	_profile_picker = ProfilePickerScript.new()
+	_profile_picker.closed.connect(_on_profile_picker_closed)
+	_profile_picker.slot_selected.connect(_on_profile_slot_selected)
+	root.add_child(_profile_picker)
+
+
+func open_profile_picker() -> void:
+	if _profile_picker == null:
+		return
+	_profile_picker.open()
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_profile_picker() -> void:
+	if _profile_picker == null:
+		return
+	_profile_picker.close()
+
+
+func _on_profile_slot_selected(_id: String) -> void:
+	# 进度已随槽切换重载；这里仅做提示，不重复冻结逻辑。
+	Events.notice.emit("已切换玩家档案：" + Profile.current_name())
+
+
+func _on_profile_picker_closed() -> void:
+	_set_player_frozen(false)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 ## 飞行任务面板：模态窗口，冻结玩家（同任务与成就面板）。

@@ -2632,3 +2632,23 @@ daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照
 - `profile_slot_probe` 0 FAIL；全量 headless 回归（含本探针）全绿、0 FAIL。
 - 已知 `[user://] DIFF` 为环境态产物：`progress.json` 本就是现有 `Progress` 在 notify 时落盘的文件（改版前后路径一致），仅当回归基线备份不含该文件时才被 diff 标出，非本改动引入。
 - 待续：档案选择器 UI（ProfilePicker）与「探索课堂」任务页签（M7.2~M7.3）下一批落地。
+
+### UI 落地：档案选择器 ProfilePicker（同一 M7.4，2026-10-30）
+
+- 新增 `scripts/ui/profile_picker.gd`：模态档案选择器（列出 / 进入 / 删除 / 新建，当前槽标识，仅剩一槽时禁用删除）。与 `profile_manager.gd` 同理**不引入 `class_name`**，由 HUD 以 `preload` 实例化，规避 `global_script_class_cache` 失配。配色与复用 `UiKit` 与任务面板同色系。
+- 新增输入动作 `toggle_profile: [KEY_F3]`（F3 全工程空闲）。F3 打开/关闭档案选择器；面板打开时 HUD `_unhandled_input` 走模态让位（仅 ESC / F3 生效）。
+- `scripts/ui/hud.gd`：`_build()` 中构建选择器；`_unhandled_input` 加模态拦截 + F3 主热键；`closed` 信号接到真正解冻玩家的 `_on_profile_picker_closed`（初版误接 `close_profile_picker`，会对已关闭面板再关一次）。
+
+### 关键教训（务必复用）
+
+- **模态界面的「启动自动弹出」必须放在 `main.gd`，不能放 `HUD._build()`**，且一律加 `DisplayServer.get_name() != "headless"` 门控。
+- 初版把自动弹出写在 `_build()` 末尾，导致探针一跑就从这里弹出选择器并 `_set_player_frozen(true)`；探针不会主动关闭它，玩家被冻结，连带打破 4 个探针共 13 条断言（飞行键盘输入、第三人称相机、关闭地图选择器后物理恢复、脱困落点——表面与档案系统毫不相干，极易误判为「历史失败/无头抖动」）。
+- `main.gd:203-206` 已有同构先例（`needs_region_pick` 选地图）并写明同一理由：「模态界面会冻结玩家，阻塞自动化流程」。本次按同一惯用法落位，不再自创检测方式。
+- **判定「失败是否自己引入」只能用 stash 对照**：把未提交改动 `git stash push -u` 后在干净 HEAD 重跑同一套回归，比对 FAIL 集合。干净 HEAD 那 4 个探针本是全绿（0 FAIL），据此才确认是本次引入而非基线已红。
+
+### 验证 / 回归（UI 落地后）
+
+- 修复后 4 个探针数字与干净基线逐一对齐：`interaction_probe` 15/0、`life_probe` 419/0、`flight_probe` 146/0、`stuck_rescue_probe` 14/0；`profile_slot_probe` 21/0。
+- 全量 headless **51 个探针 2126 PASS / 0 FAIL**，无 SCRIPT ERROR / Parse Error；`[user://] RESTORED_OK`（存档逐字节一致，仅排除 logs / 引擎二进制缓存）。
+- `rc=139` 属已记录的良性现象（Godot 退出期 Vulkan 清理段崩溃），断言全 PASS 即视为通过。
+- 工程环境备注：本轮后台任务持续以 exit 125 失败（Godot 无法在后台沙箱拉起），改为**前台分段串行**执行同一套探针后恢复正常； Godsot 二进制与 `user://` 本身完好，非工程缺陷。
