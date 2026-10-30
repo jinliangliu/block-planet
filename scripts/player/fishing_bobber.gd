@@ -11,6 +11,12 @@ const BOB_AMPLITUDE := 0.06
 const LINE_THICKNESS := 0.012
 ## 浮标与竿尖（相机）距离过远时视为脱线。
 const LINE_MAX := 40.0
+## 咬钩表现（M9 钓鱼完善）：原下沉 0.24 m、抖幅 ×2.4、频率 ×2.6，在第三人称
+## 距离下几乎看不出「往下一沉」，而咬钩是全工程唯一「没看见就失败」的时刻。
+## 加深到 0.55 m、抖幅 ×4、频率 ×3.6——余光里就能捕捉到那一下猛沉。
+const BITE_SINK := 0.55
+const BITE_BOB_MUL := 4.0
+const BITE_SPEED_MUL := 3.6
 
 var _player: Player
 var _line: MeshInstance3D
@@ -69,9 +75,9 @@ func is_biting() -> bool:
 
 
 func _process(delta: float) -> void:
-	_phase += delta * (BOB_SPEED * (2.6 if _biting else 1.0))
-	var sink := -0.24 if _biting else 0.0
-	var offset := sin(_phase) * (BOB_AMPLITUDE * (2.4 if _biting else 1.0))
+	_phase += delta * (BOB_SPEED * (BITE_SPEED_MUL if _biting else 1.0))
+	var sink := -BITE_SINK if _biting else 0.0
+	var offset := sin(_phase) * (BOB_AMPLITUDE * (BITE_BOB_MUL if _biting else 1.0))
 	_body.position.y = offset + sink
 	_update_line()
 

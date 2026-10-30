@@ -506,7 +506,7 @@ func _on_player_hurt(_amount: int) -> void:
 ## 咬钩大字（M9 反馈层）：全工程唯一「没看见就失败」的时刻。
 ## 原来只有一条 32 px 的角落 Toast，小屏 + 儿童注意力偏移时极易错过；
 ## 这里在屏幕中线偏下补一条 34 px 亮黄描边大字，覆盖整个咬钩窗口
-## （FISH_BITE_WINDOW 1.6 s）后再淡出。与 Sfx 的双响提醒构成视听双通道。
+## （木竿 3.0 s / 铁竿 3.8 s）后再淡出。与 Sfx 的双响提醒构成视听双通道。
 func _build_fish_callout(root: Control) -> void:
 	_fish_callout = Label.new()
 	_fish_callout.text = "🎣 咬钩了！按右键收竿"
@@ -535,9 +535,10 @@ func _on_fish_hooked() -> void:
 		_fish_callout_tween.kill()
 	_fish_callout.modulate.a = 1.0
 	_fish_callout_tween = create_tween()
-	# 1.7 s 常亮（略长于 1.6 s 的咬钩窗口）再 0.3 s 淡出：窗口关掉的瞬间
-	# 提示正好开始退场，孩子不会以为「还能按」。
-	_fish_callout_tween.tween_interval(1.7)
+	# 常亮 3.0 s（与木竿咬钩窗口等长）再 0.3 s 淡出。铁竿窗口 3.8 s 会略长于提示，
+	# 这是可接受的方向——提示只会「早退」不会「超时误导」；反过来的话孩子会在
+	# 窗口已关时仍看到「快按右键」。窗口常量改动时必须同步这一行。
+	_fish_callout_tween.tween_interval(3.0)
 	_fish_callout_tween.tween_property(_fish_callout, "modulate:a", 0.0, 0.3)
 
 
@@ -3345,13 +3346,19 @@ func _on_fishing_teaching_closed() -> void:
 
 
 ## 钓到鱼：生鱼入包（复用既有 RAW_FISH），图鉴记录由 FishingSystem 自己写。
-func _on_fish_caught(fish_id: String, _spot_id: String, _gear: Dictionary) -> void:
+## 条数按稀有度分级、破个人最佳再加一条（M9 钓鱼完善）——此前 0.05 kg 的小丑鱼
+## 与 1100 kg 的大白鲨都只给 1 条，「钓到大鱼」没有任何实际意义。
+func _on_fish_caught(fish_id: String, spot_id: String, _gear: Dictionary) -> void:
 	var entry := FishingSystem.get_fish(fish_id)
+	var result := FishingSystem.last_catch()
+	var count := FishingSystem.loot_count_for(fish_id, result)
 	if _player != null:
-		_player.inventory.add_item(ItemTypes.RAW_FISH, 1)
-	_push_log("钓到 %s（%s）" % [
-		String(entry.get("name_zh", fish_id)), String(FishingSystem.record_of(fish_id).get(
-			"first_caught_spot", ""))])
+		_player.inventory.add_item(ItemTypes.RAW_FISH, count)
+	var weight := float(result.get("weight_kg", 0.0))
+	var note := "，新纪录！" if bool(result.get("is_personal_best", false)) else ""
+	var spot_name := String(FishingSystem.get_spot(spot_id).get("name_zh", spot_id))
+	_push_log("钓到 %s（%s，%.2f kg，生鱼 ×%d%s）" % [
+		String(entry.get("name_zh", fish_id)), spot_name, weight, count, note])
 
 
 func _on_new_species(fish_id: String) -> void:

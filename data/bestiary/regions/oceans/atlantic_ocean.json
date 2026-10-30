@@ -14,6 +14,9 @@
     { "id": "green_sea_turtle_ao", "kingdom": "animalia", "category": "sea_animal", "name_zh": "绿海龟", "name_en": "Green Sea Turtle", "scientific": "Chelonia mydas", "fact_zh": "大西洋温暖海域常见，会跨洋迁徙。" },
     { "id": "sargassum", "kingdom": "plantae", "category": "algae", "name_zh": "马尾藻", "name_en": "Sargassum", "scientific": "Sargassum", "fact_zh": "漂浮在海面上，形成著名的马尾藻海。" },
     { "id": "seagrass_atlantic", "kingdom": "plantae", "category": "seagrass", "name_zh": "大西洋海草", "name_en": "Atlantic Seagrass", "scientific": "Zostera marina", "fact_zh": "海草床是很多小鱼和海马的家。" },
+    { "id": "atlantic_mackerel", "kingdom": "animalia", "category": "fish", "name_zh": "大西洋鲭鱼", "name_en": "Atlantic Mackerel", "scientific": "Scomber scombrus", "fact_zh": "成群结队地游，背部有深色的波浪花纹，游得很快。" },
+    { "id": "atlantic_herring", "kingdom": "animalia", "category": "fish", "name_zh": "大西洋鲱鱼", "name_en": "Atlantic Herring", "scientific": "Clupea harengus", "fact_zh": "一群鲱鱼能有几百万条，是海里最重要的口粮。" },
+    { "id": "atlantic_halibut", "kingdom": "animalia", "category": "fish", "name_zh": "大西洋庸鲽", "name_en": "Atlantic Halibut", "scientific": "Hippoglossus hippoglossus", "fact_zh": "比最大的锅盖还平，两只眼睛都长在脸的同一侧。" },
     { "id": "coral_atlantic", "kingdom": "animalia", "category": "sea_animal", "name_zh": "大西洋珊瑚", "name_en": "Atlantic Coral", "scientific": "Anthozoa", "fact_zh": "加勒比海的珊瑚礁非常有名。" }
   ]
 }

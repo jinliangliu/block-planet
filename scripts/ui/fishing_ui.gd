@@ -415,14 +415,39 @@ func _build_wait_stage() -> void:
 
 func _build_reel_stage() -> void:
 	var fish := FishingSystem.get_fish(FishingSystem.reel_state().get("fish_id", ""))
+	# 触屏没有键盘，而卸力是决定断线/跑鱼的核心机制——此前界面上写着「← → 调整」
+	# 但手机根本按不出来（M9 钓鱼完善）。
+	var touch := DisplayServer.is_touchscreen_available()
 	_subtitle.text = "第四步：鱼咬钩了！按住收线，鱼挣扎时松手放线。"
-	_drag_label.text = "卸力 ——（← → 调整）"
+	_drag_label.text = "卸力 ——" + ("（用下方按钮调整）" if touch else "（← → 调整）")
 	_stage_box.add_child(_fish_bar)
 	_stage_box.add_child(_progress_bar)
 	_stage_box.add_child(_tension_bar)
 	_info_label.text = "鱼在动：让它待在绿色安全区里再收线，硬拉会断线。"
 	if not fish.is_empty():
 		_title.text = "%s　·　收线中" % String(fish.get("name_zh", "?"))
+	if touch:
+		_build_drag_buttons()
+
+
+## 触屏专用卸力按钮（与键盘 ← → 同一套 add_drag，行为完全一致）。
+func _build_drag_buttons() -> void:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	var loose := Button.new()
+	loose.text = "卸力 −"
+	loose.custom_minimum_size = Vector2(124, 54)
+	loose.focus_mode = Control.FOCUS_NONE
+	loose.pressed.connect(func(): FishingSystem.add_drag(-DRAG_STEP))
+	row.add_child(loose)
+	var tight := Button.new()
+	tight.text = "卸力 ＋"
+	tight.custom_minimum_size = Vector2(124, 54)
+	tight.focus_mode = Control.FOCUS_NONE
+	tight.pressed.connect(func(): FishingSystem.add_drag(DRAG_STEP))
+	row.add_child(tight)
+	_stage_box.add_child(row)
 
 
 func _build_result_stage() -> void:
@@ -443,9 +468,21 @@ func _build_result_stage() -> void:
 	if bool(_result.get("is_new_species", false)):
 		_build_unlock_card(fish)
 	else:
-		_info_label.text = "%s　%.2f kg　（第 %d 次钓到）" % [
-			String(fish.get("name_zh", "?")), float(_result.get("weight_kg", 0.0)),
-			int(_result.get("catch_count", 1))]
+		# 重复钓获也要有正反馈（M9 钓鱼完善）：max_weight_kg 此前只写不读，
+		# 个人最佳孩子永远看不到。这里把它变成「新纪录！」与「最大 X kg」，
+		# 再给一个长期目标（已收集 n / 总数），让「又钓到同一条」不再是空手而归。
+		var record := FishingSystem.record_of(String(_result.get("fish_id", "")))
+		var total := FishingSystem.fish_list.size()
+		var progress := "已收集 %d / %d 种" % [FishingSystem.discovered_count(), total]
+		if bool(_result.get("is_personal_best", false)):
+			_info_label.text = "%s　%.2f kg　🏅 新纪录！（第 %d 次钓到）　%s" % [
+				String(fish.get("name_zh", "?")), float(_result.get("weight_kg", 0.0)),
+				int(_result.get("catch_count", 1)), progress]
+		else:
+			_info_label.text = "%s　%.2f kg　（第 %d 次钓到，最大 %.2f kg）　%s" % [
+				String(fish.get("name_zh", "?")), float(_result.get("weight_kg", 0.0)),
+				int(_result.get("catch_count", 1)),
+				float(record.get("max_weight_kg", 0.0)), progress]
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 10)

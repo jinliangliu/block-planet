@@ -306,6 +306,28 @@ func _run() -> void:
 	_check(is_equal_approx(FishingSystem.update_reel(0.1, 1.0), 0.0), "非收线态 update_reel 返回原进度")
 	_check(FishingSystem.try_catch().is_empty(), "进度未满 try_catch 返回空")
 
+	# ────────────── J 回报分级与个人最佳（M9 钓鱼完善） ──────────────
+	# loot_count_for 是纯函数，直接断言；不依赖状态机，也不依赖真实存档里钓过什么。
+	_check(FishingSystem.loot_count_for("pacific_clownfish") == 1,
+		"普通稀有度给 1 条生鱼")
+	var legendary_id := ""
+	for f: Dictionary in FishingSystem.fish_list:
+		if String(f.get("rarity", "")) == "legendary":
+			legendary_id = String(f.get("id", ""))
+			break
+	_check(legendary_id != "" and FishingSystem.loot_count_for(legendary_id) >= 4,
+		"传说稀有度给 4 条以上（%s → %d）" % [
+			legendary_id, FishingSystem.loot_count_for(legendary_id)])
+	_check(FishingSystem.loot_count_for("pacific_clownfish", {"is_personal_best": true}) == 2,
+		"破个人最佳额外 +1 条")
+	_check(FishingSystem.loot_count_for("no_such_fish") == 1,
+		"未知鱼种按最低档兜底（不崩、不空手）")
+	# last_catch 是 fish_caught 信号之外的第二条通路：信号只带 (fish_id, spot_id, gear)，
+	# 重量在信号层就丢了，HUD 靠这份快照决定回报条数。
+	var last: Dictionary = FishingSystem.last_catch()
+	_check(not last.is_empty() and last.has("weight_kg") and last.has("is_personal_best"),
+		"last_catch 保存重量与个人最佳标记")
+
 
 ## 收尾：还原钓鱼日志文本（不存在则删除）+ 关掉 _exit_tree 的补写闸，
 ## 再走 SaveGuard.restore()（progress/settings/竞速三件套 + Progress 内存态）。

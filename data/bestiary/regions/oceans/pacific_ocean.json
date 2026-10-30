@@ -15,6 +15,9 @@
     { "id": "pacific_salmon", "kingdom": "animalia", "category": "fish", "name_zh": "太平洋鲑鱼", "name_en": "Pacific Salmon", "scientific": "Oncorhynchus", "fact_zh": "逆流而上回到出生地产卵，被称为洄游。" },
     { "id": "giant_kelp", "kingdom": "plantae", "category": "algae", "name_zh": "巨藻", "name_en": "Giant Kelp", "scientific": "Macrocystis pyrifera", "fact_zh": "能长到60米长，是海獭的家。" },
     { "id": "seagrass_pacific", "kingdom": "plantae", "category": "seagrass", "name_zh": "海草", "name_en": "Seagrass", "scientific": "Zostera", "fact_zh": "海草是长在海底的植物，儒艮和海龟爱吃。" },
+    { "id": "pacific_clownfish", "kingdom": "animalia", "category": "fish", "name_zh": "小丑鱼", "name_en": "Clownfish", "scientific": "Amphiprion ocellaris", "fact_zh": "住在海葵里，身上的黏液让它不怕海葵的刺，互相帮忙。" },
+    { "id": "pacific_mackerel", "kingdom": "animalia", "category": "fish", "name_zh": "太平洋鲭鱼", "name_en": "Pacific Mackerel", "scientific": "Scomber japonicus", "fact_zh": "喜欢成群游动，鱼群密得像水里下了一场雨。" },
+    { "id": "pacific_marlin", "kingdom": "animalia", "category": "fish", "name_zh": "太平洋枪鱼", "name_en": "Pacific Marlin", "scientific": "Kajikia audax", "fact_zh": "上颚长长地翘起来像一柄剑，是外海最难缠的对手之一。" },
     { "id": "coral_pacific", "kingdom": "animalia", "category": "sea_animal", "name_zh": "珊瑚", "name_en": "Coral", "scientific": "Anthozoa", "fact_zh": "珊瑚看起来像石头，其实是很多小动物住在一起。" }
   ]
 }

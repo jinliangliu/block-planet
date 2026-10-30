@@ -13,6 +13,8 @@
     { "id": "bowhead_whale", "kingdom": "animalia", "category": "sea_animal", "name_zh": "弓头鲸", "name_en": "Bowhead Whale", "scientific": "Balaena mysticetus", "fact_zh": "寿命可达200年，头骨坚硬能破冰。" },
     { "id": "arctic_cod", "kingdom": "animalia", "category": "fish", "name_zh": "北极鳕鱼", "name_en": "Arctic Cod", "scientific": "Boreogadus saida", "fact_zh": "北极水域的重要鱼类，是海豹和鲸的食物。" },
     { "id": "arctic_kelp", "kingdom": "plantae", "category": "algae", "name_zh": "北极海带", "name_en": "Arctic Kelp", "scientific": "Laminaria", "fact_zh": "在冰冷的海水里生长，是海胆的食物。" },
+    { "id": "arctic_char", "kingdom": "animalia", "category": "fish", "name_zh": "北极红点鲑", "name_en": "Arctic Char", "scientific": "Salvelinus alpinus", "fact_zh": "冷水里的美人鱼，肚子在产卵季会染成晚霞一样的橙红。" },
+    { "id": "arctic_skate", "kingdom": "animalia", "category": "fish", "name_zh": "北极鳐", "name_en": "Arctic Skate", "scientific": "Amblyraja hyperborea", "fact_zh": "贴着冰海海底滑行，尾巴上还留着一根小小的毒刺。" },
     { "id": "arctic_phytoplankton", "kingdom": "plantae", "category": "algae", "name_zh": "北极浮游藻", "name_en": "Arctic Phytoplankton", "scientific": "Phytoplankton", "fact_zh": "小到看不见，却是整个海洋食物链的起点。" }
   ]
 }

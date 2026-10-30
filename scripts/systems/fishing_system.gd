@@ -72,6 +72,17 @@ const STRUGGLE_SWIM_HZ := 1.3    # 鱼左右游动频率
 ## 回放日志里的玩家列（HUD 左上角显示的名字，两处同一份措辞）。
 const PLAYER_LABEL := "小方块"
 
+## 回报数量（M9 钓鱼完善）：稀有度 → 生鱼条数。此前无论钓上 0.05 kg 的小丑鱼
+## 还是 1100 kg 的大白鲨都只给 1 条，「我费这么大劲换来了什么」没有答案。
+## 破个人最佳再加 1 条，让「这条特别大」有实际回报。
+const RARITY_LOOT := {
+	"common": 1,
+	"uncommon": 2,
+	"rare": 3,
+	"epic": 4,
+	"legendary": 5,
+}
+
 var gear: FishingGear
 var teaching: FishingTeaching
 var spots: Array = []
@@ -83,6 +94,11 @@ var state: int = State.IDLE
 var journal: Dictionary = {}
 ## 读档是否成功：失败时禁止回写，避免用默认模板覆盖真实存档（见 _load_journal）。
 var journal_ok := false
+## 最近一次成功钓获的完整结算快照（try_catch 的 result）。
+## 存在的理由：`fish_caught` 信号只带 (fish_id, spot_id, gear)，**重量在信号层就丢了**，
+## 而 HUD 要按重量/是否破纪录决定回报条数。改信号签名会破坏 fishing_probe 的既有
+## lambda 连接，故用这份只读快照把信息带过去。
+var _last_catch: Dictionary = {}
 
 var _spot_id := ""
 var _gear_set: Dictionary = {}
@@ -505,9 +521,11 @@ func try_catch() -> Dictionary:
 	record["first_caught_at"] = String(record.get("first_caught_at", now_text))
 	record["first_caught_spot"] = String(record.get("first_caught_spot", _spot_id))
 	record["first_caught_gear"] = record.get("first_caught_gear", _gear_snapshot())
+	# 个人最佳：更新前先取旧值，用来判定「这一条是不是新纪录」。
+	var prev_best := float(record.get("max_weight_kg", 0.0))
 	record["last_caught_at"] = now_text
 	record["catch_count"] = int(record.get("catch_count", 0)) + 1
-	record["max_weight_kg"] = maxf(float(record.get("max_weight_kg", 0.0)), weight)
+	record["max_weight_kg"] = maxf(prev_best, weight)
 	record["released"] = int(record.get("released", 0))
 	records[_hooked_id] = record
 	journal["records"] = records
@@ -524,14 +542,33 @@ func try_catch() -> Dictionary:
 		"depth": _band,
 		"distance_m": _cast_distance,
 		"is_new_species": is_new,
+		"is_personal_best": weight > prev_best,
 		"catch_count": int(record["catch_count"]),
 	}
+	_last_catch = result
 	fish_caught.emit(_hooked_id, _spot_id, _gear_snapshot())
 	if is_new:
 		new_species_unlocked.emit(_hooked_id)
 	_save_journal()
 	journal_changed.emit()
 	return result
+
+
+## 最近一次成功钓获的完整结算（含 weight_kg / is_personal_best / catch_count）。
+## HUD 据此计算回报条数——`fish_caught` 信号刻意不加参数，以免破坏既有探针连接。
+func last_catch() -> Dictionary:
+	return _last_catch
+
+
+## 一条鱼该给多少条生鱼（M9 钓鱼完善）。稀有度定基础值，破个人最佳 +1。
+## 纯函数，便于探针直接断言；result 缺省时按「不是新纪录」处理。
+func loot_count_for(fish_id: String, result: Dictionary = {}) -> int:
+	var entry := get_fish(fish_id)
+	var rarity := String(entry.get("rarity", "common"))
+	var count := int(RARITY_LOOT.get(rarity, 1))
+	if bool(result.get("is_personal_best", false)):
+		count += 1
+	return count
 
 
 ## 放生：只记次数与任务计数，不删图鉴记录（钓到过就是钓到过）。

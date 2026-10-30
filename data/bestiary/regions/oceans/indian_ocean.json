@@ -14,6 +14,8 @@
     { "id": "coelacanth", "kingdom": "animalia", "category": "fish", "name_zh": "腔棘鱼", "name_en": "Coelacanth", "scientific": "Latimeria chalumnae", "fact_zh": "被称为活化石，曾被认为已经灭绝。" },
     { "id": "mangrove_indian", "kingdom": "plantae", "category": "tree", "name_zh": "红树", "name_en": "Mangrove", "scientific": "Rhizophora", "fact_zh": "印度洋海岸常见，根泡在咸水里也不怕。" },
     { "id": "seagrass_indian", "kingdom": "plantae", "category": "seagrass", "name_zh": "印度洋海草", "name_en": "Indian Ocean Seagrass", "scientific": "Thalassia", "fact_zh": "儒艮的主要食物，长在浅海里。" },
+    { "id": "indian_mackerel", "kingdom": "animalia", "category": "fish", "name_zh": "印度鲭鱼", "name_en": "Indian Mackerel", "scientific": "Rastrelliger kanagurta", "fact_zh": "季风一起就成群结队地换地方，渔民跟着季风追它们。" },
+    { "id": "giant_grouper", "kingdom": "animalia", "category": "fish", "name_zh": "巨石斑鱼", "name_en": "Giant Grouper", "scientific": "Epinephelus lanceolatus", "fact_zh": "能长到一辆小汽车那么大，嘴巴一张能把小鱼整个吸进去。" },
     { "id": "coral_indian", "kingdom": "animalia", "category": "sea_animal", "name_zh": "印度洋珊瑚", "name_en": "Indian Ocean Coral", "scientific": "Anthozoa", "fact_zh": "马尔代夫和斯里兰卡附近有很多珊瑚礁。" }
   ]
 }

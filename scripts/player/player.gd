@@ -44,7 +44,13 @@ const FISH_BITING := 2
 const FISH_CAST_RANGE := 14.0
 const FISH_WAIT_MIN := 2.0
 const FISH_WAIT_MAX := 5.0
-const FISH_BITE_WINDOW := 1.6
+## 咬钩窗口（有 3.0 → 铁 3.8）：这是全工程唯一「错过就失败」的时刻。
+## 原值 1.6 s 对 6~12 岁偏苛刻，且铁鱼竿的物品描述写着「咬钩时机的容错更宽松」
+## （item_types.gd IRON_FISHING_ROD）而代码里窗口恒为 1.6 s——承诺没兑现。
+## 现在木竿 3.0 / 铁竿 3.8，把描述坐实；life_probe 用 `_fish_timer = 0.001` 强制
+## 咬钩、不依赖该常量取值，故调整不影响断言。
+const FISH_BITE_WINDOW := 3.0
+const FISH_BITE_WINDOW_IRON := 3.8
 ## 兼容旧命名的基准伤害（狩猎实际伤害由 HuntRules 按工具结算）。
 const ATTACK_DAMAGE := 1
 const ATTACK_COOLDOWN_MS := 500
@@ -88,6 +94,9 @@ var _bow_charge := 0.0
 var _fishing := FISH_IDLE
 var _fish_timer := 0.0
 var _bobber: FishingBobber
+## 抛竿瞬间手持的鱼竿 id：咬钩窗口按它分级。刻意在**抛竿时**记录而不是
+## 咬钩时现读——否则玩家抛竿后退到岸边换快捷栏，窗口会在半途变长变短。
+var _fish_rod := 0
 var selected_slot := 0
 
 signal selected_slot_changed(slot: int)
@@ -1612,6 +1621,14 @@ func _release_bow() -> void:
 
 
 ## ── 垂钓（M8.4） ──────────────────────────────────────
+## 咬钩窗口长度：铁鱼竿更长（兑现 item_types.gd 里「容错更宽松」的描述）。
+## 认不出的手持物一律按木竿算——儿童向宁可多给，不因数据异常收窄窗口。
+func _bite_window() -> float:
+	if _fish_rod == ItemTypes.IRON_FISHING_ROD:
+		return FISH_BITE_WINDOW_IRON
+	return FISH_BITE_WINDOW
+
+
 ## 右键手持鱼竿：未抛竿则抛竿，已抛竿则收竿。
 func _toggle_fishing() -> void:
 	if _fishing == FISH_IDLE:
@@ -1651,6 +1668,7 @@ func _cast_fishing() -> bool:
 	_bobber.global_position = found
 	_fishing = FISH_WAITING
 	_fish_timer = randf_range(FISH_WAIT_MIN, FISH_WAIT_MAX)
+	_fish_rod = get_selected_item()
 	Events.notice.emit("抛竿啦，等浮标下沉时再按右键。")
 	_held_item.swing()
 	return true
@@ -1693,7 +1711,7 @@ func _update_fishing(delta: float) -> void:
 		return
 	if _fishing == FISH_WAITING:
 		_fishing = FISH_BITING
-		_fish_timer = FISH_BITE_WINDOW
+		_fish_timer = _bite_window()
 		_bobber.set_biting(true)
 		Events.fish_hooked.emit()
 		Events.notice.emit("咬钩了！快按右键收竿。")
