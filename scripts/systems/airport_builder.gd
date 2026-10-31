@@ -177,7 +177,18 @@ func _probe_base_y(south_extra: int) -> void:
 	for x in range(origin.x - r, origin.x + r + 1):
 		for z in range(origin.z - _len / 2 - south_extra, origin.z + _len / 2 + 1):
 			top = maxi(top, _world.get_surface_height(x, z) - 1)
-	base_y = top
+	# ── 水面以上硬保底 ──
+	# `get_surface_height()` 返回的是**地形高度**（h + 1），不含其后的水/冰填充层，
+	# 所以 `- 1` 得到的是「裸地形顶面」，而不是「玩家真正站的那一层表面」。
+	# 大洋区域的地形基准本就低于海平面（大西洋 base_height=19 / 振幅 9，印度洋与
+	# 北冰洋同理），于是：
+	#   · 大西洋 (8,8) 半径 10 内 441 列全部低于 SEA_LEVEL=22、最高只有 21
+	#     ⇒ 跑道面铺在 21，被海面 22 淹掉一层，跑道上全是水；
+	#   · 北冰洋最高只有 19 而冰面封在 22 ⇒ 跑道被埋进冰层底下 3 格。
+	# 这两种情况下整片搜索窗都没有陆地可选（见 main._find_field_site 的兜底），
+	# 与其让跑道沉底，不如把跑道面顶到水面以上 2 格、用既有的「填 DIRT 地基」
+	# 造出一块高出水面的平台。+2 而非 +1：留一格空气，避免浪/冰紧贴道面。
+	base_y = maxi(top, World.SEA_LEVEL + 2)
 
 
 func _end() -> void:

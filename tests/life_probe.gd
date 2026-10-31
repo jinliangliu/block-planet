@@ -44,6 +44,10 @@ func _ready() -> void:
 func _run() -> void:
 	# 存档隔离（D-010 铁律 3）：在任何 Progress.notify 之前快照，quit 前还原。
 	_saved_progress = _read_user_text("user://progress.json")
+	# 档案槽（D-077 起）单独隔离：本机若已建过槽，Progress 的落盘目标是
+	# user://profiles/<id>/progress.json —— 只还原 legacy 那一个文件既保不住
+	# 玩家真实存档，也保不住下面「进度已持久化」这条断言的判据。
+	SaveGuard.snapshot_profiles()
 	# world.json 与进度同步在「任何写操作之前」快照（D-078 段会用，见 §Q-8）——
 	# 提前到 _run() 开头，是因为探针若在 Q-8 之前就崩掉，_exit_tree 的还原也不该
 	# 把一个玩家真实存在的 world.json 当成「探针多出来的」删掉。
@@ -1140,7 +1144,11 @@ func _run() -> void:
 	_check(int(Progress.counters.get("quiz_correct", 0)) == 3,
 		"答对题数计入计数器")
 
-	_check(FileAccess.file_exists("user://progress.json"), "进度已持久化到 user://")
+	# 落盘路径跟着档案槽走（D-077）：有槽时进度写在 user://profiles/<id>/progress.json，
+	# 无槽才退回 legacy 的 user://progress.json。断言判据取真实路径，别写死其中一个。
+	var progress_path: String = Profile.slot_save_path()
+	_check(FileAccess.file_exists(progress_path),
+		"进度已持久化到 user://（%s）" % progress_path)
 
 	hud.open_quest_panel()
 	_check(hud._quest_panel.is_open() and not player.is_physics_processing(),
@@ -2699,6 +2707,7 @@ func _run() -> void:
 	# _exit_tree 会 _save()，只还文件会被内存态覆盖（flight_probe 同款教训）。
 	# 阶段 L/S 的问答测试态由此不落盘（见阶段 S 开头的说明）。
 	_write_user_text("user://progress.json", _saved_progress)
+	SaveGuard.restore_profiles()
 	Progress.counters = _saved_counters.duplicate()
 	Progress.states = _saved_states.duplicate()
 	Progress._quiz_correct_since_reward = _saved_quiz_streak

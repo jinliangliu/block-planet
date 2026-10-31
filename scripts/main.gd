@@ -787,6 +787,13 @@ func _scan_spawn_column(x: int, z: int) -> Vector3:
 ## 只到 25，永不重叠。
 func _find_field_site() -> Vector3i:
 	_world.ensure_chunks_in_region(Vector3i(-4, 0, -4), Vector3i(20, 0, 20))
+	# 兜底：整窗都是浅海时退到**最高**的一列，不再死守 (8,8)。
+	# 大西洋 (8,8) 半径 10 内 441 列无一露出水面（最高 21 < SEA_LEVEL 22），
+	# 原来的写死兜底会把场地按在最低洼处；退到最高列至少让这块「海上平台」
+	# 贴着附近的浅滩，出水高度也更可信（AirportBuilder._probe_base_y 另有
+	# 水面以上硬保底，两道一起保证跑道上不会有水）。
+	var fallback := Vector3i(8, 0, 8)
+	var fallback_h := -999
 	for radius in range(11):
 		for x in range(8 - radius, 8 + radius + 1):
 			for z in range(8 - radius, 8 + radius + 1):
@@ -794,7 +801,11 @@ func _find_field_site() -> Vector3i:
 					continue
 				if _field_column_ok(x, z):
 					return Vector3i(x, 0, z)
-	return Vector3i(8, 0, 8)
+				var h := _world.get_surface_height(x, z)
+				if h > fallback_h:
+					fallback_h = h
+					fallback = Vector3i(x, 0, z)
+	return fallback
 
 
 ## 场址列判定：自世界顶向下找首个非空气块，须为可站实体（非水），

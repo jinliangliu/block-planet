@@ -19,6 +19,15 @@ class_name SaveGuard
 ## 那四个探针保留各自验证过的内联范式，新探针统一走本助手，别再各抄一份。
 ## 竞速相关三份（records / replay / teaching）也纳入快照：竞速探针会真实完赛写盘。
 
+## 档案槽目录（D-077 多存档槽起）。玩家建过槽之后，Progress 的落盘路径由
+## Profile.slot_save_path() 决定，指向 user://profiles/<id>/progress.json；
+## 只快照 legacy 的 user://progress.json 会漏掉真正的写盘目标。后果有两层：
+##   1. 探针会把玩家的真实档案槽写脏（D-010 铁律直接违反，且玩家感知得到）；
+##   2. 「没有槽时才落 legacy 路径」的断言（life_probe「进度已持久化到 user://」）
+##      在有槽的机器上必然失败——2026-10-31 实测就是这样被发现的。
+## 因此 profiles/ 整棵树的文本文件都纳入快照。
+const PROFILES_DIR := "user://profiles"
+
 ## 除 progress/settings 外，还需原样备份的 user:// 文本文件（竞速探针用）。
 const EXTRA_FILES := [
 	"user://race_records.json",
@@ -32,6 +41,8 @@ const EXTRA_FILES := [
 static var _progress := ""
 static var _settings := ""
 static var _extra: Dictionary = {}
+static var _profiles: Dictionary = {}
+static var _profiles_existed := false
 static var _counters: Dictionary = {}
 static var _states: Dictionary = {}
 static var _quiz := 0
@@ -44,6 +55,7 @@ static func snapshot() -> void:
 	_extra = {}
 	for path: String in EXTRA_FILES:
 		_extra[path] = _read_user_text(path)
+	snapshot_profiles()
 	_counters = Progress.counters.duplicate()
 	_states = Progress.states.duplicate()
 	_quiz = Progress._quiz_correct_since_reward
@@ -56,9 +68,77 @@ static func restore() -> void:
 	_write_user_text("user://settings.json", _settings)
 	for path: String in EXTRA_FILES:
 		_write_user_text(path, String(_extra.get(path, "")))
+	restore_profiles()
 	Progress.counters = _counters.duplicate()
 	Progress.states = _states.duplicate()
 	Progress._quiz_correct_since_reward = _quiz
+
+
+## 档案槽目录（user://profiles/）快照 / 还原。单独暴露一对，是给那些保留
+## 内联快照范式的老探针（life_probe 等）补上这一层，不必整体改写成 SaveGuard。
+static func snapshot_profiles() -> void:
+	_profiles_existed = DirAccess.dir_exists_absolute(
+		ProjectSettings.globalize_path(PROFILES_DIR))
+	_profiles = _read_tree(PROFILES_DIR)
+
+
+static func restore_profiles() -> void:
+	# 先删探针新建的槽（快照里没有的），再写回快照内容，最后按需清空目录。
+	var now := _read_tree(PROFILES_DIR)
+	for key in now.keys():
+		var path := String(key)
+		if not _profiles.has(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	for key in _profiles.keys():
+		var path := String(key)
+		_write_user_text(path, String(_profiles[path]))
+	if not _profiles_existed:
+		_remove_tree(PROFILES_DIR)
+
+
+## 递归读取目录下全部文本文件（路径 -> 文本）。存档都是小 JSON，量级几十份。
+static func _read_tree(dir_path: String) -> Dictionary:
+	var out: Dictionary = {}
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return out
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		if entry != "." and entry != "..":
+			var full := dir_path.path_join(entry)
+			if dir.current_is_dir():
+				out.merge(_read_tree(full))
+			else:
+				out[full] = _read_user_text(full)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	return out
+
+
+## 递归删除整个目录（含子目录），用于「快照时本不存在」的 profiles/ 兜底清理。
+static func _remove_tree(dir_path: String) -> void:
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	var files: PackedStringArray = []
+	var subdirs: PackedStringArray = []
+	while entry != "":
+		if entry != "." and entry != "..":
+			if dir.current_is_dir():
+				subdirs.append(entry)
+			else:
+				files.append(entry)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	var abs_dir := ProjectSettings.globalize_path(dir_path)
+	for f: String in files:
+		DirAccess.remove_absolute(abs_dir.path_join(f))
+	for d: String in subdirs:
+		_remove_tree(dir_path.path_join(d))
+	DirAccess.remove_absolute(abs_dir)
 
 
 ## 读 user:// 文本文件；不存在或打不开返回空串（还原即删除）。
