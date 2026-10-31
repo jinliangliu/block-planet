@@ -33,6 +33,7 @@ func _run() -> void:
 	_test_car_physics()
 	_test_ai_racer()
 	_test_session_progress()
+	_test_pace_and_offroad()
 	_test_records_and_replay()
 	await _test_scene_end_to_end()
 	await _test_hud_wiring()
@@ -340,6 +341,77 @@ func _test_hud_wiring() -> void:
 	# 崩溃（rc=139，进程死在 SaveGuard.restore 之前，race_replay.jsonl 残留，
 	# 随后又被 racing_shot 快照固化）——flight_reset_probe 同款教训。场景树
 	# 随 quit 整体销毁即可，restore 在 _finish 里先于 quit 执行。
+
+
+# ──── E. 配速归一 / 只减速侧橡皮筋 / off-road 计时 ────
+## 钉住三件事：
+##   ① pace_bias_for 三段阈值（落后恒 1.0，领先越多减得越多，封顶 0.82）；
+##   ② 目标速度的基数被「场地极速」夹住，AI 不再拿自己车的极速算目标；
+##   ③ RaceSession 的 off-road 计时吃真实 dt，不再硬编码 0.0166。
+func _test_pace_and_offroad() -> void:
+	# ① 橡皮筋曲线（纯静态函数，可逐点断言）。
+	_check(AiRacer.pace_bias_for(0.0) == 1.0, "并排（gap=0）不加不减，pace_bias=1.0")
+	_check(AiRacer.pace_bias_for(30.0) == 1.0, "领先 30 m 以内不干预，pace_bias=1.0")
+	_check(AiRacer.pace_bias_for(-500.0) == 1.0, "AI 落后 500 m 也不加速（pace_bias=1.0）")
+	var at_max := AiRacer.pace_bias_for(150.0)
+	_check(absf(at_max - 0.82) < 0.001, "领先 150 m 减到 0.82（%.3f）" % at_max)
+	var cap := AiRacer.pace_bias_for(1000.0)
+	_check(absf(cap - 0.82) < 0.001, "领先 1000 m 仍封顶 0.82（%.3f）" % cap)
+	var mid := AiRacer.pace_bias_for(90.0)
+	_check(mid > 0.82 and mid < 1.0, "30~150 m 之间线性过渡（90 m → %.3f）" % mid)
+	_check(AiRacer.pace_bias_for(40.0) >= AiRacer.pace_bias_for(80.0)
+		and AiRacer.pace_bias_for(80.0) >= AiRacer.pace_bias_for(140.0),
+		"领先越多减得越多（pace_bias 单调不增）")
+	var gap_ai := AiRacer.new()
+	gap_ai.set_gap(200.0)
+	_check(absf(gap_ai.pace_bias - 0.82) < 0.001,
+		"set_gap(200) 写入 pace_bias=0.82（%.3f）" % gap_ai.pace_bias)
+
+	# ② 配速归一：racer 极速 40 m/s，场地极速取玩家小三轮的 24 m/s。
+	#    34 m/s 时归一后的目标 ≤ 24×1.0(expert)×1.1(柏油) = 26.4，必然点刹。
+	var layout := RaceSystem.build_layout("city_circuit")
+	var start := layout.start_pose()
+	var sdir: Vector3 = start["dir"]
+	var spos: Vector3 = start["pos"]
+	# 关掉随机犯错，让同一速度下的两条断言可确定复现。
+	var diff := RaceSystem.difficulty("expert").duplicate()
+	diff["mistake_chance"] = 0.0
+	var fast := CarPhysics.new()
+	fast.setup(RaceSystem.vehicle("racer"), Vector2(spos.x, spos.z), atan2(sdir.x, sdir.z))
+	fast.vel = fast.forward() * 34.0
+	var asphalt := RaceSystem.terrain("asphalt")
+
+	var norm_ai := AiRacer.new()
+	norm_ai.setup(layout, diff, 1, 24.0)
+	var n_inp := norm_ai.think(fast, asphalt, DT)
+	var n_brake := float(n_inp["brake"])
+	_check(n_brake > 0.0,
+		"归一后 racer 车 34 m/s 已超场地极速 → 刹车（brake=%.2f）" % n_brake)
+
+	var free_ai := AiRacer.new()
+	free_ai.setup(layout, diff, 1, 0.0)
+	var f_inp := free_ai.think(fast, asphalt, DT)
+	var f_brake := float(f_inp["brake"])
+	var f_throttle := float(f_inp["throttle"])
+	_check(f_brake == 0.0 and f_throttle == 1.0,
+		"不归一（field_top=0）时同一速度仍全油门（旧行为 brake=%.2f throttle=%.2f）"
+		% [f_brake, f_throttle])
+
+	# ③ off-road 计时用真实 dt：只断言「增量」，不假设初值。
+	var r := RaceSession.Racer.new()
+	r.id = "probe_offroad"
+	r.vehicle_id = "tricycle"
+	r.car = CarPhysics.new()
+	r.car.setup(RaceSystem.vehicle("tricycle"), Vector2(spos.x, spos.z), atan2(sdir.x, sdir.z))
+	var session := RaceSession.new()
+	session.setup(layout, 1, [r])
+	var before := r.off_road_time
+	session.update_progress(r, true, 0.05)
+	_check(absf((r.off_road_time - before) - 0.05) < 0.0001,
+		"off-road 计时吃真实 dt（+%.3f s）" % (r.off_road_time - before))
+	var before_road := r.off_road_time
+	session.update_progress(r, false, 0.05)
+	_check(absf(r.off_road_time - before_road) < 0.0001, "在路面内 off-road 计时不增长")
 
 
 func _check(cond: bool, label: String) -> void:

@@ -154,7 +154,8 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
 
 ```text
 状态：COUNTDOWN（3 s，车不动不计时）→ RUNNING → FINISHED
-进度：每帧 update_progress(racer, off_road) 用「门平面穿越」推进检查点
+进度：每帧 update_progress(racer, off_road, dt) 用「门平面穿越」推进检查点
+      （dt 是真实帧长，用于累计出界时间；不传则按 1/60 s，仅供老调用方兼容）
 圈数：穿过 0 号门（起跑线/终点）记一圈 + 圈速；够 laps 辆即完赛
 名次：完赛者比完赛时间；未完赛比 圈数 → 过门数 → 距下一门距离
       （_rank_before，results() 按名次输出成绩表）
@@ -188,6 +189,36 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
   数据里是 `["tricycle","buggy","racer"]`（`ai_vehicles` 键——任务书写的
   `ai_vehicle_blueprints` 三台 ai_only 车是另一批，仅作视觉备选）。
 - AI 也吃地形 speed_factor，不耗油、从不拉手刹。
+- **配速归一到「场地极速」（D-082）**：目标速度的上界是 `min(自己车极速, 玩家车极速)`，
+  不再是 AI 自己车的极速。改动前 AI 车池里的 `racer`（40 m/s）开 easy（0.7）仍有
+  28 m/s，而玩家开小三轮只有 24 m/s——孩子必输。归一后 easy 对 racer 是 24×0.7 = 16.8。
+- **只减速侧橡皮筋（D-082）**：`AiRacer.pace_bias_for(gap_m)`，`gap_m` 正 = AI 领先玩家。
+  领先 30 m 内不干预；30→150 m 线性降到 **0.82**；150 m 以上保持 0.82；**落后恒 1.0**，
+  绝不加速追赶（保证任何难度都不越过玩家车的极速）。`race_scene` 每帧用
+  `_track_progress_m()`（`gates_passed × 段长 + 段内里程`，开赛为 0）算差距喂进去。
+
+---
+
+## 6.1 触屏操控（D-082）
+
+Android 上没有键盘：`race_hud.gd` 在 `DisplayServer.is_touchscreen_available()` 为真时
+额外建一层触屏驾驶层，与键盘路径**互斥**（`touch_input()["active"]` 决定 `race_scene`
+走哪条）。键盘/手柄玩家看到的界面与旧版逐像素一致。
+
+| 区域 | 内容 | 尺寸 |
+|---|---|---|
+| 左下 | 「◀」「▶」转向（按住语义 `button_down`/`button_up`） | 132×132，边距 24，间距 12 |
+| 右下 | 「刹车」红底 | 132×132 |
+| 右下偏上 | 「手刹」橙底 | 104×104 |
+| 右上 | 「↻ 重开」「✕ 退出」 | 96×56 |
+
+- **自动油门**：触屏层存在且没按刹车 → `throttle = 1.0`；按刹车 → `throttle = 0`、
+  `brake = 1.0`。手机上孩子只按左右就能开车，这是儿童向卡丁车的通行做法。
+- 退出是必需品（Android 没有 `race_exit` 键），否则孩子会被困在比赛里。
+- 触屏态下面板自动让位：左下油表 `offset_bottom → −168`、右上圈速 `offset_top → 92`、
+  右下按键说明改触屏文案并抬到手刹之上（实测 6 个按钮全部落在 1280×720 内、互不重叠）。
+- 松手状态清理：`clear_touch_input()`，由 `race_scene._set_teach_hint()` 在教学/成绩单
+  等会吃掉触摸事件的模态出现时调用（抬指事件被拦住会残留「刹车按着」）。
 
 ---
 

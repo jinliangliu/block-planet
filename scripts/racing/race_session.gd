@@ -95,11 +95,13 @@ func tick(dt: float) -> void:
 
 
 ## 一名参赛者本帧的进度推进（在物理步进之后调用）。
-func update_progress(r: Racer, terrain_off_road: bool) -> void:
+## dt 默认 1/60 s，只是为了让不传 dt 的旧调用（探针）行为不变；
+## 场景必须传真实帧长，否则 off-road 计时在低帧率机器上会系统性偏小。
+func update_progress(r: Racer, terrain_off_road: bool, dt: float = 0.0166) -> void:
 	if r.finished():
 		return
 	if terrain_off_road:
-		r.off_road_time += 0.0166
+		r.off_road_time += maxf(dt, 0.0)
 	var gp := layout.gate_position(r.next_gate)
 	var gd := layout.direction(layout.gate_index(r.next_gate))
 	var g_xy := Vector2(gp.x, gp.z)

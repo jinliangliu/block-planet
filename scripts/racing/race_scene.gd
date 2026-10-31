@@ -18,6 +18,8 @@ var _layout: TrackLayout = null
 var _loader: TrackLoader = null
 var _session: RaceSession = null
 var _vehicle_id := ""
+## 场地极速（玩家车极速，m/s）：机器人配速归一的上界。0 = 取不到，退回不归一。
+var _field_top := 0.0
 var _racers: Array = []
 var _cars: Array[RaceCar] = []
 var _idx: Array[int] = []
@@ -101,6 +103,9 @@ func _spawn_racers() -> void:
 	var diff := RaceSystem.difficulty(String(RaceSystem.pending.get("ai_difficulty", "easy")))
 	var names := RaceSystem.ai_names()
 	var pool := RaceSystem.ai_vehicle_ids()
+	# 配速归一：机器人目标速度的上界是「玩家车的极速」，不是它自己车的极速。
+	# 否则 AI 车池里的 racer(40 m/s) 开 easy(0.7) 仍有 28 m/s，孩子开小三轮(24 m/s)必输。
+	_field_top = float(RaceSystem.vehicle(_vehicle_id).get("max_speed_mps", 0.0))
 
 	# 玩家占最靠前的发车格（0 号位），机器人排在其后，两列错开。
 	for i in ai_total + 1:
@@ -121,7 +126,7 @@ func _spawn_racers() -> void:
 			r.display = String(names[k % names.size()]) if names.size() > 0 else "机器人%d" % (k + 1)
 			r.vehicle_id = String(pool[k % pool.size()])
 			r.ai = AiRacer.new()
-			r.ai.setup(_layout, diff, _layout.seed + k * 17 + 3)
+			r.ai.setup(_layout, diff, _layout.seed + k * 17 + 3, _field_top)
 		var spec := RaceSystem.vehicle(r.vehicle_id)
 		r.color = Color(String(spec.get("color", "#b0b0b0")))
 		r.car = CarPhysics.new()
@@ -156,6 +161,10 @@ func _setup_camera() -> void:
 func _setup_ui() -> void:
 	_hud = RaceHUD.new()
 	add_child(_hud)
+	# 触屏层的「返回」/「重开」按钮：与键盘的 race_exit / race_restart 同一出口，
+	# 手机上没有 ESC 键，孩子只能靠这两个按钮离开或重开。
+	_hud.touch_exit_requested.connect(_back_to_selector)
+	_hud.touch_restart_requested.connect(_restart)
 	_result = RaceResultUI.new()
 	add_child(_result)
 	_result.again_requested.connect(_restart)
@@ -189,6 +198,10 @@ func _physics_process(delta: float) -> void:
 	_tick += 1
 
 	var counting := _session.is_counting()
+	# 只减速侧橡皮筋：本帧先算一次玩家的沿赛道里程，每个机器人用它换算差距。
+	# AI 大幅领先就松油、落后恒 1.0（不加速），孩子永远有追上的机会。
+	var player: RaceSession.Racer = _session.player()
+	var player_m := _track_progress_m(player)
 	for i in _racers.size():
 		var r: RaceSession.Racer = _racers[i]
 		var terr := _terrain_for(r, i)
@@ -201,7 +214,8 @@ func _physics_process(delta: float) -> void:
 			if autopilot:
 				if _player_ai == null:
 					_player_ai = AiRacer.new()
-					_player_ai.setup(_layout, RaceSystem.difficulty("hard"), _layout.seed + 91)
+					_player_ai.setup(_layout, RaceSystem.difficulty("hard"),
+						_layout.seed + 91, _field_top)
 				var pin: Dictionary = _player_ai.think(r.car, terr, delta)
 				r.car.throttle = float(pin["throttle"])
 				r.car.brake = float(pin["brake"])
@@ -216,6 +230,7 @@ func _physics_process(delta: float) -> void:
 			r.car.steer = 0.0
 			r.car.handbrake = false
 		else:
+			r.ai.set_gap(_track_progress_m(r) - player_m)
 			var inp: Dictionary = r.ai.think(r.car, terr, delta)
 			r.car.throttle = float(inp["throttle"])
 			r.car.brake = float(inp["brake"])
@@ -224,7 +239,7 @@ func _physics_process(delta: float) -> void:
 
 		r.car.step(delta, terr)
 		_clamp_arena(r.car)
-		_session.update_progress(r, _off_road[i])
+		_session.update_progress(r, _off_road[i], delta)
 		_cars[i].sync_from(r.car, delta)
 		# 地形粒子（M9）：跑到沙石扬尘、湿地溅水花——速度感的主要来源之一。
 		_cars[i].set_terrain_fx(terr, r.car.speed() / maxf(r.car.max_speed(), 1.0))
@@ -251,6 +266,21 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _apply_player_input(r: RaceSession.Racer, delta: float) -> void:
+	# 触屏优先：touch_input().active 为真说明手机上存在触屏驾驶层，
+	# 此时不能再读键盘（手机上键盘恒为松开，会把车「锁」在原地）。
+	var ti: Dictionary = _hud.touch_input()
+	if bool(ti.get("active", false)):
+		# 触屏按钮是离散按下的，方向这里再做一次平滑，松手自动回到 0。
+		var want := clampf(float(ti.get("steer", 0.0)), -1.0, 1.0)
+		_steer_input = lerpf(_steer_input, want, clampf(delta * 9.0, 0.0, 1.0))
+		r.car.steer = _steer_input
+		r.car.throttle = clampf(float(ti.get("throttle", 0.0)), 0.0, 1.0)
+		r.car.brake = clampf(float(ti.get("brake", 0.0)), 0.0, 1.0)
+		r.car.handbrake = bool(ti.get("handbrake", false))
+		if r.car.handbrake:
+			r.used_handbrake = true
+		return
+
 	var target := 0.0
 	if Input.is_action_pressed("move_right") or Input.is_action_pressed("aircraft_roll_right"):
 		target += 1.0
@@ -296,6 +326,21 @@ func _current_terrain_id(i: int) -> String:
 	if _off_road[i]:
 		return "grass"
 	return _layout.terrain_at_index(_idx[i])
+
+
+## 沿赛道的累计里程（m，跨圈单调），橡皮筋差距用它来算。
+## gates_passed 跨圈单调递增，每门间隔 ≈ total/gate_count；gate_distance 是到
+## 「下一个门」的直线距离，于是 seg − gate_distance 就是刚过门后跑出的段内里程。
+## 发车格都排在起跑线之后（段内里程钳到 0），所以开赛瞬间所有人的进度都是 0。
+func _track_progress_m(r: RaceSession.Racer) -> float:
+	if r == null or _layout == null:
+		return 0.0
+	var gates := _layout.gate_count()
+	if gates <= 0:
+		return 0.0
+	var seg := _layout.total / float(gates)
+	var since_gate := clampf(seg - r.gate_distance, 0.0, seg)
+	return float(r.gates_passed) * seg + since_gate
 
 
 ## 软性边界：竞技场地台之外没有东西，越界就把车拉回来并卸掉大部分速度。
@@ -388,6 +433,10 @@ func _log(action: String) -> void:
 
 
 func _restart() -> void:
+	# 清掉触屏残留按下态：抬指事件若被教学弹窗/成绩单吃掉，_touch_brake 会留成
+	# true，重开后新车一出发就「刹车踩着」动不了。这是真机上的坑，代价一行。
+	if _hud != null:
+		_hud.clear_touch_input()
 	var p: Dictionary = RaceSystem.pending
 	RaceSystem.select_race(String(p["track_id"]), String(p["vehicle_id"]),
 		int(p["ai_count"]), String(p["ai_difficulty"]))
