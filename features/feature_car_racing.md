@@ -119,7 +119,9 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
 数不出「难看」）。所以 `TrackLayout.min_curve_radius()`（相邻三点外接圆半径）
 是一个必须可断言的值，闸门：**物理闸 `> half_width × 1.2`，新赛道设计线
 `≥ half_width × 2.5`**。极坐标赛道实测最小 20.4 m（作对照基准），三条新赛道
-15.5 / 17.3 / 16.6 m——显著更小，这正是「极坐标做不出的弯」的量化证据。
+15.5 / 18.4 / 16.6 m——更小，这正是「极坐标做不出的弯」的量化证据。`harbor_chicane`
+的 18.4 m 距基准只剩 2 m 余量，它的形状证据不是曲率而是**拓扑**：闭合矩形街上
+「先往里挪 26 m 再挪回来」的 jog，在单向 `r(θ)` 上不可能存在。
 
 - **地形分段**按圈程百分比逐点贴标签（`terrain_segments`），CarPhysics 按所在
   段查抓地力/极速/刹车。
@@ -131,6 +133,26 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
   空串与未知格式一律视为已解锁（儿童向：宁可多给，不把赛道锁死）。
   `unlock_hint()` 生成中文说明（「赢 2 场后解锁」等）。任务书的
   `quest_wetland` / `shop_1000` / `quest_mixed` **未实现**。
+
+### 3.2 AI 可跑性（新赛道设计的硬约束）
+
+新赛道不只要几何合法，还要 **AI 开得完**——`ai_racer.gd` 是纯 P 朝向控制器，有固定相位
+滞后，弯越密越跟不上。`tmp/ai_new_tracks.gd` 每赛道实跑 120 s 量「在草地上的时间占比」：
+
+| 赛道 | AI 难度 | 出界占比 | 最深越界 |
+|---|---|---|---|
+| canyon_hairpin | expert | 5.2 % | 5.5 m |
+| harbor_chicane | normal | 7.7 % | 2.8 m |
+| dune_slalom | normal | 0.0 % | — |
+| city_circuit（对照） | easy | 0.0 % | — |
+| mountain_road（对照，既有欠账） | expert | 25.2 % | 6.4 m |
+
+`harbor_chicane` 第一版是「三段连续 S 形减速弯」，AI **19.8 %** 时间在草地上。加宽
+5.5→6.5 降到 13.2 %，难度 hard→normal 降到 10.3 %，最后把形状改成「圆角矩形街道 +
+一处 jog」才到 7.7 %——**加宽和降难度只是在容忍 P 控制的滞后，换弯型才是消除它**。
+
+⇒ 设计约束：**新赛道的弯要「疏而深」，不要「密而浅」**。AI 开不稳比弯不够花哨更伤
+儿童体验。
 
 ---
 
