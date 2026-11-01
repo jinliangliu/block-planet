@@ -304,7 +304,7 @@ fish.json 的 id 与图鉴条目 id 一致，但 **bestiary 数据侧没有 `cat
 > `FishingSystem._exit_tree` 会把探针改乱的日志再写一遍盘），`_exit_tree`
 > 安全网 + 120 s 看门狗兜底；断言全部走「基线差分」，真实存档里已有什么
 > 都不影响结论。
-> 回归基线：日常无头 **53 探针** / 验收全量 **58 探针**
+> 回归基线：日常无头 **54 探针** / 验收全量 **66 探针**
 > （`tmp/run_regression.sh` / `tmp/run_regression.sh full`）。
 
 ---

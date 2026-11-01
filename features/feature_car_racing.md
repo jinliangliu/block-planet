@@ -82,24 +82,51 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
 
 ---
 
-## 3. 赛道（6 条，tracks.json）
+## 3. 赛道（9 条，tracks.json）
 
-| id | 名称 | 主题 | 难度 | 圈数 | 长度 | 解锁 |
-|---|---|---|---|---|---|---|
-| desert_ring | 沙丘环线 | desert | 2 | 3 | 1200 m | default |
-| forest_trail | 林间小径 | forest | 3 | 3 | 1500 m | default |
-| city_circuit | 城市街道 | city | 2 | 4 | 1000 m | default |
-| wetland_cross | 沼泽穿越 | wetland | 4 | 2 | 1800 m | wins:2 |
-| mountain_road | 盘山公路 | mountain | 5 | 2 | 2200 m | record:2 |
-| all_terrain | 全地形挑战 | mixed | 4 | 3 | 2500 m | wins:5 |
+| id | 名称 | 主题 | 难度 | 圈数 | 长度 | 形状 | 解锁 |
+|---|---|---|---|---|---|---|---|
+| desert_ring | 沙丘环线 | desert | 2 | 3 | 1200 m | polar | default |
+| forest_trail | 林间小径 | forest | 3 | 3 | 1500 m | polar | default |
+| city_circuit | 城市街道 | city | 2 | 4 | 1000 m | polar | default |
+| wetland_cross | 沼泽穿越 | wetland | 4 | 2 | 1800 m | polar | wins:1 |
+| mountain_road | 盘山公路 | mountain | 5 | 2 | 2200 m | polar | wins:3 |
+| all_terrain | 全地形挑战 | mixed | 4 | 3 | 2500 m | polar | record:1 |
+| canyon_hairpin | 峡谷发卡弯 | mountain | 5 | 2 | 1700 m | waypoints | wins:4 |
+| harbor_chicane | 海港减速弯 | city | 4 | 3 | 1300 m | waypoints | wins:1 |
+| dune_slalom | 沙丘绕桩 | desert | 3 | 3 | 1500 m | waypoints | wins:2 |
 
-- **形状是公式生成的闭合环线**：`r(θ) = R·(1 + amp·sin(lobes·θ+phase)
-  + amp2·sin(lobes2·θ+phase2))`，先密集采样反解 R 使周长落在 `length_m`，
-  再每 4 m 等距重采样成中心线。`seed` 供形状微扰与 AI 犯错的确定性随机源。
-  任务书只给了长度/圈数/地形分段，形状参数是本工程新增（tracks.json `_note`）。
+> 上表以 `data/racing/tracks.json` 为准。此前文档里的解锁条件（wins:2 / record:2 /
+> wins:5）与代码不一致，已按代码校正。
+
+### 3.1 两种形状定义（D-085）
+
+1. **polar（极坐标正弦环，前 6 条）**：`r(θ) = R·(1 + amp·sin(lobes·θ+phase)
+   + amp2·sin(lobes2·θ+phase2))`，先密集采样反解 R 使周长落在 `length_m`，
+   再每 4 m 等距重采样成中心线。`seed` 供形状微扰与 AI 犯错的确定性随机源。
+   **局限是数学性的**：`r(θ)` 是星形曲线，任何方向只有唯一半径，因此永远做不出
+   发卡弯（180° 回头）或减速弯（S 形快速反打）——6 条极坐标赛道在「弯的性格」
+   上必然同质，只是正弦起伏的疏密不同。
+2. **waypoints（控制点折线，后 3 条）**：显式控制点 → **Chaikin 切角**（3 轮）
+   → 加密折线，之后与 polar 共用同一条「等比缩放到 `length_m` → 4 m 等距重采样
+   → 地形分段 → 检查点」路径。选 Chaikin 不选 Catmull-Rom：均匀 CR 在控制点
+   间距不均时会过冲，发卡弯上能自己绕出内环，路面带随即自交翻面；Chaikin 每轮
+   把各边按 1:3 切两刀，结果永远落在控制多边形的凸包内，对简单闭合多边形不会自交。
+   控制点少于 3 个时 `_raw_waypoints()` 返回空，`build()` 自动回落 polar。
+
+**路面带自交翻面的判据**：路面是沿中心线两侧各偏 `half_width` 缝成的带状网格，
+中心线曲率半径 < `half_width` 时内侧边线会翻过去（画面打结、顶点色错乱，而探针
+数不出「难看」）。所以 `TrackLayout.min_curve_radius()`（相邻三点外接圆半径）
+是一个必须可断言的值，闸门：**物理闸 `> half_width × 1.2`，新赛道设计线
+`≥ half_width × 2.5`**。极坐标赛道实测最小 20.4 m（作对照基准），三条新赛道
+15.5 / 17.3 / 16.6 m——显著更小，这正是「极坐标做不出的弯」的量化证据。
+
 - **地形分段**按圈程百分比逐点贴标签（`terrain_segments`），CarPhysics 按所在
   段查抓地力/极速/刹车。
 - **检查点**：起跑线在 0 号点，之后大致每 300 m 一个，至少 3 个、至多 8 个。
+- **`length_m` 必须是 `SPACING`(4 m) 的整数倍**：重采样点数是 `floor(total/4)`，
+  不是整数倍时最后一段会明显偏长（例如 1505 m → 闭合边 5 m），圈长记账悄悄偏 1 m。
+  探针钉住这条。
 - **解锁**：`default` 恒开 / `wins:N` 赢 N 场 / `record:N` 破 N 次最快圈速；
   空串与未知格式一律视为已解锁（儿童向：宁可多给，不把赛道锁死）。
   `unlock_hint()` 生成中文说明（「赢 2 场后解锁」等）。任务书的
@@ -298,10 +325,20 @@ vehicle_id / position[3] / player），但格式是 **JSONL 而非 CSV**，只�
 
 | 探针 | 断言数 | 覆盖 | 标记 |
 |---|---|---|---|
-| `tests/racing_probe.gd` | 82 | 赛道几何（周长/采样/地形分段/检查点）/ 门平面过门与圈数 / 名次排序 / 记录读写与破纪录 / AI 追线与犯错 / CarPhysics 地形与燃料 | `RACING_TEST_OK` |
+| `tests/racing_probe.gd` | **154** | 赛道几何（周长/采样/地形分段/检查点/**最小曲率半径**/**中心线不自交**/waypoints 模式/坏数据回落）/ 门平面过门与圈数 / 名次排序 / 记录读写与破纪录 / AI 追线与犯错与**配速归一** / CarPhysics 地形与燃料 / **手刹漂移** / 选择器卡片数与赛道数一致 | `RACING_TEST_OK` |
+| `tests/race_touch_probe.gd` | 38 | 触屏层（自动油门 / 刹车互斥 / 按住语义 / 两个动作信号 / 面板让位） | `RACE_TOUCH_TEST_OK` |
+| `tests/track_decor_probe.gd` | **44** | 主题装饰（6 主题色盘 / 9 条赛道组数 2~10 且实例 >0 / 离中心线 ≥ `half_width+KERB_WIDTH+2.9` / 不投影 / 确定性 / 重复 build 不残留）+ 红白路肩 10 条（节点唯一 / 顶点数 8×size / 红白都存在 / 内外沿偏移 / 高于路面 / 亮度差 ≥0.05） | `TRACK_DECOR_TEST_OK` |
+
+**D-085 的两条探针坑（写探针前必读）**：
+1. `--headless` 下 `RendererDummy` **不保存 MultiMesh 实例缓冲**，
+   `MultiMesh.get_instance_transform()` 恒返回单位矩阵——直接读它会打出「y 实测 0.00，
+   最差横向 142.98 m」这种一眼假的数字却**全 PASS**。`TrackLoader` 因此额外记一份
+   纯数据镜像 `decor_instances`，探针读镜像并用 `instance_count` 之和交叉校验。
+2. 顶点色是**线性值**（材质 `albedo_color` 才由引擎做 sRGB→线性），设计色值必须先
+   `srgb_to_linear()`，否则红块渲染成粉红；且顶点色按 1/255 量化，比对不能 `==`。
 
 D-010 合规：存档 `user://race_records.json` 与 `race_replay.jsonl` 由探针
-读写时走 user:// 备份/还原；回归基线：日常无头 43 探针 / 验收全量 54 探针
+读写时走 user:// 备份/还原；回归基线：日常无头 **54 探针** / 验收全量 **66 探针**
 （`tmp/run_regression.sh` / `full` 档）。
 
 ---

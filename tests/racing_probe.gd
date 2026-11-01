@@ -333,8 +333,12 @@ func _test_hud_wiring() -> void:
 	_check(hud._track_selector.is_open(), "地图页 🏁 入口打开选择器")
 	hud.close_track_selector()
 
-	# 选择器内容：至少一条赛道卡片 + 「开始比赛」按钮可用。
+	# 选择器内容：卡片数与赛道数一致（D-085 从 6 条扩到 9 条，条数对不上就是
+	# 有赛道在列表里被吞掉）+ 「开始比赛」按钮可用。
 	hud.open_track_selector()
+	_check(hud._track_selector._card_grid.get_child_count() == RaceSystem.tracks().size(),
+		"选择器卡片数 = 赛道数（%d / %d）"
+		% [hud._track_selector._card_grid.get_child_count(), RaceSystem.tracks().size()])
 	_check(hud._track_selector._card_grid.get_child_count() >= 1, "选择器列出赛道卡片")
 	_check(not hud._track_selector._start_button.disabled, "默认赛道可选、开始按钮可用")
 	hud.close_track_selector()
