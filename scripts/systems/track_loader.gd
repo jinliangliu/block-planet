@@ -11,11 +11,26 @@ extends Node3D
 ## 没有这两样，6 条赛道在画面上是同一条「绿板 + 灰带」，孩子看不出沙漠和城市的区别。
 ## 装饰一律走 MultiMeshInstance3D：一个 (形状, 颜色) 组 = 一个 draw call，单条赛道
 ## ≤ 10 组——中低端 Android 上几百个 MeshInstance3D 是跑不动的。
+##
+## 路肩（红白交替）是「可读性」的兜底：地台按主题上色之后，城市/森林这类主题的地台
+## 亮度与该段路面的亮度只差 0.03~0.06（Rec.601），光靠色盘救不回来——forest/mixed
+## 的路面亮度本身就横跨 0.284~0.624，任何单一地台色都至少贴近其中一种。红白高频
+## 交替不依赖明度差，是「路的左右边界在哪」唯一可靠的视觉锚点。
 
 const ROAD_LIFT := 0.04        # 路面比地台抬高一点，避免共面闪烁
 const PLATE_MARGIN := 90.0     # 地台比赛道外接圆再大这么多米
 const ARCH_HEIGHT := 5.5
 const ARCH_POST := 0.6
+
+## ── 路肩（kerb）────────────────────────────────────────────
+const KERB_WIDTH := 0.9        # 路肩带宽度（m），铺在路面外侧 half_width → +0.9
+## 一块红/白路肩的圈程长度（m）。**必须整除 TrackLayout.SPACING（4 m）**：块边界
+## 落在采样环上才有整齐的节奏。取 6 时块长在 4/8 m 之间乱跳（一圈 1.5 环），
+## 取 4 = 一块正好一个采样段，交替最规整。
+const KERB_SEG_M := 4.0
+const KERB_LIFT := 0.012       # 比路面再抬高一点：0.04 → 0.052，避免共面闪烁
+const KERB_A := Color(0.86, 0.20, 0.20)   # 红
+const KERB_B := Color(0.96, 0.96, 0.93)   # 白
 
 ## 检查点拱门配色（循环取用；起跑线单独用红白）。
 const ARCH_COLORS := [
@@ -26,12 +41,14 @@ const ARCH_COLORS := [
 
 ## 主题 → 地台底色。这组值直接写进 StandardMaterial3D.albedo_color（与原来的单色
 ## 草地同一色彩空间：albedo 按线性解释，不额外做 sRGB→线性，否则会被压暗两层）。
+## city 用浅混凝土（0.58）而不是冷灰（0.30）：冷灰的亮度 0.319 与沥青 #4A4A4A 的
+## 0.290 只差 0.03，全沥青赛道（harbor_chicane）的路面在画面上几乎融进地台里。
 const PLATE_COLORS := {
 	"desert": Color(0.62, 0.52, 0.32),    # 沙黄
 	"forest": Color(0.26, 0.42, 0.20),    # 深绿
 	"wetland": Color(0.30, 0.44, 0.30),   # 苔绿
 	"mountain": Color(0.38, 0.40, 0.30),  # 岩灰绿
-	"city": Color(0.30, 0.32, 0.36),      # 冷灰
+	"city": Color(0.58, 0.58, 0.56),      # 浅混凝土
 	"mixed": Color(0.34, 0.48, 0.24),     # 原绿（也是未知主题的回落值）
 }
 const PLATE_DEFAULT := "mixed"
@@ -40,7 +57,7 @@ const PLATE_DEFAULT := "mixed"
 ## 每 DECOR_STRIDE 个采样点（4 m 一个点 → 24 m）取一个装饰位，左右各掷一次骰子。
 const DECOR_STRIDE := 6
 const DECOR_SIDE_CHANCE := 0.55
-## 装饰中心到路面边缘的最小留白（m）：再近就会显得压在路肩上。
+## 装饰中心到「可驾驶边缘外沿」（路面 + 路肩）的最小留白（m）。
 const DECOR_CLEARANCE := 3.0
 ## 落账时的额外安全边距（m）。为什么不是 0：① 部件的局部偏移会把件中心再往路面
 ## 推最多 1 m（仙人掌的手臂、岩石的第二块、看台 4 m 长条），② 探针量的「横向距离」
@@ -87,6 +104,7 @@ func build(p_layout: TrackLayout) -> void:
 	arena_radius = extent + PLATE_MARGIN
 	_build_plate()
 	_build_road()
+	_build_kerbs()
 	_build_start_line()
 	_build_arches()
 	_build_decor()
@@ -173,6 +191,99 @@ func _build_road() -> void:
 	add_child(mi)
 
 
+## 路肩：沿路两侧各铺一条红白交替的窄带（横向 half_width → half_width+KERB_WIDTH）。
+##
+## 地台按主题上色之后，城市（浅混凝土 0.58）以外的主题地台亮度与该段路面亮度只差
+## 0.06~0.09，而 forest/mixed 的路面亮度横跨 0.284~0.624——靠地台色永远救不回来。
+## 红白高频交替提供的是「结构上的边界」，不依赖明度差，所以它比调色盘可靠。
+##
+## 两侧合成**一个** ArrayMesh（顶点色），1 个 draw call，不是每块一个节点。
+##
+## 顶点不做环间共享（每段每带各 4 个顶点，共 8 个/段）：共享顶点会强制顶点色在
+## 相邻环之间插值，红块与白块之间出现一条 4 m 长的过渡带，整条路肩糊成一片淡粉
+## （本工程实测踩过，截图一看就是「粉带」而不是「红白块」）。每段独立顶点 = 每块
+## 纯色 = 真正的红白交替。代价只是顶点数翻倍（2500 m 赛道 5000 个顶点，可忽略）。
+##
+## 绕序照抄路面：每带每段的顶点顺序取 [A 更靠 +normal, A 更靠 -normal,
+## B 更靠 +normal, B 更靠 -normal]，索引 [0,3,1,0,2,3] 与路面同一模式，
+## 才能保证正面朝上（否则法线被翻成 DOWN，太阳光归零，路肩渲染成暗带）。
+func _build_kerbs() -> void:
+	var n := layout.size()
+	var hw := layout.half_width
+	var y := ROAD_LIFT + KERB_LIFT
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	for i in n:
+		var k0 := layout.wrap_index(i)
+		var k1 := layout.wrap_index(i + 1)
+		var p0 := layout.point(k0)
+		var p1 := layout.point(k1)
+		var n0 := layout.normal(k0)
+		var n1 := layout.normal(k1)
+		# 块号按圈程算：每 KERB_SEG_M 换一次色，红白交替。
+		var along := float(i) * TrackLayout.SPACING
+		var col := kerb_color(int(along / KERB_SEG_M))
+		# 左带：外沿（+normal 侧）在前。
+		var base := verts.size()
+		_kerb_quad(verts, norms, cols, p0, n0, p1, n1, hw + KERB_WIDTH, hw, y, col)
+		idx.append_array([base, base + 3, base + 1, base, base + 2, base + 3])
+		# 右带：内沿（-normal 侧）才是「更靠 +normal」的那个，所以顺序是 (hw, hw+W)。
+		base = verts.size()
+		_kerb_quad(verts, norms, cols, p0, n0, p1, n1, -hw, -(hw + KERB_WIDTH), y, col)
+		idx.append_array([base, base + 3, base + 1, base, base + 2, base + 3])
+
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_COLOR] = cols
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.85
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.name = "Kerbs"
+	add_child(mi)
+
+
+## 路肩某一块的顶点色（**已转成线性空间**）。block 偶数 = 红，奇数 = 白。
+##
+## 为什么顶点色要自己转、而地台不用：材质上的 albedo_color 由引擎按 sRGB→线性
+## 自动换算，但 ArrayMesh 的顶点色是**直接当线性值**送进着色器的（路面那侧踩着
+## 同一个坑，见 _terrain_color 的注释）。把设计用的 sRGB 值原样塞进顶点色，红
+## (0.86, 0.20, 0.20) 会显示成 sRGB 约 (0.94, 0.48, 0.48)——整条路肩看着是
+## 「白 + 粉」而不是「白 + 红」（本工程实测踩过，截图才看得出）。
+func kerb_color(block: int) -> Color:
+	var srgb: Color = KERB_A if block % 2 == 0 else KERB_B
+	return srgb.srgb_to_linear()
+
+
+## 往路肩网格里追加一段四边形：off_hi 是「更靠 +normal」的横向偏移（m），
+## off_lo 是另一个。两个环 p0/p1 各两个顶点，纯色 col。
+func _kerb_quad(verts: PackedVector3Array, norms: PackedVector3Array,
+		cols: PackedColorArray, p0: Vector3, n0: Vector3, p1: Vector3, n1: Vector3,
+		off_hi: float, off_lo: float, y: float, col: Color) -> void:
+	var a_hi := p0 + n0 * off_hi
+	var a_lo := p0 + n0 * off_lo
+	var b_hi := p1 + n1 * off_hi
+	var b_lo := p1 + n1 * off_lo
+	verts.append(Vector3(a_hi.x, y, a_hi.z))
+	verts.append(Vector3(a_lo.x, y, a_lo.z))
+	verts.append(Vector3(b_hi.x, y, b_hi.z))
+	verts.append(Vector3(b_lo.x, y, b_lo.z))
+	for _s in 4:
+		norms.append(Vector3.UP)
+		cols.append(col)
+
+
 ## 起跑线：横跨路面的一条白色带（在 index 0 处）。
 func _build_start_line() -> void:
 	var p := layout.point(0)
@@ -251,7 +362,10 @@ func _build_decor() -> void:
 			if rng.randf() >= DECOR_SIDE_CHANCE:
 				continue
 			var sgn := -1.0 if side == 0 else 1.0
-			var lat := layout.half_width + DECOR_CLEARANCE + rng.randf() * DECOR_SPREAD
+			# 留白从「路面边缘」起算要再加上路肩宽度：路肩是 0.9 m 宽的可见结构，
+			# 装饰贴到路肩外沿上同样算压路。
+			var lat := layout.half_width + KERB_WIDTH + DECOR_CLEARANCE \
+				+ rng.randf() * DECOR_SPREAD
 			var pos: Vector3 = layout.point(i) + layout.normal(i) * (lat * sgn)
 			var sc := DECOR_MIN_SCALE + rng.randf() * DECOR_SCALE_SPAN
 			var yaw := rng.randf() * TAU
@@ -265,7 +379,8 @@ func _build_decor() -> void:
 			# ① 只判落点不够：部件自己的局部偏移会把件中心往路面推（本工程实测踩过：
 			#    mountain_road 上落点合规、岩石第二块却贴到 6.91 m < 7.4 m）；
 			# ② 只判本段也不够：弯道另一头可能贴得很近，装饰压到那段路上同样穿帮。
-			var need := layout.half_width + DECOR_SAFE_MARGIN \
+			# ③ 留白算在「路面 + 路肩」的外沿上（+ KERB_WIDTH），不是路面边缘。
+			var need := layout.half_width + KERB_WIDTH + DECOR_SAFE_MARGIN \
 				+ _template_reach(tmpl) * DECOR_MAX_SCALE
 			if not _road_clear(pos, need):
 				continue
@@ -487,14 +602,14 @@ func _setup_mountain() -> Dictionary:
 
 
 ## 城市：路灯（暗柱 + 亮黄自发光灯头）+ 2 档灰的看台阶梯。4 组。
-## 台阶刻意比冷灰地台（0.30/0.32/0.36）亮两档：同明度的灰压在灰地台上，
-## 截图里几乎看不出来（本工程实测踩过一次）。
+## 台阶刻意比地台暗两档：地台是浅混凝土（0.58），台阶若还用 0.58 灰就等于隐形
+## （上一版对着冷灰地台踩过反向的同一个坑：同明度的灰压在灰地台上看不出来）。
 func _setup_city() -> Dictionary:
 	var channels := [
 		_chan("box", Color(0.13, 0.14, 0.16)),
 		_chan("box", Color(1.0, 0.86, 0.30), 1.2),
-		_chan("box", Color(0.74, 0.72, 0.68)),
-		_chan("box", Color(0.58, 0.56, 0.54)),
+		_chan("box", Color(0.40, 0.40, 0.43)),
+		_chan("box", Color(0.28, 0.28, 0.31)),
 	]
 	var templates := [
 		_lamp(0, 1), _stand(2), _stand(3),
