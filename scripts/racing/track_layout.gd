@@ -2,17 +2,25 @@ class_name TrackLayout
 extends RefCounted
 ## 闭合赛道的几何与地形分段（纯逻辑，不碰节点，可无头测试）。
 ##
-## 赛道是一圈闭合的中心线：r(θ) = R·(1 + amp·sin(lobes·θ+phase) + amp2·sin(lobes2·θ+phase2))。
-## 先按目标长度（length_m）解出 R，再等距重采样成 points（每 SPACING 米一个点）。
+## 两种形状定义，二选一：
+##   ① 「极坐标正弦环」（默认）：r(θ) = R·(1 + amp·sin(lobes·θ+phase)
+##      + amp2·sin(lobes2·θ+phase2))。先按目标长度（length_m）解出 R，再等距重采样。
+##   ② 「控制点折线」（D-085，json 里给 waypoints）：显式控制点 → Chaikin 切角 →
+##      等距重采样。**这是极坐标做不出来的那一类弯**——r(θ) 是星形曲线，任何角度
+##      只有唯一的 r，因此永远不可能出现发卡弯（180° 回头）或减速弯（S 形快速
+##      反打）；6 条极坐标赛道在弯的「性格」上必然同质，只是正弦起伏的疏密不同。
+##   两种模式的后续处理（等距重采样 / 地形分段 / 检查点）完全共用一条路径，
+##   所以 waypoints 只是换了 raw 折线的来源，风险面很小。
 ## 地形按 terrain_segments 的「圈程百分比」逐点贴标签，供 CarPhysics 查抓地力/极速。
 ##
 ## 为什么不用体素铺路：世界是流式加载的，一条 1200 m 的赛道要跨 150 个区块，
 ## 远超加载窗口；赛道因此是独立的 3D 几何（见 TrackLoader），不与体素世界耦合。
 
 const SPACING := 4.0        # 中心线采样间距（m）
-const DENSE := 2048         # 解 R 用的密集采样数
+const DENSE := 2048         # 解 R / 加密折线用的密集采样数
 const ROAD_Y := 0.0         # 路面高度（竞技场是平的）
 const GATE_SPACING_M := 300.0   # 检查点大致间距
+const WAYPOINT_SMOOTH_ITERS := 3   # Chaikin 切角迭代次数（每轮点数 ×2）
 
 var id: String = ""
 var name_zh: String = ""
@@ -41,29 +49,25 @@ static func build(def: Dictionary) -> TrackLayout:
 	l.half_width = float(def.get("half_width_m", 6.0))
 	var length_target := float(def.get("length_m", 1200.0))
 
+	# ① 先拿到「密折线 raw」，两种形状定义二选一，之后的处理完全共用。
 	var shape: Dictionary = def.get("shape", {})
-	var amp := float(shape.get("amp", 0.1))
-	var lobes := int(shape.get("lobes", 3))
-	var phase := float(shape.get("phase", 0.0))
-	var amp2 := float(shape.get("amp2", 0.04))
-	var lobes2 := int(shape.get("lobes2", 5))
-	var phase2 := float(shape.get("phase2", 0.0))
-
-	# ① 密集采样求实际周长，反解 R 使周长落在 length_target。
-	var r0 := length_target / TAU
-	var raw := PackedVector2Array()
-	var cum_raw := PackedFloat32Array()
-	for i in DENSE:
-		var th := TAU * float(i) / float(DENSE)
-		var r := r0 * (1.0 + amp * sin(float(lobes) * th + phase)
-			+ amp2 * sin(float(lobes2) * th + phase2))
-		raw.append(Vector2(r * cos(th), r * sin(th)))
+	var raw := _raw_waypoints(def)
+	if raw.size() < 8:
+		raw = _raw_polar(shape, length_target)
+	# 统一按弧长等比缩放到 length_m（UI 上显示的就是这个数）。
+	# waypoints 模式也走这条，所以控制点设计时让自然周长大致等于 length_m，
+	# 缩放比才接近 1，发卡弯的曲率半径才不会被缩放带偏。
+	# 弧长累积必须用 float64：float32 在 1700 m 量级累积两千段的舍入残差能到
+	# 0.05 m，闭合边因此比 SPACING 长出一小截，「等距重采样」就再也断言不了严格等号。
+	# 用 float64 之后 total == count × SPACING 精确成立，探针可以钉 < 0.01 m。
+	var cum_raw := PackedFloat64Array()
+	var n_raw := raw.size()
 	var perimeter := 0.0
-	cum_raw.resize(DENSE + 1)
-	for i in DENSE:
+	cum_raw.resize(n_raw + 1)
+	for i in n_raw:
 		cum_raw[i] = perimeter
-		perimeter += raw[i].distance_to(raw[(i + 1) % DENSE])
-	cum_raw[DENSE] = perimeter
+		perimeter += raw[i].distance_to(raw[(i + 1) % n_raw])
+	cum_raw[n_raw] = perimeter
 	var scale := length_target / maxf(perimeter, 0.001)
 	for i in raw.size():
 		raw[i] *= scale
@@ -102,7 +106,92 @@ static func build(def: Dictionary) -> TrackLayout:
 	return l
 
 
-func _sample_polyline(raw: PackedVector2Array, cum_raw: PackedFloat32Array, d: float) -> Vector2:
+## 极坐标正弦环的密折线（原唯一形状，D-085 起成为两种模式之一）。
+static func _raw_polar(shape: Dictionary, length_target: float) -> PackedVector2Array:
+	var amp := float(shape.get("amp", 0.1))
+	var lobes := int(shape.get("lobes", 3))
+	var phase := float(shape.get("phase", 0.0))
+	var amp2 := float(shape.get("amp2", 0.04))
+	var lobes2 := int(shape.get("lobes2", 5))
+	var phase2 := float(shape.get("phase2", 0.0))
+	var r0 := length_target / TAU
+	var raw := PackedVector2Array()
+	for i in DENSE:
+		var th := TAU * float(i) / float(DENSE)
+		var r := r0 * (1.0 + amp * sin(float(lobes) * th + phase)
+			+ amp2 * sin(float(lobes2) * th + phase2))
+		raw.append(Vector2(r * cos(th), r * sin(th)))
+	return raw
+
+
+## 控制点折线 → Chaikin 切角平滑 → 加密，得到与 _raw_polar 等价地位的密折线。
+##
+## 为什么用 Chaikin 而不是 Catmull-Rom：均匀 CR 在控制点间距不均时会过冲，
+## 在发卡弯上能自己绕出一个内环，路面带随即自交翻面（顶点色也一起错乱）。
+## Chaikin 每轮把各边按 1:3 切两刀，结果**永远落在控制多边形的凸包内**，
+## 对简单闭合多边形不会自交——这类几何里「一定不会翻面」比「数学上更光滑」值钱。
+## 代价是控制点本身会被切掉（转角变圆滑），但这正是发卡弯该有的样子。
+static func _raw_waypoints(def: Dictionary) -> PackedVector2Array:
+	var src: Array = def.get("waypoints", [])
+	var pts := PackedVector2Array()
+	for item: Variant in src:
+		if item is Array and (item as Array).size() >= 2:
+			var pair: Array = item
+			pts.append(Vector2(float(pair[0]), float(pair[1])))
+	if pts.size() < 3:
+		return PackedVector2Array()
+	var cur := pts
+	for _iter in WAYPOINT_SMOOTH_ITERS:
+		var nxt := PackedVector2Array()
+		nxt.resize(cur.size() * 2)
+		for i in cur.size():
+			var p0 := cur[i]
+			var p1 := cur[(i + 1) % cur.size()]
+			nxt[i * 2] = p0.lerp(p1, 0.25)
+			nxt[i * 2 + 1] = p0.lerp(p1, 0.75)
+		cur = nxt
+	# 加密成细折线：_sample_polyline 靠 cum_raw 按弧长二分，段太粗会让
+	# 重采样点落在直线段内部的折角处（视觉上路面出现硬折）。
+	var dense := PackedVector2Array()
+	var segs := cur.size()
+	var per := maxi(1, int(ceil(float(DENSE) / float(segs))))
+	for i in segs:
+		var a := cur[i]
+		var b := cur[(i + 1) % segs]
+		for k in per:
+			dense.append(a.lerp(b, float(k) / float(per)))
+	return dense
+
+
+## 最小曲率半径（m）。取相邻三点的外接圆半径。
+##
+## 这条是「路面带会不会自交翻面」的可断言闸：路面是沿中心线两侧各偏 half_width
+## 缝成的带状网格，转弯半径一旦小于 half_width，内侧边线就会自己穿过去——画面
+## 上是路面颜色打结、顶点色错乱，而且探针数不出「难看」。所以建造新赛道（尤其
+## 是 waypoints 模式的发卡弯）必须让 min_curve_radius() ≥ half_width × 2.5。
+## 共线（三点几乎共线）的三点返回一个很大的值，等价于「这里没有弯」。
+func min_curve_radius() -> float:
+	var n := size()
+	if n < 3:
+		return 1.0e9
+	var best := 1.0e9
+	for i in n:
+		var a := Vector2(point(i - 1).x, point(i - 1).z)
+		var b := Vector2(point(i).x, point(i).z)
+		var c := Vector2(point(i + 1).x, point(i + 1).z)
+		var ab := b.distance_to(a)
+		var bc := c.distance_to(b)
+		var ca := a.distance_to(c)
+		var cross := absf((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x))
+		var area2 := cross
+		if area2 < 0.0001:
+			continue
+		var r := ab * bc * ca / (2.0 * area2)
+		best = minf(best, r)
+	return best
+
+
+func _sample_polyline(raw: PackedVector2Array, cum_raw: PackedFloat64Array, d: float) -> Vector2:
 	var n := raw.size()
 	var dist := fposmod(d, maxf(cum_raw[n], 0.001))
 	var lo := 0

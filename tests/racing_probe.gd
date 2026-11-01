@@ -35,6 +35,7 @@ func _run() -> void:
 	_test_session_progress()
 	_test_pace_and_offroad()
 	_test_handbrake_drift()
+	_test_waypoint_tracks()
 	_test_records_and_replay()
 	await _test_scene_end_to_end()
 	await _test_hud_wiring()
@@ -519,6 +520,122 @@ func _cornering(vehicle_id: String, terrain_id: String, handbrake: bool) -> Dict
 		"arc": arc,
 		"radius": arc / maxf(turn, 0.0001),
 	}
+
+
+# ──── G. waypoints 形状模式与三条新赛道（D-085）────
+## 为什么需要第二种形状定义：极坐标正弦环 r(θ) 是**星形曲线**——任何方向只有
+## 唯一的半径，因此永远不可能出现发卡弯（180° 回头）或减速弯（S 形快速反打）。
+## 原来 6 条赛道在弯的性格上必然同质，只是正弦起伏的疏密不同。本节钉住三件事：
+##   ① 新赛道几何合法（等距、闭合、不自交、曲率半径不会让路面带翻面）；
+##   ② 它们确实是「新弯型」而不是又一条正弦环（最小曲率半径显著更小）；
+##   ③ 坏 waypoints 数据会安全回落到极坐标，不会炸掉整个赛道。
+func _test_waypoint_tracks() -> void:
+	var new_ids: Array[String] = ["canyon_hairpin", "harbor_chicane", "dune_slalom"]
+	var all := RaceSystem.tracks()
+	_check(all.size() == 9, "赛道总数 9 条（实际 %d）" % all.size())
+	for tid: String in new_ids:
+		var def := RaceSystem.track(tid)
+		_check(not def.is_empty(), "新赛道定义存在：%s" % tid)
+		_check(def.has("waypoints"), "%s 走 waypoints 形状模式" % tid)
+		var lay := RaceSystem.build_layout(tid)
+		_check(lay != null and lay.size() > 100,
+			"%s 几何构建成功（%d 采样点）" % [tid, 0 if lay == null else lay.size()])
+		if lay == null:
+			continue
+		var target := float(def.get("length_m", 0.0))
+		var err := absf(lay.total - target) / maxf(target, 1.0)
+		_check(err < 0.06, "%s 周长贴近目标 %.0f m（实测 %.1f m）" % [tid, target, lay.total])
+		# 「等距」是**弧长**意义，不是弦长：曲线上相隔 4 m 弧长的两点，直线距离略短
+		# （半径 16 m 处弦差约 0.009 m）；再叠加 PackedVector2Array 是 float32、
+		# 在 ±430 m 量级上累积的坐标量化（实测 0.018~0.051 m）。两者之和决定了
+		# 容差至少要 0.07。取 0.1 仍然能一眼抓出真正的回归——少算一档就是 4 m 级。
+		var worst_gap := 0.0
+		for i in lay.size():
+			worst_gap = maxf(worst_gap, absf(lay.point(i).distance_to(lay.point(i + 1)) - TrackLayout.SPACING))
+		_check(worst_gap < 0.1, "%s 采样等距（最大弦长偏差 %.4f m < 0.1）" % [tid, worst_gap])
+		# 报告出来的周长必须是 count × SPACING 的精确值——这个等式是几何与圈速记账
+		# 的共同基础，不能有残差。
+		var exact_total := float(lay.size()) * TrackLayout.SPACING
+		_check(absf(lay.total - exact_total) < 0.000001,
+			"%s total 精确等于 采样点数×%.0f（%.4f）" % [tid, TrackLayout.SPACING, lay.total])
+		# length_m 必须是 SPACING 的整数倍：否则 count 向下取整后最后一段会明显偏长
+		# （例如 1505 m → 最后一段 5 m），赛道圈长记账会悄悄偏 1 m。
+		_check(absf(target - roundf(target / TrackLayout.SPACING) * TrackLayout.SPACING) < 0.0001,
+			"%s length_m %.0f 是 %.0f 的整数倍（否则闭合边会明显偏长）"
+			% [tid, target, TrackLayout.SPACING])
+		# 路面带自交翻面的物理条件：中心线曲率半径 < half_width 时内侧边线会翻过去。
+		# 这里用 1.2× 做回归闸（留一点离散化余量），另外新赛道还要过 2.5× 的设计线。
+		var min_r := lay.min_curve_radius()
+		_check(min_r > lay.half_width * 1.2,
+			"%s 最小曲率半径 %.1f m > 路面半宽 %.1f m（不会翻面）" % [tid, min_r, lay.half_width])
+		_check(min_r >= lay.half_width * 2.5,
+			"%s 满足新赛道设计线：minR %.1f ≥ %.1f（半宽 ×2.5）"
+			% [tid, min_r, lay.half_width * 2.5])
+		# 简单多边形：waypoints 随手摆很容易让赛道自己穿过去（画面上看不出、
+		# 却能让孩子冲到对向车道上）。这条是 waypoints 模式独有的风险闸。
+		_check(not _self_intersects(lay), "%s 中心线不自交（简单闭合多边形）" % tid)
+		var gate_ok := lay.gate_count() >= 3 and lay.gate_count() <= 8
+		_check(gate_ok, "%s 检查点 %d 个在 3..8" % [tid, lay.gate_count()])
+		_check(lay.gate_index(0) == 0, "%s 起跑线在 0 号采样点" % tid)
+		var unlock := String(def.get("unlock", "default"))
+		_check(RaceSystem.unlock_hint(unlock) != "", "%s 解锁条件可读：%s → %s"
+			% [tid, unlock, RaceSystem.unlock_hint(unlock)])
+
+	# 「真的是新弯型」：新赛道的最小曲率半径必须明显小于全部极坐标赛道。
+	# 若哪天有人把新赛道的 waypoints 换成近似圆形，这条会立刻报出来。
+	var polar_min := 1.0e9
+	for def: Dictionary in RaceSystem.tracks():
+		if def.has("waypoints"):
+			continue
+		var lay := TrackLayout.build(def)
+		if lay == null:
+			continue
+		polar_min = minf(polar_min, lay.min_curve_radius())
+	_check(polar_min > 0.0 and polar_min < 1.0e8,
+		"极坐标赛道最小曲率半径 %.1f m（作为对照基准）" % polar_min)
+	for tid: String in new_ids:
+		var lay := RaceSystem.build_layout(tid)
+		if lay == null:
+			continue
+		_check(lay.min_curve_radius() < polar_min,
+			"%s minR %.1f < 极坐标基准 %.1f（确实是极坐标做不出的弯）"
+			% [tid, lay.min_curve_radius(), polar_min])
+
+	# 坏数据安全阀：waypoints 少于 3 点时 _raw_waypoints 返回空，build 回落极坐标。
+	var broken := RaceSystem.track("desert_ring").duplicate(true)
+	broken["waypoints"] = [[0.0, 0.0], [10.0, 0.0]]
+	var lay_broken := TrackLayout.build(broken)
+	_check(lay_broken != null and lay_broken.size() > 100,
+		"坏 waypoints（2 个点）安全回落到极坐标（%d 采样点）"
+		% (0 if lay_broken == null else lay_broken.size()))
+
+
+## 闭合折线是否自交（跳过相邻边与首尾相邻边）。O(n²)，9 条赛道累计几十万次，
+## 但这是 waypoints 模式唯一能「画面上看不出、逻辑上致命」的错误来源，值得跑。
+func _self_intersects(lay: TrackLayout) -> bool:
+	var n := lay.size()
+	for i in n:
+		var a1 := lay.point(i)
+		var a2 := lay.point(i + 1)
+		for j in range(i + 2, n):
+			if i == 0 and j == n - 1:
+				continue     # 首尾相邻，共享顶点
+			if _segments_cross(a1, a2, lay.point(j), lay.point(j + 1)):
+				return true
+	return false
+
+
+func _segments_cross(a1: Vector3, a2: Vector3, b1: Vector3, b2: Vector3) -> bool:
+	var p := Vector2(a1.x, a1.z)
+	var r := Vector2(a2.x - a1.x, a2.z - a1.z)
+	var q := Vector2(b1.x, b1.z)
+	var s := Vector2(b2.x - b1.x, b2.z - b1.z)
+	var denom := r.cross(s)
+	if absf(denom) < 0.000001:
+		return false      # 平行或共线：等距采样下不构成穿越
+	var t := (q - p).cross(s) / denom
+	var u := (q - p).cross(r) / denom
+	return t > 0.0001 and t < 0.9999 and u > 0.0001 and u < 0.9999
 
 
 func _check(cond: bool, label: String) -> void:
