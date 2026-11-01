@@ -50,6 +50,9 @@ var _reel_state: Dictionary = {}
 var _fish_pos := 0.5
 var _safe_min := 0.32
 var _safe_max := 0.68
+## 抛投提示的缓存：水层不变时那一层的鱼名单也不会变，不必每帧重算（D-083）。
+var _cast_band := ""
+var _cast_preview: Dictionary = {}
 
 
 func _ready() -> void:
@@ -171,6 +174,9 @@ func open_session() -> void:
 	visible = true
 	_power = 0.0
 	_result = {}
+	# 换钓点 / 换饵后水层名单会变，抛投预告必须重算。
+	_cast_band = ""
+	_cast_preview = {}
 	_prev_confirm = true  # 开局那一下按键不算「确认」，免得刚打开就被跳过
 	_rebuild()
 
@@ -222,10 +228,30 @@ func _tick_cast(delta: float) -> void:
 		_do_cast()
 		return
 	_power_bar.value = _power
+	var info := FishingSystem.session_info()
 	var distance := FishingGear.cast_distance(
-		FishingSystem.gear.sinker(FishingSystem.session_info()["sinker_id"]), _power)
-	_info_label.text = "力度 %.0f%% —— 松手将抛到约 %.0f 米（%s）" % [
+		FishingSystem.gear.sinker(String(info["sinker_id"])), _power)
+	var band := FishingGear.band_of(distance)
+	if band != _cast_band:
+		_cast_band = band
+		_cast_preview = FishingSystem.cast_preview(_power)
+	_info_label.text = _cast_hint(distance, _cast_preview)
+
+
+## 抛投前提示：力度 / 落点 / **这一层最猛的是谁**（D-083）。
+## 最后一项是这次加的：收线是「拉力越高压得越难」的博弈，孩子没法从「深水」
+## 两个字反推出「这里有拉力 9 的大白鲨」，原来只有先白跑一趟才知道。
+func _cast_hint(distance: float, preview: Dictionary) -> String:
+	var head := "力度 %.0f%% —— 松手将抛到约 %.0f 米（%s）" % [
 		_power * 100.0, distance, FishingGear.band_title(FishingGear.band_of(distance))]
+	var fight := int(preview.get("hardest_fight", 0))
+	if fight <= 0:
+		return head + "\n这一层这一竿暂时没鱼：换个鱼饵，或者改个力度。"
+	var tail := "这一层最猛：%s · 拉力 %d" % [
+		String(preview.get("hardest_name", "")), fight]
+	if bool(preview.get("line_short", false)):
+		tail += "（线偏细，容易断——记得随时松手泄力）"
+	return head + "\n" + tail
 
 
 func _do_cast() -> void:
@@ -303,6 +329,8 @@ func _restart() -> void:
 	FishingSystem.start_fishing(String(info["spot_id"]), gear_set)
 	_result = {}
 	_power = 0.0
+	_cast_band = ""
+	_cast_preview = {}
 	_prev_confirm = true
 	_rebuild()
 

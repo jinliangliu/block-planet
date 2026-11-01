@@ -54,15 +54,27 @@ const NO_BITE_FACTOR := 2.0
 const BITE_MIN_MATCH := 0.3
 
 ## 收线小游戏。
+##
+## 三条「可钓性」常量（D-083）：此前**入门套装一竿抛出的鱼可能是必败的**——
+## 拉力 7~10 的大鱼哪怕操作全对也会在 5~13 s 内跑掉（见下三处注释的实测表）。
+## 目标玩家 6~12 岁，且 fish_escaped 是「白费一趟」的挫败，不是有代价的失败，
+## 所以本轮把这三条整体放宽，让「拉满操作」能换来结果。
 const REEL_RATE := 0.12          # 进度速率 = 渔轮 speed × 本值 × (1 - 0.4·张力)
-const SLIP_RATE := 0.012         # 松手时进度回退 = 鱼挣扎力 × 本值
+## 松手时进度回退 = 鱼挣扎力 × 本值。0.012 → 0.006：原来一次「该松手」的
+## 安全区窗口就吃掉刚收上来的 3 成进度，孩子会以为「松手=白干」。
+const SLIP_RATE := 0.006
 const TENSION_FIGHT := 0.10      # 鱼的拉力系数
 const TENSION_DRAG := 0.12       # 卸力越紧，线受力越大
-const TENSION_RELIEF := 0.60     # 收线时的自然泄力（抵消一部分，让小鱼能轻松收）
+## 收线时的自然泄力。0.60 → 0.72：小鱼的张力余量更宽，大鱼靠「松手泄力」
+## 也能把张力压回去（原来 0.45/s 的泄力追不上 0.30~0.44/s 的涨速）。
+const TENSION_RELIEF := 0.72
 const TENSION_SCALE := 0.35
 const TENSION_RELEASE := 0.45    # 松手时张力每秒下降
 const LINE_WEAK_FACTOR := 1.25   # 线拉力 < 鱼挣扎力时的断线加速
-const ESCAPE_FIGHT := 0.04       # 卸力太松 → 鱼越跑越远
+## 卸力太松 → 鱼越跑越远。0.04 → 0.028：入门鼓轮上限 drag_max=2，
+## 原值下 fight 7/8/9 的逃逸速度是 0.16/0.20/0.24 每秒（6~8 s 必跑），
+## 而同等条件下收满盘要 13~20 s——**数学上不可能钓上来**。
+const ESCAPE_FIGHT := 0.028
 const ESCAPE_DRAG := 0.10        # 卸力越紧 → 拉得住，但张力上得更快（见上）
 const HARD_PULL_FACTOR := 1.5    # 鱼不在安全区还硬收 → 张力加速
 const SAFE_HALF_WIDTH := 0.18    # 安全区半宽（鱼位置 0~1）
@@ -319,6 +331,58 @@ func best_match(spot_id: String, bait_id: String, depth: String, sinker_id: Stri
 		best = maxf(best, float(item["match"]) * FishingGear.sinker_factor(
 			gear.sinker(sinker_id), String((item["fish"] as Dictionary).get("depth", ""))))
 	return best
+
+
+## 抛投前的「这一竿会碰上谁」（D-083）：当前力度落在哪个水层、那一层最猛的是哪条鱼、
+## 手上这根线扛不扛得住它。
+##
+## 为什么要预告：收线是「拉力越高压得越难」的博弈，孩子没法从「深水」两个字反推出
+## 「这里有拉力 9 的大白鲨」。原来只有先失败一次才知道自己打不过——而 `fish_escaped`
+## 是纯粹白费一趟，没有任何「下次更聪明」的线索。预告把这一步提前到松手之前。
+##
+## 纯查询：只读数据表，不改任何状态，UI 每帧调用也安全（池子只有 2~3 条鱼）。
+func cast_preview(power: float) -> Dictionary:
+	var distance := FishingGear.cast_distance(gear.sinker(_sinker_id), power)
+	# 只算**这套饵 + 这个坠真的能招来**的鱼（权重 0 = 诱不来），
+	# 否则会用一条不会上钩的大鱼吓退孩子。
+	var reachable := {}
+	for item_value: Variant in weighted_pool(_spot_id, _bait_id,
+			FishingGear.band_of(distance), _sinker_id):
+		var item: Dictionary = item_value
+		if float(item.get("weight", 0.0)) <= 0.0:
+			continue
+		var fish: Dictionary = item["fish"]
+		reachable[String(fish.get("id", ""))] = fish
+	return _preview_of(distance, reachable)
+
+
+## cast_preview 的纯函数版本（探针直接喂 fish 名单，不必开一场 session）。
+func _preview_of(distance: float, pool_by_id: Dictionary) -> Dictionary:
+	var band := FishingGear.band_of(distance)
+	var hardest: Dictionary = {}
+	for key: Variant in pool_by_id:
+		var entry: Dictionary = pool_by_id[key]
+		if hardest.is_empty() or int(entry.get("fight_power", 1)) \
+				> int(hardest.get("fight_power", 1)):
+			hardest = entry
+	var out := {
+		"distance_m": distance,
+		"band": band,
+		"band_title": FishingGear.band_title(band),
+		"hardest_id": "",
+		"hardest_name": "",
+		"hardest_fight": 0,
+		"line_short": false,
+	}
+	if hardest.is_empty():
+		return out
+	var fight := int(hardest.get("fight_power", 0))
+	var line_strength := int(gear.line(String(_gear_set.get("line", ""))).get("strength", 0))
+	out["hardest_id"] = String(hardest.get("id", ""))
+	out["hardest_name"] = String(hardest.get("name_zh", ""))
+	out["hardest_fight"] = fight
+	out["line_short"] = line_strength < fight
+	return out
 
 
 # ────────────────────────── 状态机 ──────────────────────────

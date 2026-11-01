@@ -12,8 +12,7 @@
       "intro_zh": "风平浪静的近岸浅滩，礁石边躲着小丑鱼，远处偶有鲑鱼洄游经过。",
       "fish_pool": [
         "pacific_clownfish",
-        "pacific_salmon",
-        "great_white_shark"
+        "pacific_salmon"
       ],
       "unlock": "default"
     },
@@ -42,8 +41,7 @@
       "intro_zh": "五彩的珊瑚礁盘，小丑鱼在海葵间穿梭，礁外是鲸鲨缓慢巡游的深水。",
       "fish_pool": [
         "clownfish",
-        "lionfish",
-        "whale_shark_io"
+        "lionfish"
       ],
       "unlock": "default"
     },
@@ -57,8 +55,7 @@
       "intro_zh": "浮冰边缘的冷水，北极鳕鱼成群，冰缝深处有格陵兰鲨慢慢游动。",
       "fish_pool": [
         "arctic_cod",
-        "narwhal",
-        "greenland_shark"
+        "narwhal"
       ],
       "unlock": "default"
     },

@@ -328,6 +328,71 @@ func _run() -> void:
 	_check(not last.is_empty() and last.has("weight_kg") and last.has("is_personal_best"),
 		"last_catch 保存重量与个人最佳标记")
 
+	# ────────────── K 大鱼可钓性与抛投预告（D-083） ──────────────
+	# 背景：改常量前，拉力 7/8/9 的鱼在入门鼓轮（drag_max=2）下逃逸速度是
+	# 0.16/0.20/0.24 每秒（6~8 s 必跑），而同样条件收满盘要 13~20 s——
+	# 数学上不可能钓上来，也就是「一竿抛出必败的鱼」。下面四组断言把这个
+	# 平衡钉住：岸钓点不再出现顶级掠食者、拉力 8 能靠正确操作钓上、
+	# 拉力 9 仍然需要更好的渔轮（不是无脑变简单）。
+	var shore_spots: Array[String] = ["pacific_coast", "atlantic_open",
+		"indian_reef", "arctic_edge"]
+	for spot_id: String in shore_spots:
+		var worst := 0
+		for f: Dictionary in FishingSystem.get_fish_pool(spot_id, ""):
+			worst = maxi(worst, int(f.get("fight_power", 0)))
+		_check(worst <= 8, "%s 岸钓点最猛鱼拉力 ≤ 8（实测 %d）" % [spot_id, worst])
+
+	var basic_set := {"rod": "basic_sea_rod", "reel": "basic_reel", "line": "nylon_line"}
+	_check(_reel_with_policy("bluefin_tuna", basic_set),
+		"入门套装 + 正确操作能钓上拉力 8 的蓝鳍金枪鱼")
+	_check(not _reel_with_policy("great_white_shark", basic_set),
+		"拉力 9 的大白鲨仍要升级渔轮（入门套装钓不上，难度没被抹平）")
+
+	# 抛投预告：松手之前就告诉孩子这一层最猛的是谁 / 这一层到底有没有鱼。
+	_check(FishingSystem.start_fishing("pacific_coast", basic_set), "岸钓点开钓（抛投预告用）")
+	FishingSystem.select_bait("live_shrimp")
+	FishingSystem.select_sinker("sinker_10g")
+	var shallow_pv: Dictionary = FishingSystem.cast_preview(0.3)
+	_check(String(shallow_pv.get("band", "")) == "shallow"
+		and int(shallow_pv.get("hardest_fight", 0)) >= 1
+		and String(shallow_pv.get("hardest_name", "")) != "",
+		"浅水预告报出最猛鱼（%s 拉力 %d）" % [shallow_pv.get("hardest_name", ""),
+			int(shallow_pv.get("hardest_fight", 0))])
+	FishingSystem.select_sinker("sinker_60g")
+	var deep_pv: Dictionary = FishingSystem.cast_preview(1.0)
+	_check(String(deep_pv.get("band", "")) == "deep" and int(deep_pv.get("hardest_fight", 0)) == 0,
+		"岸钓点抛到深水层会报「这一层没鱼」，而不是让孩子空等")
+	FishingSystem.select_sinker("sinker_30g")
+	FishingSystem.select_bait("live_shrimp")
+	var mid_pv: Dictionary = FishingSystem.cast_preview(1.0)
+	_check(bool(mid_pv.get("line_short", false)) == (2 < int(mid_pv.get("hardest_fight", 0))),
+		"细线提示与「线拉力 < 鱼拉力」一致（线 2 / 鱼 %d）" % int(mid_pv.get("hardest_fight", 0)))
+	FishingSystem.end_session()
+
+
+## 按「鱼在安全区就收、出安全区就松」的正确操作跑一局收线，返回是否钓上来。
+## 直接指定鱼种而不用随机鱼池，保证结论可复现；断言只看公开状态。
+func _reel_with_policy(fish_id: String, gear_set: Dictionary) -> bool:
+	FishingSystem.start_fishing("pacific_far", gear_set)
+	FishingSystem.select_bait("metal_lure")
+	FishingSystem.select_sinker("sinker_60g")
+	FishingSystem.cast_power(1.0)
+	# 卸力拉满（夹到该渔轮的 drag_max）——这是钓大鱼的标准操作：
+	# 卸力太松鱼会一直往外跑，正确玩法就是「拉满卸力 + 出安全区就松手」。
+	FishingSystem.set_drag(99.0)
+	FishingSystem._hooked_id = fish_id
+	FishingSystem._phase = float(fish_id.hash() % 628) / 100.0
+	FishingSystem.set_state(FishingSystem.State.REELING)
+	var dt := 1.0 / 60.0
+	for i in range(3600):   # 最多 60 s，正常情况 10~30 s 内出结果
+		if FishingSystem.state != FishingSystem.State.REELING:
+			break
+		var st: Dictionary = FishingSystem.reel_state()
+		var in_safe := absf(float(st["fish_pos"]) - 0.5) <= FishingSystem.SAFE_HALF_WIDTH
+		FishingSystem.update_reel(dt, 1.0 if in_safe else 0.0)
+	return FishingSystem.state != FishingSystem.State.REELING \
+		and float(FishingSystem.reel_state()["progress"]) >= 1.0
+
 
 ## 收尾：还原钓鱼日志文本（不存在则删除）+ 关掉 _exit_tree 的补写闸，
 ## 再走 SaveGuard.restore()（progress/settings/竞速三件套 + Progress 内存态）。
