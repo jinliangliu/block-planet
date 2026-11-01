@@ -34,6 +34,7 @@ func _run() -> void:
 	_test_ai_racer()
 	_test_session_progress()
 	_test_pace_and_offroad()
+	_test_handbrake_drift()
 	_test_records_and_replay()
 	await _test_scene_end_to_end()
 	await _test_hud_wiring()
@@ -412,6 +413,112 @@ func _test_pace_and_offroad() -> void:
 	var before_road := r.off_road_time
 	session.update_progress(r, false, 0.05)
 	_check(absf(r.off_road_time - before_road) < 0.0001, "在路面内 off-road 计时不增长")
+
+
+# ──── F. 手刹漂移（D-084）────
+## 改前的实测病：手刹只减纵向速度、把侧滑回正降到 0.2，**转向率一点不变**——
+## 于是同样 2 s 满舵，转角与不拉手刹完全一致（230°），速度却掉了三成。
+## 「同样的弯、更慢的车」= 玩家没有任何理由用它，漂移是纯惩罚。
+## 本节钉住三条：① 手刹能换来转角（甩得出去）；② 换来的速度代价可接受（不是急刹）；
+## ③ 手刹真的在漂（侧滑角显著 > 普通转弯）。
+## CarPhysics 是纯逻辑层，整段是「构造式喂帧」，逐帧确定，不是机会性断言。
+func _test_handbrake_drift() -> void:
+	_check(absf(CarPhysics.HANDBRAKE_DECEL - 0.18) < 0.0001
+		and absf(CarPhysics.HANDBRAKE_YAW - 1.35) < 0.0001
+		and absf(CarPhysics.HANDBRAKE_GRIP - 0.20) < 0.0001,
+		"手刹三常量在位（DECEL=%.2f YAW=%.2f GRIP=%.2f）"
+		% [CarPhysics.HANDBRAKE_DECEL, CarPhysics.HANDBRAKE_YAW, CarPhysics.HANDBRAKE_GRIP])
+	_check(CarPhysics.HANDBRAKE_YAW > 1.0,
+		"手刹必须有转向增益——否则它只会减速、换不来任何转弯能力")
+
+	for vid: String in ["tricycle", "racer"]:
+		var plain := _cornering(vid, "asphalt", false)
+		var drift := _cornering(vid, "asphalt", true)
+		var turn_ratio := float(drift["turn_deg"]) / maxf(float(plain["turn_deg"]), 0.001)
+		_check(turn_ratio > 1.20,
+			"%s：拉手刹 2 s 转角 %.0f° ≫ 普通转弯 %.0f°（×%.2f）"
+			% [vid, float(drift["turn_deg"]), float(plain["turn_deg"]), turn_ratio])
+		_check(float(drift["retain"]) > 0.85,
+			"%s：漂移后仍保有 %.0f%% 车速（不是急刹，%.1f→%.1f m/s）"
+			% [vid, float(drift["retain"]) * 100.0,
+				float(drift["v_before"]), float(drift["v_after"])])
+		_check(float(drift["max_slip"]) > 20.0,
+			"%s：漂移最大侧滑 %.1f°（> 20° 才看得出在漂）" % [vid, float(drift["max_slip"])])
+		_check(float(plain["max_slip"]) < 10.0,
+			"%s：不拉手刹侧滑仅 %.1f°（反向对照：普通转弯不漂）"
+			% [vid, float(plain["max_slip"])])
+		# 「漂移有收益」的不变式：单位速度的转角（= 1/有效转弯半径）手刹更大。
+		# 这条是本节的存在理由——只要它不成立，手刹就该被删掉而不是被调参。
+		var plain_efficiency := float(plain["turn_deg"]) / maxf(float(plain["v_after"]), 0.001)
+		var drift_efficiency := float(drift["turn_deg"]) / maxf(float(drift["v_after"]), 0.001)
+		_check(drift_efficiency > plain_efficiency,
+			"%s：漂移的有效转弯更紧（单位速度转角 %.2f > %.2f °/(m/s)）"
+			% [vid, drift_efficiency, plain_efficiency])
+
+	# 低抓地放大漂移：湿地上同样的手刹侧滑更大（grip 0.4 < 柏油 1.0）。
+	var wet := _cornering("buggy", "wetland", true)
+	var dry := _cornering("buggy", "asphalt", true)
+	_check(float(wet["max_slip"]) >= float(dry["max_slip"]),
+		"湿地漂移侧滑 %.1f° ≥ 柏油 %.1f°（低抓地放大甩尾）"
+		% [float(wet["max_slip"]), float(dry["max_slip"])])
+
+	# 不打方向就拉手刹 → 只是滑行，不该凭空产生侧滑角（转向增益只作用于转向）。
+	var straight := CarPhysics.new()
+	straight.setup(RaceSystem.vehicle("buggy"), Vector2.ZERO, 0.0)
+	straight.vel = straight.forward() * 25.0
+	var straight_slip := 0.0
+	for i in range(int(1.0 / DT)):
+		straight.throttle = 0.0
+		straight.steer = 0.0
+		straight.handbrake = true
+		straight.step(DT, RaceSystem.terrain("asphalt"))
+		straight_slip = maxf(straight_slip, straight.slip_deg())
+	_check(straight_slip < 1.0,
+		"直线上拉手刹不产生侧滑（%.2f°）——增益只经转向生效" % straight_slip)
+
+
+## 让车在给定地形上跑到接近极速，供 _cornering 用。
+func _car_at_top_speed(vehicle_id: String, terrain_id: String) -> CarPhysics:
+	var spec := RaceSystem.vehicle(vehicle_id)
+	var terr := RaceSystem.terrain(terrain_id)
+	var car := CarPhysics.new()
+	car.setup(spec, Vector2.ZERO, 0.0)
+	var goal := float(spec["max_speed_mps"]) * float(terr["speed_factor"]) * 0.995
+	for i in range(int(40.0 / DT)):
+		car.throttle = 1.0
+		car.step(DT, terr)
+		if car.speed() > goal:
+			break
+	return car
+
+
+## 满舵 2 s：返回 {turn_deg, v_before, v_after, retain, max_slip, arc, radius}。
+func _cornering(vehicle_id: String, terrain_id: String, handbrake: bool) -> Dictionary:
+	var terr := RaceSystem.terrain(terrain_id)
+	var car := _car_at_top_speed(vehicle_id, terrain_id)
+	var v0 := car.speed()
+	var h0 := car.heading
+	var max_slip := 0.0
+	var arc := 0.0
+	for i in range(int(2.0 / DT)):
+		car.throttle = 1.0
+		car.steer = 1.0
+		car.handbrake = handbrake
+		car.step(DT, terr)
+		arc += car.speed() * DT
+		max_slip = maxf(max_slip, car.slip_deg())
+	# 注意：heading 是无界累积量（不是 wrap 到 ±π），漂移 2 s 能转过 300°+。
+	# 这里绝不能 wrapf——wrap 会把 310° 折成 −50°，断言会读到「手刹转得更少」的假象。
+	var turn := absf(car.heading - h0)
+	return {
+		"turn_deg": rad_to_deg(turn),
+		"v_before": v0,
+		"v_after": car.speed(),
+		"retain": car.speed() / maxf(v0, 0.001),
+		"max_slip": max_slip,
+		"arc": arc,
+		"radius": arc / maxf(turn, 0.0001),
+	}
 
 
 func _check(cond: bool, label: String) -> void:

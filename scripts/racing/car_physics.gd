@@ -11,15 +11,27 @@ extends RefCounted
 ##   forward = Vector2(sin h, cos h)     ⇒ h=0 时车头朝 +Z，节点 rotation.y = h
 ##   h 增大 = 向左转（+Z 转向 +X）；steer 输入 +1 = 向右打方向 ⇒ heading 减小
 ##
-## 手感三要素：
+## 手感四要素：
 ##   极速  = spec.max_speed_mps × 地形 speed_factor（阻力系数按此反解，全油门自然收敛）
 ##   抓地  = terrain.grip × spec.grip_base，决定侧滑角回正速率（低抓地 = 推头/甩尾）
 ##   刹车  = spec.brake_mps2 × 地形 brake_factor（湿地刹车距离明显变长）
+##   漂移  = 手刹 × (DECEL 少掉速 + YAW 甩得出去 + GRIP 滑得久)，见下方三常量
 
 const GRIP_K := 20.0      # 侧滑回正速率系数（1/s）：slip 以 GRIP_K×grip 的速率衰减
 const TURN_REF := 5.0     # 转向生效参考速度（m/s）：低于它转向权限按比例减弱
 const ROLL_K := 6.0       # 滚动阻力换算系数
 const SPEED_CAP_SLACK := 1.02
+
+## ── 手刹（漂移）三件套（D-084）────────────────────────────────────────
+## 改前的实测问题：手刹只做两件事——减 0.6×brake_mps2 的纵向速度、把侧滑回正
+## 降到 0.2。**转向率完全不变**，于是 2 s 满舵的转角和不拉手刹一模一样（230°），
+## 而速度掉了 20~32%。也就是说手刹＝「同样的弯，更慢的车」——玩家没有任何理由
+## 用它，漂移在系统上是个纯惩罚。
+## 三个常量分工：DECEL 决定「漂移掉多少速」，YAW 决定「车头愿意转多快」
+## （甩得出来才叫漂移），GRIP 决定「滑多久」。
+const HANDBRAKE_DECEL := 0.18   # 纵向减速占 brake_mps2 的比例（原 0.60 → 急刹感）
+const HANDBRAKE_YAW := 1.35     # 手刹时转向权限倍率（原 1.0 → 手刹换不来转角）
+const HANDBRAKE_GRIP := 0.20    # 手刹时侧滑回正速率倍率（原硬编码 0.2，提为常量）
 
 var pos := Vector2.ZERO          # 世界 XZ
 var heading := 0.0               # 朝向（弧度）
@@ -95,7 +107,7 @@ func step(dt: float, terrain: Dictionary) -> void:
 	if brake > 0.0:
 		decel += float(spec.get("brake_mps2", 9.0)) * float(terrain.get("brake_factor", 1.0)) * brake
 	if handbrake:
-		decel += float(spec.get("brake_mps2", 9.0)) * 0.6
+		decel += float(spec.get("brake_mps2", 9.0)) * HANDBRAKE_DECEL
 	var vmax2 := maxf(vmax * vmax, 1.0)
 	var drag_k := accel / vmax2
 	decel += float(terrain.get("rolling_resistance", 0.02)) * ROLL_K + drag_k * spd * spd
@@ -106,11 +118,14 @@ func step(dt: float, terrain: Dictionary) -> void:
 		vel = vel.normalized() * target
 
 	# ── 3. 转向：速度越低转向权限越小（静止打不动方向），抓地越低越吃不住弯。
+	#        手刹时额外 ×HANDBRAKE_YAW ——「拉手刹甩尾」的另一半就这一条：
+	#        回正变慢只让velocity方向落后，转向变快才让车头真的甩出去。
 	var spd2 := vel.length()
 	var f_speed := vel.dot(forward())
 	var authority := clampf(spd2 / TURN_REF, 0.0, 1.0)
+	var yaw_boost := HANDBRAKE_YAW if handbrake else 1.0
 	var rate := deg_to_rad(float(spec.get("turn_rate_deg", 100.0))) \
-		* steer * authority * (0.4 + 0.6 * grip)
+		* steer * authority * (0.4 + 0.6 * grip) * yaw_boost
 	heading -= rate * dt * signf(f_speed)
 
 	# ── 4. 侧滑：把速度矢量朝车头方向回正。回正速率 = GRIP_K×grip，
@@ -119,7 +134,8 @@ func step(dt: float, terrain: Dictionary) -> void:
 	if spd3 > 0.001:
 		var vel_ang := atan2(vel.x, vel.y)
 		var diff := wrapf(vel_ang - heading, -PI, PI)
-		var align := clampf(GRIP_K * grip * (0.2 if handbrake else 1.0) * dt, 0.0, 1.0)
+		var grip_mul := HANDBRAKE_GRIP if handbrake else 1.0
+		var align := clampf(GRIP_K * grip * grip_mul * dt, 0.0, 1.0)
 		vel_ang = heading + diff * (1.0 - align)
 		vel = Vector2(sin(vel_ang), cos(vel_ang)) * spd3
 
