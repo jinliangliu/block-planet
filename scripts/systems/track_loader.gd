@@ -6,6 +6,11 @@ extends Node3D
 ## 车辆运动是纯运动学的（CarPhysics），不依赖物理引擎，因此不需要碰撞；路面之外
 ## 就是草地（另一种地形参数），开出去只会变慢——对儿童比撞墙友好，也让物理
 ## 完全确定性、探针可断言。边界由 RaceCar 做软性收束（不会掉出世界）。
+##
+## 主题（TrackLayout.theme）在这里真正生效：地台底色 + 两侧的低模装饰都按主题换。
+## 没有这两样，6 条赛道在画面上是同一条「绿板 + 灰带」，孩子看不出沙漠和城市的区别。
+## 装饰一律走 MultiMeshInstance3D：一个 (形状, 颜色) 组 = 一个 draw call，单条赛道
+## ≤ 10 组——中低端 Android 上几百个 MeshInstance3D 是跑不动的。
 
 const ROAD_LIFT := 0.04        # 路面比地台抬高一点，避免共面闪烁
 const PLATE_MARGIN := 90.0     # 地台比赛道外接圆再大这么多米
@@ -19,14 +24,62 @@ const ARCH_COLORS := [
 	Color(0.80, 0.55, 0.95), Color(0.35, 0.90, 0.80),
 ]
 
+## 主题 → 地台底色。这组值直接写进 StandardMaterial3D.albedo_color（与原来的单色
+## 草地同一色彩空间：albedo 按线性解释，不额外做 sRGB→线性，否则会被压暗两层）。
+const PLATE_COLORS := {
+	"desert": Color(0.62, 0.52, 0.32),    # 沙黄
+	"forest": Color(0.26, 0.42, 0.20),    # 深绿
+	"wetland": Color(0.30, 0.44, 0.30),   # 苔绿
+	"mountain": Color(0.38, 0.40, 0.30),  # 岩灰绿
+	"city": Color(0.30, 0.32, 0.36),      # 冷灰
+	"mixed": Color(0.34, 0.48, 0.24),     # 原绿（也是未知主题的回落值）
+}
+const PLATE_DEFAULT := "mixed"
+
+## ── 装饰 ────────────────────────────────────────────────────
+## 每 DECOR_STRIDE 个采样点（4 m 一个点 → 24 m）取一个装饰位，左右各掷一次骰子。
+const DECOR_STRIDE := 6
+const DECOR_SIDE_CHANCE := 0.55
+## 装饰中心到路面边缘的最小留白（m）：再近就会显得压在路肩上。
+const DECOR_CLEARANCE := 3.0
+## 落账时的额外安全边距（m）。为什么不是 0：① 部件的局部偏移会把件中心再往路面
+## 推最多 1 m（仙人掌的手臂、岩石的第二块、看台 4 m 长条），② 探针量的「横向距离」
+## 是最近采样点法向的投影，比点到线段的真实距离略小。留 0.6 m 抵消这两笔。
+const DECOR_SAFE_MARGIN := 3.6
+## 留白之外再往外撒的随机距离（m）。
+const DECOR_SPREAD := 11.0
+const DECOR_MIN_SCALE := 0.8
+const DECOR_SCALE_SPAN := 0.55
+const DECOR_MAX_SCALE := DECOR_MIN_SCALE + DECOR_SCALE_SPAN
+## 单赛道实例（= 装饰部件）硬上限。留出余量：外部约定是「< 400 件」，
+## 这里卡 360，超了就不再放新的一件（不是截断已放的）。
+const DECOR_MAX_INSTANCES := 360
+## 装饰总高上限（m，含最大缩放）：太高会挡驾驶时的视距。
+const DECOR_MAX_HEIGHT := 4.0
+
 var layout: TrackLayout = null
 var arena_radius := 0.0
+## 装饰摆位的纯数据镜像：[{mesh: String, color: Color, xform: Transform3D}]，每次
+## build 重建。给探针读的原因：无头模式跑的是 RendererDummy，而 MultiMesh 的实例
+## 缓冲存在 RenderingServer 侧，dummy 后端不保存它——`get_instance_transform` 恒返回
+## 单位矩阵（本工程实测，见 tests/track_decor_probe.gd 的注释）。所以摆位在这里
+## 同时记一份，让「不压路面 / 高度 / 确定性」这些几何断言在无头下依然可测。
+var decor_instances: Array = []
+
+# 装饰用的三个单位图元：所有装饰都靠 Transform3D 的缩放变尺寸，
+# 于是「同图元 + 同颜色」的部件天然落进同一个 MultiMesh 组。
+var _box_mesh: BoxMesh = null
+var _cyl_mesh: CylinderMesh = null
+var _cone_mesh: CylinderMesh = null
 
 
 ## 按布局构建整座竞技场（重复调用会先清空旧内容）。
 func build(p_layout: TrackLayout) -> void:
 	layout = p_layout
+	# queue_free 是延后释放：只调它的话，重复 build 之后立刻 get_child_count()
+	# 还会数到上一轮的节点（探针里踩过）。先 remove_child 摘树，再 queue_free 释放。
 	for child in get_children():
+		remove_child(child)
 		child.queue_free()
 	var extent := 0.0
 	for p in layout.points:
@@ -36,6 +89,16 @@ func build(p_layout: TrackLayout) -> void:
 	_build_road()
 	_build_start_line()
 	_build_arches()
+	_build_decor()
+
+
+## 主题 → 地台底色（缺省回落 mixed）。探针直调它比对色盘。
+func plate_color(theme: String) -> Color:
+	if PLATE_COLORS.has(theme):
+		var c: Color = PLATE_COLORS[theme]
+		return c
+	var fallback: Color = PLATE_COLORS[PLATE_DEFAULT]
+	return fallback
 
 
 func _build_plate() -> void:
@@ -46,7 +109,8 @@ func _build_plate() -> void:
 	mi.mesh = plane
 	mi.position = Vector3(0.0, -0.06, 0.0)
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.34, 0.48, 0.24)
+	var theme_id := PLATE_DEFAULT if layout == null else layout.theme
+	mat.albedo_color = plate_color(theme_id)
 	mat.roughness = 1.0
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mi.material_override = mat
@@ -155,6 +219,372 @@ func _build_arches() -> void:
 				Vector3((layout.half_width + ARCH_POST) * 2.0, 0.8, 0.25),
 				Color(0.96, 0.96, 0.96))
 		add_child(root)
+
+
+## ── 主题装饰 ────────────────────────────────────────────────
+## 沿中心线每 24 m 一个装饰位，左右各以 55% 概率摆一件；每件由 1~4 个图元部件拼成，
+## 按 (图元, 颜色) 归组写进 MultiMesh。整条赛道 ≤ 10 组 → ≤ 10 个 draw call。
+## 随机源钉死在 layout.seed 上：同一赛道每次 build 的摆位逐位相同。
+func _build_decor() -> void:
+	if layout == null or layout.size() < DECOR_STRIDE:
+		return
+	decor_instances = []
+	_prepare_primitives()
+	var setup := _decor_setup(layout.theme)
+	var channels: Array = setup["channels"]
+	var templates: Array = setup["templates"]
+	if channels.is_empty() or templates.is_empty():
+		return
+	# 每通道一个 Transform3D 池（通道 = 一个 MultiMeshInstance3D）。
+	var slots: Array = []
+	slots.resize(channels.size())
+	for ci in slots.size():
+		slots[ci] = []
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = layout.seed * 31 + 7
+	var alternate: bool = setup.get("alternate", false)
+	var instances := 0
+	var placed := 0
+	for i in range(0, layout.size(), DECOR_STRIDE):
+		for side in 2:
+			if rng.randf() >= DECOR_SIDE_CHANCE:
+				continue
+			var sgn := -1.0 if side == 0 else 1.0
+			var lat := layout.half_width + DECOR_CLEARANCE + rng.randf() * DECOR_SPREAD
+			var pos: Vector3 = layout.point(i) + layout.normal(i) * (lat * sgn)
+			var sc := DECOR_MIN_SCALE + rng.randf() * DECOR_SCALE_SPAN
+			var yaw := rng.randf() * TAU
+			var pick := rng.randi_range(0, templates.size() - 1)
+			if alternate:
+				pick = placed % templates.size()
+			var tmpl: Array = templates[pick]
+			if instances + tmpl.size() > DECOR_MAX_INSTANCES:
+				continue
+			# 压路面保护：留白要按「部件最大水平偏移」放大后再整体查一遍全赛道——
+			# ① 只判落点不够：部件自己的局部偏移会把件中心往路面推（本工程实测踩过：
+			#    mountain_road 上落点合规、岩石第二块却贴到 6.91 m < 7.4 m）；
+			# ② 只判本段也不够：弯道另一头可能贴得很近，装饰压到那段路上同样穿帮。
+			var need := layout.half_width + DECOR_SAFE_MARGIN \
+				+ _template_reach(tmpl) * DECOR_MAX_SCALE
+			if not _road_clear(pos, need):
+				continue
+			var rot := Basis(Vector3.UP, yaw)
+			for part: Variant in tmpl:
+				var pd: Dictionary = part
+				var ci := int(pd["ch"])
+				var dims: Vector3 = pd["size"]
+				var off: Vector3 = pd["off"]
+				var basis := rot * Basis.from_scale(dims * sc)
+				var origin := pos + rot * (off * sc)
+				var bucket: Array = slots[ci]
+				var xf := Transform3D(basis, origin)
+				bucket.append(xf)
+				var ch_def: Dictionary = channels[ci]
+				decor_instances.append({
+					"mesh": String(ch_def["mesh"]),
+					"color": ch_def["color"],
+					"xform": xf,
+				})
+				instances += 1
+			placed += 1
+
+	for ci in channels.size():
+		var xforms: Array = slots[ci]
+		if xforms.is_empty():
+			continue
+		var ch: Dictionary = channels[ci]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = false
+		mm.mesh = _mesh_of(String(ch["mesh"]))
+		# instance_count 必须在 mesh 与 transform_format 之后赋值，否则按旧的
+		# transform_format 分配缓冲，第二次 set_instance_transform 会越界。
+		mm.instance_count = xforms.size()
+		for k in xforms.size():
+			mm.set_instance_transform(k, xforms[k])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "Decor%d" % ci
+		mmi.multimesh = mm
+		mmi.material_override = _decor_material(ch)
+		# 装饰一律不投影：Mobile 渲染器下阴影是第一笔要省的开销，
+		# 几百个低模装饰投影换不来画面收益。
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mmi)
+
+
+## 装饰点是否离整条路面带都够远（对每一段中心线做点到线段距离）。
+func _road_clear(pos: Vector3, need: float) -> bool:
+	var n := layout.size()
+	for j in n:
+		var a := layout.point(j)
+		var b := layout.point(j + 1)
+		if _seg_dist_xz(pos, a, b) < need:
+			return false
+	return true
+
+
+## 一件装饰的部件最远能比落点多伸出多少（水平，m，未乘缩放）。
+func _template_reach(tmpl: Array) -> float:
+	var reach := 0.0
+	for part: Variant in tmpl:
+		var off: Vector3 = (part as Dictionary)["off"]
+		reach = maxf(reach, Vector2(off.x, off.z).length())
+	return reach
+
+
+func _seg_dist_xz(p: Vector3, a: Vector3, b: Vector3) -> float:
+	var p2 := Vector2(p.x, p.z)
+	var a2 := Vector2(a.x, a.z)
+	var b2 := Vector2(b.x, b.z)
+	var ab := b2 - a2
+	var len2 := ab.length_squared()
+	if len2 < 0.000001:
+		return p2.distance_to(a2)
+	var t := clampf((p2 - a2).dot(ab) / len2, 0.0, 1.0)
+	return p2.distance_to(a2 + ab * t)
+
+
+func _decor_material(ch: Dictionary) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	var col: Color = ch["color"]
+	mat.albedo_color = col
+	mat.roughness = 1.0
+	var energy := float(ch["emission"])
+	if energy > 0.0:
+		# 路灯灯头这类「自发光感」的件：高值 albedo + 一点 emission。
+		mat.emission_enabled = true
+		mat.emission = col
+		mat.emission_energy_multiplier = energy
+	if col.a < 1.0:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return mat
+
+
+func _prepare_primitives() -> void:
+	# 三个单位图元：1 m³ 盒 / 直径 1 高 1 的柱 / 直径 1 高 1 的锥。
+	# 具体尺寸全靠 Transform3D 的缩放表达，这样「柱身 + 锥形树冠」也只需两个组。
+	if _box_mesh == null:
+		var box := BoxMesh.new()
+		box.size = Vector3.ONE
+		_box_mesh = box
+	if _cyl_mesh == null:
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.5
+		cyl.bottom_radius = 0.5
+		cyl.height = 1.0
+		cyl.radial_segments = 8
+		_cyl_mesh = cyl
+	if _cone_mesh == null:
+		var cone := CylinderMesh.new()
+		cone.top_radius = 0.0
+		cone.bottom_radius = 0.5
+		cone.height = 1.0
+		cone.radial_segments = 8
+		_cone_mesh = cone
+
+
+func _mesh_of(mesh_key: String) -> Mesh:
+	match mesh_key:
+		"cyl":
+			return _cyl_mesh
+		"cone":
+			return _cone_mesh
+	return _box_mesh
+
+
+## 一个图元部件：通道号（决定图元 + 颜色）+ 尺寸 + 相对装饰落点的偏移。
+func _part(ch: int, dims: Vector3, off: Vector3) -> Dictionary:
+	return {"ch": ch, "size": dims, "off": off}
+
+
+## 一个装饰通道：图元种类 + 颜色 + 自发光强度（0 = 不发光）。
+func _chan(mesh_key: String, color: Color, emission: float = 0.0) -> Dictionary:
+	return {"mesh": mesh_key, "color": color, "emission": emission}
+
+
+## 返回 {channels: Array[Dictionary], templates: Array[Array], alternate: bool}。
+## channels 的条数就是这条赛道的 draw call 数，必须 ≤ 10。
+func _decor_setup(theme: String) -> Dictionary:
+	var kind := theme
+	if not PLATE_COLORS.has(kind):
+		kind = PLATE_DEFAULT
+	match kind:
+		"desert":
+			return _setup_desert()
+		"forest":
+			return _setup_forest()
+		"wetland":
+			return _setup_wetland()
+		"mountain":
+			return _setup_mountain()
+		"city":
+			return _setup_city()
+		_:
+			return _setup_mixed()
+
+
+## 沙漠：3 档绿的仙人掌 + 3 档褐的砂岩巨石。6 组。
+func _setup_desert() -> Dictionary:
+	var channels := [
+		_chan("box", Color(0.20, 0.40, 0.19)),
+		_chan("box", Color(0.26, 0.48, 0.22)),
+		_chan("box", Color(0.15, 0.33, 0.17)),
+		_chan("box", Color(0.46, 0.33, 0.21)),
+		_chan("box", Color(0.56, 0.41, 0.26)),
+		_chan("box", Color(0.38, 0.28, 0.19)),
+	]
+	var templates := [
+		_cactus(0), _cactus(1), _cactus(2),
+		_rock(3), _rock(4), _rock(5),
+	]
+	return {"channels": channels, "templates": templates}
+
+
+## 森林：树干（柱）+ 3 档绿的树冠（锥）+ 2 档绿的灌木（盒）。6 组。
+func _setup_forest() -> Dictionary:
+	var channels := [
+		_chan("cyl", Color(0.24, 0.16, 0.10)),
+		_chan("cone", Color(0.12, 0.30, 0.12)),
+		_chan("cone", Color(0.15, 0.36, 0.15)),
+		_chan("cone", Color(0.19, 0.42, 0.18)),
+		_chan("box", Color(0.32, 0.54, 0.26)),
+		_chan("box", Color(0.38, 0.60, 0.30)),
+	]
+	var templates := [
+		_tree(0, 1), _tree(0, 2), _tree(0, 3),
+		_bush(4), _bush(5),
+	]
+	return {"channels": channels, "templates": templates}
+
+
+## 湿地：2 档芦苇簇 + 一片半透明水洼。3 组。
+func _setup_wetland() -> Dictionary:
+	var channels := [
+		_chan("box", Color(0.42, 0.52, 0.26)),
+		_chan("box", Color(0.34, 0.46, 0.22)),
+		_chan("box", Color(0.18, 0.42, 0.46, 0.72)),
+	]
+	var templates := [
+		_reeds(0), _reeds(1), _puddle(2),
+	]
+	return {"channels": channels, "templates": templates}
+
+
+## 山地：3 档灰的岩块 + 白色护栏桩。4 组。
+func _setup_mountain() -> Dictionary:
+	var channels := [
+		_chan("box", Color(0.42, 0.42, 0.40)),
+		_chan("box", Color(0.50, 0.50, 0.47)),
+		_chan("box", Color(0.31, 0.31, 0.29)),
+		_chan("box", Color(0.86, 0.86, 0.83)),
+	]
+	var templates := [
+		_rock(0), _rock(1), _rock(2),
+		[_part(3, Vector3(0.24, 1.0, 0.24), Vector3(0.0, 0.5, 0.0))],
+	]
+	return {"channels": channels, "templates": templates}
+
+
+## 城市：路灯（暗柱 + 亮黄自发光灯头）+ 2 档灰的看台阶梯。4 组。
+## 台阶刻意比冷灰地台（0.30/0.32/0.36）亮两档：同明度的灰压在灰地台上，
+## 截图里几乎看不出来（本工程实测踩过一次）。
+func _setup_city() -> Dictionary:
+	var channels := [
+		_chan("box", Color(0.13, 0.14, 0.16)),
+		_chan("box", Color(1.0, 0.86, 0.30), 1.2),
+		_chan("box", Color(0.74, 0.72, 0.68)),
+		_chan("box", Color(0.58, 0.56, 0.54)),
+	]
+	var templates := [
+		_lamp(0, 1), _stand(2), _stand(3),
+	]
+	return {"channels": channels, "templates": templates}
+
+
+## 混合：沙漠与森林各减配一半，交替摆放。8 组（必须 ≤ 10）。
+func _setup_mixed() -> Dictionary:
+	var channels := [
+		_chan("box", Color(0.20, 0.40, 0.19)),
+		_chan("box", Color(0.26, 0.48, 0.22)),
+		_chan("box", Color(0.46, 0.33, 0.21)),
+		_chan("box", Color(0.56, 0.41, 0.26)),
+		_chan("cyl", Color(0.24, 0.16, 0.10)),
+		_chan("cone", Color(0.13, 0.32, 0.13)),
+		_chan("cone", Color(0.19, 0.42, 0.18)),
+		_chan("box", Color(0.32, 0.54, 0.26)),
+	]
+	# 顺序刻意排成「沙 / 林」交替：alternate 模式下按落点序取模，两种主题轮流出现。
+	var templates := [
+		_cactus(0), _tree(4, 5), _rock(2), _bush(7), _cactus(1), _tree(4, 6),
+	]
+	return {"channels": channels, "templates": templates, "alternate": true}
+
+
+## 仙人掌：竖干 + 左右各一条小臂。最高 2.4 m（×1.35 缩放 ≈ 3.2 m）。
+func _cactus(ch: int) -> Array:
+	return [
+		_part(ch, Vector3(0.5, 2.4, 0.5), Vector3(0.0, 1.2, 0.0)),
+		_part(ch, Vector3(0.9, 0.32, 0.32), Vector3(0.42, 1.55, 0.0)),
+		_part(ch, Vector3(0.32, 0.85, 0.32), Vector3(0.74, 1.95, 0.0)),
+		_part(ch, Vector3(0.7, 0.28, 0.28), Vector3(-0.34, 1.85, 0.0)),
+	]
+
+
+## 砂岩/岩块：两块错开的方块，比单个立方像石头。最高 1.15 m。
+func _rock(ch: int) -> Array:
+	return [
+		_part(ch, Vector3(1.5, 1.2, 1.4), Vector3(0.0, 0.55, 0.0)),
+		_part(ch, Vector3(0.9, 0.8, 1.0), Vector3(0.55, 0.40, 0.25)),
+	]
+
+
+## 树：圆柱干 + 圆锥冠。整棵最高 2.9 m（×1.35 ≈ 3.9 m，卡住 4 m 上限）。
+func _tree(trunk_ch: int, crown_ch: int) -> Array:
+	return [
+		_part(trunk_ch, Vector3(0.4, 1.8, 0.4), Vector3(0.0, 0.9, 0.0)),
+		_part(crown_ch, Vector3(2.4, 1.4, 2.4), Vector3(0.0, 2.2, 0.0)),
+	]
+
+
+## 灌木：两块错开的扁方块（单个方块看着就是个立方体，不像植物）。高 0.7 m。
+func _bush(ch: int) -> Array:
+	return [
+		_part(ch, Vector3(1.0, 0.7, 1.0), Vector3(0.0, 0.35, 0.0)),
+		_part(ch, Vector3(0.75, 0.52, 0.75), Vector3(0.28, 0.30, 0.18)),
+	]
+
+
+## 芦苇簇：三根错开的细高方块。最高 1.8 m。
+func _reeds(ch: int) -> Array:
+	return [
+		_part(ch, Vector3(0.16, 1.8, 0.16), Vector3(0.0, 0.9, 0.0)),
+		_part(ch, Vector3(0.16, 1.5, 0.16), Vector3(0.22, 0.75, 0.12)),
+		_part(ch, Vector3(0.16, 1.65, 0.16), Vector3(-0.20, 0.82, -0.14)),
+	]
+
+
+## 水洼：极扁的大方块，贴地。y 中心 0.02 m（不埋、不挡）。
+func _puddle(ch: int) -> Array:
+	return [
+		_part(ch, Vector3(2.6, 0.03, 2.6), Vector3(0.0, 0.02, 0.0)),
+	]
+
+
+## 路灯：暗色柱 + 顶端亮黄块。最高 2.66 m。
+func _lamp(post_ch: int, head_ch: int) -> Array:
+	return [
+		_part(post_ch, Vector3(0.18, 2.6, 0.18), Vector3(0.0, 1.3, 0.0)),
+		_part(head_ch, Vector3(0.8, 0.22, 0.8), Vector3(0.0, 2.64, 0.0)),
+	]
+
+
+## 看台阶梯：两级错开的横向长条。最高 1.1 m。
+func _stand(ch: int) -> Array:
+	return [
+		_part(ch, Vector3(4.0, 0.6, 0.8), Vector3(0.0, 0.30, 0.0)),
+		_part(ch, Vector3(4.0, 0.5, 0.8), Vector3(0.0, 0.85, -0.70)),
+	]
 
 
 func _add_box(parent: Node3D, at: Vector3, size: Vector3, color: Color) -> void:
