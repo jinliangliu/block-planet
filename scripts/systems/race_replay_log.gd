@@ -7,12 +7,23 @@ extends RefCounted
 ## 「幽灵车回放」时，这串就是重演的原始素材（与 flight_recorder 的思路一致，
 ## 只是飞行轨迹在内存里、这里落盘，因为它跨场景且要留给下次启动）。
 
-const PATH := "user://race_replay.jsonl"
-const MAX_LINES := 600   # 只留最近 600 条，避免存档无限增长
+## D-086：不再是 const，且必须是 static var（本类全静态、从无实例）。
+## 无槽时 slot_file() 逐字节产出旧根路径 "user://race_replay.jsonl"。
+static var PATH: String = "user://race_replay.jsonl"
+const MAX_LINES := 600   # 分槽后语义自动变成「每槽 600 行」，比全局 600 行更正确
+
+
+## 本类是 RefCounted 全静态、没有 _ready()、不能连 Profile.slot_changed；
+## append() 也没有持久文件句柄（每次读全量 → 内存 append → 裁剪 → WRITE 覆写），
+## 所以换槽无需换句柄，只要在 append/read_lines/clear 每次入口现算一次路径。
+static func _refresh_path() -> void:
+	if Profile != null:
+		PATH = Profile.slot_file("race_replay.jsonl")
 
 
 static func append(tick: int, action: String, track_id: String, vehicle_id: String,
 		position: Vector3, player_name: String) -> void:
+	_refresh_path()
 	var line := JSON.stringify({
 		"tick": tick,
 		"action": action,
@@ -37,6 +48,7 @@ static func append(tick: int, action: String, track_id: String, vehicle_id: Stri
 
 
 static func read_lines() -> PackedStringArray:
+	_refresh_path()
 	if not FileAccess.file_exists(PATH):
 		return PackedStringArray()
 	var f := FileAccess.open(PATH, FileAccess.READ)
@@ -62,5 +74,6 @@ static func read_events() -> Array:
 
 
 static func clear() -> void:
+	_refresh_path()
 	if FileAccess.file_exists(PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(PATH))

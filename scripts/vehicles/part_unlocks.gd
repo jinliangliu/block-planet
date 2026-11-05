@@ -63,7 +63,15 @@ static func reward_to_balance(balance: int, reward: int) -> int:
 ## 解锁状态跨会话保留：任务赚的绿宝石买的零件，下次进游戏还在。
 ## 真实游戏里由 main 持有唯一实例并传入 build_screen；探针用临时路径验证往返。
 
-const SAVE_PATH := "user://unlocks.json"
+## D-086：按槽派生。save() 是实例方法、load_or_new() 是静态方法，二者都要
+## 读它 → static var。默认参数不再是常量（GDScript 默认参数要求常量表达式），
+## 故改成空串哨兵，在函数体内解析按槽路径；显式传 path 的探针调用不受影响。
+static var SAVE_PATH: String = "user://unlocks.json"
+
+
+static func _refresh_path() -> void:
+	if Profile != null:
+		SAVE_PATH = Profile.slot_file("unlocks.json")
 
 
 ## 当前已解锁集合的零件 id 列表（默认套件恒含；供探针与序列化）。
@@ -90,8 +98,12 @@ static func from_dict(d: Dictionary) -> PartUnlocks:
 
 
 ## 写入 JSON；失败（只读/磁盘满）返回 false，不抛异常。
-func save(path: String = SAVE_PATH) -> bool:
-	var f := FileAccess.open(path, FileAccess.WRITE)
+func save(path: String = "") -> bool:
+	var target: String = path
+	if target.is_empty():
+		_refresh_path()
+		target = SAVE_PATH
+	var f := FileAccess.open(target, FileAccess.WRITE)
 	if f == null:
 		return false
 	f.store_string(JSON.stringify(to_dict()))
@@ -100,10 +112,14 @@ func save(path: String = SAVE_PATH) -> bool:
 
 
 ## 读档：文件不存在 / 损坏时安全退回「仅默认套件解锁」的新实例。
-static func load_or_new(path: String = SAVE_PATH) -> PartUnlocks:
-	if not FileAccess.file_exists(path):
+static func load_or_new(path: String = "") -> PartUnlocks:
+	var target: String = path
+	if target.is_empty():
+		_refresh_path()
+		target = SAVE_PATH
+	if not FileAccess.file_exists(target):
 		return PartUnlocks.new()
-	var f := FileAccess.open(path, FileAccess.READ)
+	var f := FileAccess.open(target, FileAccess.READ)
 	if f == null:
 		return PartUnlocks.new()
 	var text := f.get_as_text()

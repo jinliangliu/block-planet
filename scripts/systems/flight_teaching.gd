@@ -18,7 +18,10 @@ extends RefCounted
 ## D-065 补了 CockpitPanel，但儿童玩家不知道第一人称可以低头看仪表台。
 ## 触屏设备没有鼠标环顾手段，「低头」无从谈起（U-12 只记录不实现）。
 
-const SAVE_PATH := "user://flight_teaching.json"
+## D-086：按槽派生。探针以 FlightTeaching.SAVE_PATH 做类级读取（stall_coach_probe
+## / stall_coach_shot 共 12 处），因此必须是 static var 而非实例 var——const 改
+## 成实例 var 会让那些 `FlightTeaching.SAVE_PATH` 直接取不到值。
+static var SAVE_PATH: String = "user://flight_teaching.json"
 
 ## 提示 id → 课文案。加新提示只改这里 + should_fire 的触发条件。
 const HINT_LOOKDOWN := "lookdown_panel"
@@ -41,6 +44,13 @@ var _seen: Array[String] = []
 ## 正确语义是「看过才消耗」：投递只记 pending，由 HUD 在 Toast 完整播完
 ## （tween 自然结束、未被顶掉）后回调 confirm_shown() 才落盘。
 var _pending_id := ""
+
+
+## D-086：路径随档案槽重算。本类由场景按需 new()，没有 _ready()，故在每次
+## 读写入口现算；无槽时逐字节等于旧根路径。
+static func _refresh_path() -> void:
+	if Profile != null:
+		SAVE_PATH = Profile.slot_file("flight_teaching.json")
 
 
 func _init() -> void:
@@ -125,6 +135,7 @@ static func should_fire(snap: Dictionary, ctx: Dictionary, seen: Array) -> bool:
 ## 字符串，一律按「什么都没看过」处理。最坏后果 = 提示复发，无害；
 ## 只有原子写在截断时可能留下坏文件，所以读档必须宽容。
 func _load() -> void:
+	_refresh_path()
 	_seen = []
 	if not FileAccess.file_exists(SAVE_PATH):
 		return
@@ -154,6 +165,7 @@ func _load() -> void:
 ## 截成 0 字节，若此刻进程被信号打断（headless 退出期偶发段错误），存档就被
 ## 清空——tmp + rename 保证任何时刻盘上都有一份完整存档。
 func _save() -> void:
+	_refresh_path()
 	var text := JSON.stringify({"seen": _seen})
 	var tmp := SAVE_PATH + ".tmp"
 	var file := FileAccess.open(tmp, FileAccess.WRITE)

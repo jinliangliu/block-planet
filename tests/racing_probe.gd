@@ -13,6 +13,9 @@ const DT := 1.0 / 60.0
 ## 定步长手动推进的上限：一场 4 圈约 6~10k tick，给足余量防死循环。
 const MAX_RACE_TICKS := 40000
 const RECORDS_TMP := "user://race_records_probe.json"
+## AI 急弯手刹的难度白名单/黑名单（typed const array，避免裸写 for x in [...]）。
+const HANDBRAKE_ON_DIFFICULTIES: Array[String] = ["hard", "expert"]
+const HANDBRAKE_OFF_DIFFICULTIES: Array[String] = ["easy", "normal"]
 
 var _failed := 0
 var _race_events: Array = []
@@ -36,9 +39,13 @@ func _run() -> void:
 	_test_pace_and_offroad()
 	_test_handbrake_drift()
 	_test_waypoint_tracks()
+	_test_clean_semantics()
+	_test_ai_handbrake()
+	_test_mountain_road_width()
 	_test_records_and_replay()
 	await _test_scene_end_to_end()
 	await _test_hud_wiring()
+	_test_scene_ai_handbrake()
 
 	_finish()
 
@@ -286,6 +293,10 @@ func _test_scene_end_to_end() -> void:
 	if _race_events.size() == 1:
 		_check(String(_race_events[0]["track"]) == "city_circuit", "广播带正确赛道 id")
 		_check(int(_race_events[0]["laps"]) == p.lap, "广播圈数与实况一致")
+	# clean 现在是「全程没出界」，不再由 used_handbrake 决定；广播值必须与
+	# Racer.is_clean() 同源（完赛后 update_progress 早退，off_road_time 已冻结）。
+	_check(_race_events.size() == 1 and bool(_race_events[0]["clean"]) == p.is_clean(),
+		"广播 clean 与 player.is_clean() 一致（出界累计 %.3f s）" % p.off_road_time)
 	_check(int(Progress.counters.get("race_finished_any", 0)) == before_any + 1,
 		"Progress 累计完赛次数")
 
@@ -640,6 +651,175 @@ func _segments_cross(a1: Vector3, a2: Vector3, b1: Vector3, b2: Vector3) -> bool
 	var t := (q - p).cross(s) / denom
 	var u := (q - p).cross(r) / denom
 	return t > 0.0001 and t < 0.9999 and u > 0.0001 and u < 0.9999
+
+
+# ──── H. clean 语义：从「没拉手刹」反转为「没出界」────
+## D-084 之后手刹是过急弯的正解，再用 used_handbrake 当 clean 判据等于奖励
+## 更慢的玩法。本节用反向对照钉死：拉了手刹但没出界 = clean；没拉手刹但
+## 出过界 = 不 clean。off_road_time 由 update_progress() 按真实 dt 累加。
+func _test_clean_semantics() -> void:
+	var handbrake_only := RaceSession.Racer.new()
+	handbrake_only.used_handbrake = true
+	handbrake_only.off_road_time = 0.0
+	_check(handbrake_only.is_clean(),
+		"反向对照：拉过手刹但全程在路面内 → is_clean() == true")
+
+	var offroad_only := RaceSession.Racer.new()
+	offroad_only.used_handbrake = false
+	offroad_only.off_road_time = 0.5
+	_check(not offroad_only.is_clean(),
+		"没拉手刹但出界 0.5 s → is_clean() == false")
+
+	var tiny := RaceSession.Racer.new()
+	tiny.off_road_time = 0.0009
+	_check(tiny.is_clean(), "0.001 s 容差：浮点残差不算出界")
+	tiny.off_road_time = 0.002
+	_check(not tiny.is_clean(), "超过 0.001 s 容差即判出界")
+
+	# 走生产路径：update_progress(r, true, dt) 累加真实 dt 后 clean 立刻翻转。
+	var layout := RaceSystem.build_layout("city_circuit")
+	var start := layout.start_pose()
+	var sdir: Vector3 = start["dir"]
+	var spos: Vector3 = start["pos"]
+	var r := RaceSession.Racer.new()
+	r.id = "probe_clean"
+	r.is_player = true
+	r.used_handbrake = true
+	r.car = CarPhysics.new()
+	r.car.setup(RaceSystem.vehicle("tricycle"), Vector2(spos.x, spos.z), atan2(sdir.x, sdir.z))
+	var session := RaceSession.new()
+	session.setup(layout, 1, [r])
+	_check(r.is_clean(), "开赛（0 出界 + 已拉手刹）仍算 clean")
+	session.update_progress(r, true, 0.05)
+	_check(not r.is_clean(),
+		"update_progress(r, true, 0.05) 后 clean 翻转（累计 %.3f s）" % r.off_road_time)
+
+
+# ──── I. AI 急弯手刹：限 hard / expert，且不改配速 ────
+## 判定复用 think() 里现成的 err / spd / difficulty。手刹只影响 CarPhysics 的
+## DECEL / YAW / GRIP，不碰 target_speed，所以 D-082 的配速归一不变式必须
+## 逐位不变 —— 最后一条断言就是这条反向对照。
+func _test_ai_handbrake() -> void:
+	var layout := RaceSystem.build_layout("city_circuit")
+	var start := layout.start_pose()
+	var sdir: Vector3 = start["dir"]
+	var spos: Vector3 = start["pos"]
+	# 车头反着赛道放 → 前视点朝向误差约 ±π（远大于 0.35 rad）；20 m/s > 5 m/s。
+	var car := CarPhysics.new()
+	car.setup(RaceSystem.vehicle("tricycle"), Vector2(spos.x, spos.z),
+		atan2(sdir.x, sdir.z) + PI)
+	car.vel = car.forward() * 20.0
+	var asphalt := RaceSystem.terrain("asphalt")
+
+	for did: String in HANDBRAKE_ON_DIFFICULTIES:
+		var on_ai := AiRacer.new()
+		on_ai.setup(layout, RaceSystem.difficulty(did), 7)
+		var on_inp := on_ai.think(car, asphalt, DT)
+		_check(bool(on_inp["handbrake"]), "%s 急弯（err≈π、20 m/s）→ AI 拉手刹" % did)
+	for did: String in HANDBRAKE_OFF_DIFFICULTIES:
+		var off_ai := AiRacer.new()
+		off_ai.setup(layout, RaceSystem.difficulty(did), 7)
+		var off_inp := off_ai.think(car, asphalt, DT)
+		_check(not bool(off_inp["handbrake"]), "%s 同帧恒不拉手刹（儿童向）" % did)
+
+	# 低速闸：车还没跑起来时不该甩尾。
+	var slow := CarPhysics.new()
+	slow.setup(RaceSystem.vehicle("tricycle"), Vector2(spos.x, spos.z),
+		atan2(sdir.x, sdir.z) + PI)
+	slow.vel = slow.forward() * 2.0
+	var slow_ai := AiRacer.new()
+	slow_ai.setup(layout, RaceSystem.difficulty("expert"), 7)
+	var slow_inp := slow_ai.think(slow, asphalt, DT)
+	_check(not bool(slow_inp["handbrake"]), "expert 但车速 2 m/s ≤ 5 → 不拉手刹")
+
+	# 反向对照：只把 difficulty["id"] 从 expert 改成 normal，其余数值参数逐字复制，
+	# 于是强制出「handbrake 真 / 假」两帧；throttle/brake/steer 必须逐位相同。
+	var hb_on := RaceSystem.difficulty("expert")
+	var hb_off := RaceSystem.difficulty("expert").duplicate()
+	hb_off["id"] = "normal"
+	var ai_on := AiRacer.new()
+	ai_on.setup(layout, hb_on, 31)
+	var ai_off := AiRacer.new()
+	ai_off.setup(layout, hb_off, 31)
+	var forced_on := ai_on.think(car, asphalt, DT)
+	var forced_off := ai_off.think(car, asphalt, DT)
+	_check(bool(forced_on["handbrake"]) and not bool(forced_off["handbrake"]),
+		"同参数强制 handbrake 真/假两帧（只改 difficulty.id）")
+	_check(float(forced_on["throttle"]) == float(forced_off["throttle"])
+		and float(forced_on["brake"]) == float(forced_off["brake"])
+		and float(forced_on["steer"]) == float(forced_off["steer"]),
+		"手刹开关不改配速：throttle / brake / steer 逐位相同")
+
+
+## race_scene 的 AI 分支必须把 think() 的 handbrake 透传给 car，而不是无条件
+## 写 false（旧实现会把返回值丢掉）。单独起一场 expert、定步长只喂一帧。
+func _test_scene_ai_handbrake() -> void:
+	RaceSystem.select_race("city_circuit", "tricycle", 1, "expert")
+	var scene: Node3D = load("res://scenes/racing/race_scene.tscn").instantiate()
+	add_child(scene)
+	scene.set_physics_process(false)
+	# 跳过倒计时：COUNTDOWN 分支无条件把 handbrake 按成 true，那一帧测不到透传。
+	var session: RaceSession = scene._session
+	session.state = RaceSession.State.RUNNING
+	var lay: TrackLayout = scene._layout
+	var start := lay.start_pose()
+	var sdir: Vector3 = start["dir"]
+	var spos: Vector3 = start["pos"]
+	var ai_r: RaceSession.Racer = scene._racers[1]
+	ai_r.car.pos = Vector2(spos.x, spos.z)
+	ai_r.car.heading = atan2(sdir.x, sdir.z) + PI
+	ai_r.car.vel = ai_r.car.forward() * 20.0
+	scene._physics_process(DT)
+	_check(ai_r.car.handbrake,
+		"race_scene AI 分支透传 inp[\"handbrake\"] 到 r.car.handbrake")
+	# 同 e2e 收尾：不手动释放，等帧区即崩溃区（rc=139），随 quit 整体销毁。
+
+
+# ──── J. 盘山公路加宽：只改路面半宽，不动中心线几何 ────
+## mountain_road 上 AI 有 25.2 % 时间出界。按 D-085 的先例只加宽半宽
+## （4.5 → 5.5），不动 ai_difficulty / unlock，也不连 canyon_hairpin 一起加宽
+## ——后者只有 5.2 % 出界，一起改会抹平 9 条赛道的难度梯度。
+func _test_mountain_road_width() -> void:
+	var def := RaceSystem.track("mountain_road")
+	_check(not def.is_empty(), "盘山公路赛道定义存在")
+	if def.is_empty():
+		return
+	_check(absf(float(def.get("half_width_m", 0.0)) - 5.5) < 0.0001,
+		"mountain_road 半宽加宽到 5.5 m（%.2f）" % float(def.get("half_width_m", 0.0)))
+	_check(String(def.get("ai_difficulty", "")) == "expert", "加宽不动 AI 难度（仍 expert）")
+	_check(String(def.get("unlock", "")) == "wins:3", "加宽不动解锁条件（仍 wins:3）")
+	_check(absf(float(RaceSystem.track("canyon_hairpin").get("half_width_m", 0.0))
+		- 4.5) < 0.0001, "峡谷发卡弯半宽保持 4.5 m（难度梯度不被抹平）")
+
+	# 加宽只改路面带：拿旧的 4.5 m 定义重建一份对照，中心线逐位不变。
+	var old_def := def.duplicate(true)
+	old_def["half_width_m"] = 4.5
+	var wide := TrackLayout.build(def)
+	var narrow := TrackLayout.build(old_def)
+	_check(wide != null and narrow != null, "新旧半宽都能构建 TrackLayout")
+	if wide == null or narrow == null:
+		return
+	_check(absf(wide.half_width - 5.5) < 0.0001 and absf(narrow.half_width - 4.5) < 0.0001,
+		"Layout 读到新旧半宽（%.2f / %.2f m）" % [wide.half_width, narrow.half_width])
+	_check(wide.total == narrow.total,
+		"加宽不改周长 total（%.1f m，逐位相等）" % wide.total)
+	_check(wide.min_curve_radius() == narrow.min_curve_radius(),
+		"加宽不改最小曲率半径 minR（%.3f m，逐位相等）" % wide.min_curve_radius())
+	var min_r := wide.min_curve_radius()
+	_check(min_r > wide.half_width * 1.2,
+		"双闸① minR %.2f > 半宽×1.2 %.2f（路面带不翻面）"
+		% [min_r, wide.half_width * 1.2])
+	_check(min_r >= wide.half_width * 2.5,
+		"双闸② minR %.2f ≥ 半宽×2.5 %.2f（设计线）" % [min_r, wide.half_width * 2.5])
+	var length_m := float(def.get("length_m", 0.0))
+	_check(absf(length_m - roundf(length_m / TrackLayout.SPACING)
+		* TrackLayout.SPACING) < 0.0001,
+		"length_m %.0f 仍是 %.0f 的整数倍" % [length_m, TrackLayout.SPACING])
+	# gate_lateral_limit = half_width + 8.0 会跟着放宽，属于预期联动，不是硬编码。
+	var s := RaceSession.new()
+	s.setup(wide, 1, [])
+	_check(absf(s.gate_lateral_limit - 13.5) < 0.0001,
+		"过门横向容差联动为 5.5+8.0=13.5 m（%.2f）" % s.gate_lateral_limit)
 
 
 func _check(cond: bool, label: String) -> void:

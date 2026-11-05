@@ -4,7 +4,8 @@ extends RefCounted
 ##
 ## 策略：沿中心线的前视点追线（lookahead 随速度增长），弯道按「转向误差」自动
 ## 收油/点刹。难度四档直接改变：极速上限、转向精度（噪声量）、犯错概率与恢复时间。
-## 机器人不消耗真实燃料（spec.fuel_burn_lps = 0），也从不拉手刹。
+## 机器人不消耗真实燃料（spec.fuel_burn_lps = 0）；easy / normal 从不拉手刹，
+## 只有 hard / expert 在急弯会拉（见 _wants_handbrake）。
 
 const LOOKAHEAD_BASE := 10.0
 const LOOKAHEAD_PER_SPEED := 0.9
@@ -17,6 +18,12 @@ const SEARCH_WINDOW := 24   # 每帧只在前方这么多采样点内找最近�
 const PACE_GAP_FREE := 30.0
 const PACE_GAP_MAX := 150.0
 const PACE_MIN_BIAS := 0.82
+
+## 急弯手刹只对 hard / expert 开放：儿童向的简单难度里，不该让孩子被 AI
+## 甩尾超越。err 是前视点朝向误差（rad），spd 是当前车速（m/s）。
+const HANDBRAKE_DIFFICULTIES: Array[String] = ["hard", "expert"]
+const HANDBRAKE_MIN_ERR := 0.35
+const HANDBRAKE_MIN_SPEED := 5.0
 
 var difficulty: Dictionary = {}
 var layout: TrackLayout = null
@@ -64,10 +71,23 @@ func set_gap(gap_m: float) -> void:
 	pace_bias = pace_bias_for(gap_m)
 
 
+## 急弯是否拉手刹。判定只用现成的 err / spd / difficulty，不改 target_speed：
+## 手刹在 CarPhysics 里只影响减速、转向增益与侧滑回正，并不提高极速，
+## 所以 D-082「AI 目标速度不超过玩家车极速」的不变式不受影响。
+func _wants_handbrake(err: float, spd: float) -> bool:
+	var did := String(difficulty.get("id", ""))
+	if not HANDBRAKE_DIFFICULTIES.has(did):
+		return false
+	return absf(err) > HANDBRAKE_MIN_ERR and spd > HANDBRAKE_MIN_SPEED
+
+
 ## 返回一帧输入 {throttle, brake, steer, handbrake}。
 func think(car: CarPhysics, terrain: Dictionary, dt: float) -> Dictionary:
 	if layout == null:
-		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "handbrake": false}
+		# 没有 layout 就没有前视点与 err；仍走同一道闸门取安全默认 false。
+		# handbrake 键必须保留（探针与其它纯逻辑调用方会直接索引）。
+		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0,
+			"handbrake": _wants_handbrake(0.0, 0.0)}
 	var spd := car.speed()
 	var at := Vector3(car.pos.x, 0.0, car.pos.y)
 	index = layout.nearest_index_forward(index, at, SEARCH_WINDOW)
@@ -113,4 +133,5 @@ func think(car: CarPhysics, terrain: Dictionary, dt: float) -> Dictionary:
 	elif spd > target_speed * 1.12:
 		brake = clampf((spd - target_speed) / maxf(target_speed, 1.0), 0.0, 1.0)
 
-	return {"throttle": throttle, "brake": brake, "steer": steer, "handbrake": false}
+	return {"throttle": throttle, "brake": brake, "steer": steer,
+		"handbrake": _wants_handbrake(err, spd)}

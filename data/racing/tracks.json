@@ -71,7 +71,7 @@
       "difficulty": 5,
       "laps": 2,
       "length_m": 2200,
-      "half_width_m": 4.5,
+      "half_width_m": 5.5,
       "seed": 4404,
       "shape": { "lobes": 6, "amp": 0.16, "phase": 1.5, "lobes2": 9, "amp2": 0.05, "phase2": 0.3 },
       "terrain_segments": [

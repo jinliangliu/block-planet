@@ -43,6 +43,13 @@ class Racer:
 		return finish_time >= 0.0
 
 
+	## clean = 全程没出过路面。D-084 之后手刹是过急弯的正解，不能再拿
+	## used_handbrake 当惩罚判据（那等于奖励更慢的玩法）。off_road_time 由
+	## update_progress() 按真实 dt 累加；0.001 s 容差只用于挡浮点残差。
+	func is_clean() -> bool:
+		return off_road_time <= 0.001
+
+
 var layout: TrackLayout = null
 var laps := 3
 var racers: Array[Racer] = []

@@ -312,7 +312,7 @@ fish.json 的 id 与图鉴条目 id 一致，但 **bestiary 数据侧没有 `cat
 ## 11. 差距与已知问题（以代码为准）
 
 1. ~~独立钓鱼探针缺失~~ —— **已修复**（2026-10-23）：新增
-   `tests/fishing_probe.gd`（87 断言），钉死抛投距离公式、水层分界、
+   `tests/fishing_probe.gd`（初建 87 断言，D-083 后 **102 断言**），钉死抛投距离公式、水层分界、
    `BITE_MIN_MATCH` 门槛、等咬钩超时、收线三败局（断线 / 跑鱼 / 没鱼）、
    完整钓获链路与日志 round-trip（records / replay / stats）+ Progress
    计数折算；已登记进 `tmp/run_regression.sh` 日常档（42 → 43 探针）。

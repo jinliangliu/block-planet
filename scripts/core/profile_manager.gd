@@ -82,13 +82,33 @@ func slot_save_path() -> String:
 ## 当前槽目录。刻意从 slot_save_path() 派生而非重写 _current.is_empty() 判定——
 ## 一路复用同一处 legacy 回退：无槽时得到 user://（世界设置退化为 user://world.json，
 ## 与改版前「一切都落在 user://」的形态一致），不会出现两套判据各自漂移。
+##
+## ⚠️ get_base_dir() 对 "user://progress.json" 返回 **"user://"**（保留双斜线），
+## 不是 "user:/"！因此下游绝不能再用 "%s/%s" % [slot_dir(), filename] 拼接，
+## 否则会产出三斜线的 "user:///xxx.json"——字符串上不等于改版前的
+## "user://xxx.json"（Godot 虽会归一化到同一物理文件，但路径契约、探针快照
+## 与 D-010 逐字节比对全部会偏）。统一走 slot_file() 的 path_join()。
 func slot_dir() -> String:
 	return slot_save_path().get_base_dir()
 
 
 ## 当前槽的世界设置文件路径（D-078：和平模式开关存在这里）。
+## 与 8 份玩家状态共用同一处派生，避免三斜线拼接各自漂移。
 func slot_world_path() -> String:
-	return "%s/%s" % [slot_dir(), SLOT_WORLD_FILE]
+	return slot_file(SLOT_WORLD_FILE)
+
+
+## 当前槽内一份「玩家状态文件」的路径（D-086）。八份玩法状态（钓鱼图鉴 /
+## 船只 / 记录 / 回放 / 教学 / 蓝图 / 解锁）共用这一处派生，避免各系统自造
+## 路径工具、各自漂移。刻意做成实例方法而非 static：通过 Autoload 单例名
+## 调用 static 函数会触发 STATIC_CALLED_ON_INSTANCE 警告（本项目警告即错误）。
+##
+## 无槽时 slot_dir() == "user://"，path_join 产出 "user://<filename>"，
+## 逐字节等于改版前的旧根路径；有槽时为 "user://profiles/<id>/<filename>"。
+## 用 path_join 而非 "%s/%s"：前者在目录已带尾斜线时不再补第二个斜线，
+## 是这里唯一能同时满足「无槽逐字节兼容」与「有槽路径正确」的拼法。
+func slot_file(filename: String) -> String:
+	return slot_dir().path_join(filename)
 
 
 ## 读当前槽的世界设置：文件不存在 / JSON 损坏一律返回空字典，由调用方各自取

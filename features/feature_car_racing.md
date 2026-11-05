@@ -20,7 +20,7 @@
 
 现状一句话：**竞速 = 地图选择器「🏁 赛道竞速」→ 赛道选择器（选赛道/赛车/
 机器人数量与难度）→ 独立竞速场景：3 秒倒计时 → 门平面检查点 + 圈数 + 排名 →
-结算写 `user://race_records.json` + 回放 JSONL + 任务计数；6 条赛道、4 辆玩家
+结算写 `user://race_records.json` + 回放 JSONL + 任务计数；9 条赛道、4 辆玩家
 赛车、AI 四档难度，赛道几何由形状公式程序化生成（不铺体素）。**
 
 ---
@@ -45,7 +45,7 @@
 
 ```text
 data/racing/（五份 JSON，只读）
-├── tracks.json     6 条赛道（形状/圈数/地形分段/AI 推荐/解锁）
+├── tracks.json     9 条赛道（形状/圈数/地形分段/AI 推荐/解锁）
 ├── terrain.json    6 种地形（抓地/极速/刹车/滚阻/颜色）
 ├── vehicles.json   7 辆车（4 玩家 + 3 ai_only）
 ├── ai_racers.json  AI 四档难度 + 6 个名字 + AI 用车池
@@ -58,7 +58,7 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
   └── submit_result() → RaceRecords 纯逻辑 + Events 广播
         │
         ▼
-竞速场景（scripts/racing/race_scene.gd，386 行，总装）
+竞速场景（scripts/racing/race_scene.gd，总装）
   ├── TrackLayout（track_layout.gd）   赛道几何 + 地形分段 + 检查点下标（纯逻辑）
   ├── TrackLoader（track_loader.gd）   把 Layout 画成 3D（地板/路面/起跑线/拱门）
   ├── RaceSession（race_session.gd）   比赛规则引擎（纯逻辑）
@@ -70,8 +70,8 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
 三个关键约定：
 
 1. **纯逻辑层可无头探针**：TrackLayout / RaceSession / RaceRecords / AiRacer /
-   CarPhysics 全部不依赖节点，`racing_probe` 82 条断言直接钉死（标记
-   `RACING_TEST_OK`）。
+   CarPhysics 全部不依赖节点，由 `racing_probe` 直接钉死（标记
+   `RACING_TEST_OK`，运行时 PASS 条数见 §8）。
 2. **检查点用「门平面穿越」而非 Area3D**：每个检查点是一条垂直于赛道的线段，
    车从后往前穿过平面且在门的横向宽度内（半宽 + 8 m）才算过门——高速掠过
    不漏判、不受帧率影响，且判定完全在纯逻辑层。场景里的拱门只是同一份数据
@@ -153,6 +153,11 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
 
 ⇒ 设计约束：**新赛道的弯要「疏而深」，不要「密而浅」**。AI 开不稳比弯不够花哨更伤
 儿童体验。
+
+> 表中 `mountain_road` 的 25.2 % 是**加宽前**的实测基线。本轮按 D-085 的先例把它的
+> `half_width_m` 从 4.5 加到 5.5（见 §9.1），只放宽路面、不改 `ai_difficulty`（仍
+> expert）与 `unlock`；`canyon_hairpin` 只有 5.2 % 出界，保持 4.5 不动，以免抹平
+> 9 条赛道的难度梯度。加宽后的实测占比由主理人统一回归时复测，本表保留基线。
 
 ---
 
@@ -236,9 +241,12 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
 
 - **防抄近道**：必须按顺序过门（`next_gate` 环绕递增），掉头/切弯会被
   `nearest_index_forward` 的窗口搜索与门平面判定排除。
-- **clean 判定**（结算传入）：全程未用手刹（`used_handbrake`）且未冲出
-  路面（横向偏移 > half_width 记 `off_road_time`）——「湿地无手刹完赛」
-  任务即用此标志。
+- **clean 判定**（结算传入 `Racer.is_clean()`）：**全程未冲出路面**。
+  `update_progress()` 每帧只在出界时按真实 dt 累加 `off_road_time`；
+  `is_clean()` 判 `off_road_time <= 0.001`（容差只用于挡浮点残差）。
+  D-084 之后手刹是过急弯的正解，旧判据 `not used_handbrake` 等于奖励更慢的
+  玩法，已废弃；`used_handbrake` 仍留在 `results()` 里作诊断字段。
+  「湿地不出界」任务即用此标志（计数键保持旧名，见 §7.4）。
 - 任务书 §7 排名规则（同圈比检查点与距离、未完赛按完成度）已实现。
 
 ---
@@ -261,7 +269,13 @@ RaceSystem（Autoload，scripts/systems/race_system.gd）
 - AI 名字池 6 个（闪电兔/岩石龟/风之子/小星尘/铁皮狗/彩虹狐）；AI 用车池
   数据里是 `["tricycle","buggy","racer"]`（`ai_vehicles` 键——任务书写的
   `ai_vehicle_blueprints` 三台 ai_only 车是另一批，仅作视觉备选）。
-- AI 也吃地形 speed_factor，不耗油、从不拉手刹。
+- AI 也吃地形 speed_factor，不耗油。**急弯手刹只对 hard / expert 开放**：
+  `AiRacer.think()` 在 `absf(err) > 0.35 rad` 且 `spd > 5 m/s` 时返回
+  `handbrake: true`，easy / normal 恒 false（儿童向：简单难度不该被 AI 甩尾超越）。
+  判定只改返回的 `handbrake` 键，**不动 `target_speed` 公式**——手刹在
+  `CarPhysics` 里只影响 DECEL / YAW / GRIP、不提高极速，因此下面 D-082 的
+  配速归一不变式依然成立。`race_scene` 的 AI 分支与 autopilot 分支都透传该值
+  （旧实现无条件写 `false`，会把 `think()` 的结果丢掉）。
 - **配速归一到「场地极速」（D-082）**：目标速度的上界是 `min(自己车极速, 玩家车极速)`，
   不再是 AI 自己车的极速。改动前 AI 车池里的 `racer`（40 m/s）开 easy（0.7）仍有
   28 m/s，而玩家开小三轮只有 24 m/s——孩子必输。归一后 easy 对 racer 是 24×0.7 = 16.8。
@@ -290,8 +304,9 @@ Android 上没有键盘：`race_hud.gd` 在 `DisplayServer.is_touchscreen_availa
 - 退出是必需品（Android 没有 `race_exit` 键），否则孩子会被困在比赛里。
 - 触屏态下面板自动让位：左下油表 `offset_bottom → −168`、右上圈速 `offset_top → 92`、
   右下按键说明改触屏文案并抬到手刹之上（实测 6 个按钮全部落在 1280×720 内、互不重叠）。
-- 松手状态清理：`clear_touch_input()`，由 `race_scene._set_teach_hint()` 在教学/成绩单
-  等会吃掉触摸事件的模态出现时调用（抬指事件被拦住会残留「刹车按着」）。
+- 松手状态清理：`clear_touch_input()` 由 `race_scene._restart()` 调用；HUD 侧另有
+  三条自愈（同一 index 重新按下 / 无手指在屏 / 失焦）兜住「抬指事件根本没到引擎」，
+  抬指被模态面板拦住则由 `_input` 的原始触摸记账处理。
 
 ---
 
@@ -334,22 +349,27 @@ vehicle_id / position[3] / player），但格式是 **JSONL 而非 CSV**，只�
 | q_race_first 完成第一场比赛 | race_finished_any |
 | q_race_win_desert 沙丘环线夺冠 | race_win_desert_ring |
 | q_race_record 打破任一圈速纪录 | race_new_record |
-| q_race_wetland_clean 湿地无手刹完赛 | race_clean_wetland_cross |
+| q_race_wetland_clean 湿地不出界 | race_clean_wetland_cross |
 | q_race_tricycle_win 小三轮夺冠 | race_win_vehicle_tricycle |
 
 计数由 ProgressManager 监听 `Events.race_finished` / `race_record_beaten`
 累加（键名规则见 progress_manager.gd:220 注释）。任务书 §10.2 五条任务
-全部落地（「湿地无手刹」从愿望句变成了 clean 标志）。
+全部落地（「湿地不出界」从愿望句变成了 clean 标志）。本轮只反转 clean 判据并
+改标题/描述，**`goal.key` 仍是 `race_clean_wetland_cross`、既有完成进度不迁移**，
+否则旧存档里的任务计数会失效。
 
 ---
 
 ## 8. 验证（探针）
 
-| 探针 | 断言数 | 覆盖 | 标记 |
+| 探针 | 运行时 PASS 条数 | 覆盖 | 标记 |
 |---|---|---|---|
-| `tests/racing_probe.gd` | **154** | 赛道几何（周长/采样/地形分段/检查点/**最小曲率半径**/**中心线不自交**/waypoints 模式/坏数据回落）/ 门平面过门与圈数 / 名次排序 / 记录读写与破纪录 / AI 追线与犯错与**配速归一** / CarPhysics 地形与燃料 / **手刹漂移** / 选择器卡片数与赛道数一致 | `RACING_TEST_OK` |
+| `tests/racing_probe.gd` | **182** | 赛道几何（周长/采样/地形分段/检查点/**最小曲率半径**/**中心线不自交**/waypoints 模式/坏数据回落）/ 门平面过门与圈数 / 名次排序 / 记录读写与破纪录 / AI 追线与犯错与**配速归一** / CarPhysics 地形与燃料 / **手刹漂移** / 选择器卡片数与赛道数一致 | `RACING_TEST_OK` |
 | `tests/race_touch_probe.gd` | 38 | 触屏层（自动油门 / 刹车互斥 / 按住语义 / 两个动作信号 / 面板让位） | `RACE_TOUCH_TEST_OK` |
 | `tests/track_decor_probe.gd` | **44** | 主题装饰（6 主题色盘 / 9 条赛道组数 2~10 且实例 >0 / 离中心线 ≥ `half_width+KERB_WIDTH+2.9` / 不投影 / 确定性 / 重复 build 不残留）+ 红白路肩 10 条（节点唯一 / 顶点数 8×size / 红白都存在 / 内外沿偏移 / 高于路面 / 亮度差 ≥0.05） | `TRACK_DECOR_TEST_OK` |
+
+> 上表数字是**运行时 PASS 行数**（含探针里按赛道/载具展开的循环），不是
+> `_check(` 的静态计数；本轮新增断言后的总行数由主理人统一回归时复测。
 
 **D-085 的两条探针坑（写探针前必读）**：
 1. `--headless` 下 `RendererDummy` **不保存 MultiMesh 实例缓冲**，
@@ -369,10 +389,25 @@ D-010 合规：存档 `user://race_records.json` 与 `race_replay.jsonl` 由探�
 
 1. **幽灵车回放未实现**：回放日志已在写（§7.2），「播放上一场轨迹」是后续
    迭代项（任务书亦列入后续）。
-2. **地形粒子未实现**：terrain.json 的 `dust` / `wet` 标志位无消费方，
-   扬尘/水花视觉效果空缺。
+2. **地形粒子已实现**（D-079，旧版此处误记为「未实现」）：`terrain.json` 的
+   `dust` / `wet` 标志位由 `race_car.gd set_terrain_fx(terrain, speed_ratio)`
+   消费；两路 `CPUParticles3D` 互斥、湿地优先，`speed_ratio < FX_MIN_RATIO`
+   （0.22）时不出粒子。`race_scene._physics_process` 每帧把该车
+   `speed() / max_speed()` 喂进去，地形段换标签即自动换特效。
 3. **竞速车 ≠ 拼装蓝图**：任务书 §10.1 的「用自己拼的车比赛」未实现，
    当前是预制赛车（§4.3）。
 4. **联机竞速未实现**（任务书后续项，单机定位不变）。
 5. **赛道选择器的记录面板**：记录查看/清空在选择器内，无独立「竞速记录」
    主菜单页（任务书 §8.3 的可选形态）。
+
+### 9.1 本轮三处欠账的修复结果
+
+| 欠账 | 修复 | 落点 |
+|---|---|---|
+| clean 判据奖励更慢的玩法（P0） | 改判「全程未出界」，手刹不再是惩罚 | `RaceSession.Racer.is_clean()`（`off_road_time <= 0.001`）→ `race_scene._finalize()` → `Events.race_finished` → `ProgressManager` → `q_race_wetland_clean`；任务文案改「湿地不出界」，`goal.key` 不变、旧进度不迁移 |
+| AI 急弯不会用手刹（P1） | `hard`/`expert` 在 `absf(err) > 0.35 rad` 且 `spd > 5 m/s` 时返回 `handbrake: true`，easy/normal 恒 false | `AiRacer._wants_handbrake()`（`think()` 两个返回点都走它）+ `race_scene` AI/autopilot 两处透传；`target_speed` 公式一行未动，D-082 配速归一不变式保持 |
+| `mountain_road` AI 25.2 % 出界（P1） | `half_width_m` 4.5 → 5.5，只加宽路面 | `data/racing/tracks.json`；`ai_difficulty` 仍 expert、`unlock` 仍 wins:3、`canyon_hairpin` 仍 4.5。`gate_lateral_limit = half_width + 8.0` 联动为 13.5 m；`TrackLoader` 装饰留白按 `half_width + KERB_WIDTH + DECOR_CLEARANCE` 动态取，**无硬编码半宽**。`TrackLayout.total` 与 `min_curve_radius()` 不随半宽变化，双闸（>1.2× / ≥2.5× 半宽）仍成立 |
+
+三处都由 `racing_probe` 补了反向对照断言：拉手刹但没出界 = clean、手刹开关不改
+`throttle`/`brake`/`steer`、加宽不改 `total`/`minR`。**加宽后的实际出界占比与
+排名分布需实机回归复测**，本文件不预填新数字。

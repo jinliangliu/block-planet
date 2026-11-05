@@ -13,9 +13,9 @@ extends Node3D
 @onready var _mob_spawner: MobSpawner = $MobSpawner
 @onready var _env: Environment = ($WorldEnvironment as WorldEnvironment).environment
 var _build_screen: BuildScreen
-## 零件解锁状态（跨会话持久化 user://unlocks.json）：main 持有唯一实例，
+## 零件解锁状态（跨会话持久化，D-086 起按档案槽派生）：main 持有唯一实例，
 ## 注入 build_screen——任务赚的绿宝石买的零件，下次进游戏还在（D-032 Phase 4b-ii）。
-var _unlocks := PartUnlocks.load_or_new()
+var _unlocks := PartUnlocks.load_or_new(Profile.slot_file("unlocks.json"))
 ## 飞行视角三件套（D-033）：相机 rig / 轨迹录制 / 回放。随主场景生毁；
 ## 登机即激活相机并开始录制（Events.aircraft_ride_changed），HUD 路由按键。
 var _flight_camera: AircraftCamera
@@ -53,6 +53,10 @@ var _craft_park := Vector3.ZERO
 
 func _ready() -> void:
 	InputActions.register()
+	# D-086：主场景成员不随切槽重建，_unlocks 必须换槽重载并重新注入工坊台，
+	# 否则从 A 槽切到 B 槽后仍带着 A 槽买过的零件（还会被 save() 写进 B 槽）。
+	if Profile != null:
+		Profile.slot_changed.connect(_on_slot_changed)
 
 	# 区域参数必须先于世界生成落地：World._ready 用默认区域初始化了噪声，
 	# 这里按 GameState 的当前区域覆盖种子、地形起伏与地表材质。
@@ -216,6 +220,14 @@ func _ready() -> void:
 		RaceSystem.open_selector_on_return = false
 		if DisplayServer.get_name() != "headless":
 			_hud.open_track_selector()
+
+
+## D-086：换槽重载 _unlocks 并重新注入工坊台。工坊台可能还没建（启动期选槽），
+## 故判空；建好后 set_unlocks() 只是替换引用，不触碰当前打开状态。
+func _on_slot_changed(_id: String) -> void:
+	_unlocks = PartUnlocks.load_or_new(Profile.slot_file("unlocks.json"))
+	if _build_screen != null:
+		_build_screen.set_unlocks(_unlocks)
 
 
 ## 飞行任务遥测：玩家在机上时，每物理帧把真实飞行状态喂给 HUD 任务面板

@@ -15,7 +15,9 @@ signal lap_completed(lap: int, lap_time: float)
 signal race_finished(results: Array)
 signal new_record(track_id: String, record_type: String, value: float)
 
-const RECORDS_PATH := "user://race_records.json"
+## D-086：不再是 const。无槽时按 Profile.slot_dir() 派生回旧根路径
+## "user://race_records.json"；建槽后落到 user://profiles/<id>/。
+var RECORDS_PATH: String = "user://race_records.json"
 const TRACKS_PATH := "res://data/racing/tracks.json"
 const TERRAIN_PATH := "res://data/racing/terrain.json"
 const AI_PATH := "res://data/racing/ai_racers.json"
@@ -49,7 +51,10 @@ var open_selector_on_return := false
 
 func _ready() -> void:
 	load_data()
+	_refresh_path()
 	load_records()
+	if Profile != null:
+		Profile.slot_changed.connect(_on_slot_changed)
 
 
 # ── 数据加载 ──────────────────────────────────────────────
@@ -249,6 +254,19 @@ func best_lap_of(track_id: String) -> float:
 
 func best_time_of(track_id: String) -> float:
 	return float(entry_of(track_id)["best_race_time"])
+
+
+## D-086：路径随档案槽重算（无槽逐字节等于旧根路径）。
+func _refresh_path() -> void:
+	if Profile != null:
+		RECORDS_PATH = Profile.slot_file("race_records.json")
+
+
+## 换槽必须真的重跑 load_records()：_records 是 Autoload 常驻内存，只换路径不换
+## 内容的话，下一次 save_records() 会把 A 槽的记录写进 B 槽的文件。
+func _on_slot_changed(_id: String) -> void:
+	_refresh_path()
+	load_records()
 
 
 func load_records() -> void:

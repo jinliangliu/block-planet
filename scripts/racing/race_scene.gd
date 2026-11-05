@@ -220,7 +220,7 @@ func _physics_process(delta: float) -> void:
 				r.car.throttle = float(pin["throttle"])
 				r.car.brake = float(pin["brake"])
 				r.car.steer = float(pin["steer"])
-				r.car.handbrake = false
+				r.car.handbrake = bool(pin.get("handbrake", false))
 			else:
 				_apply_player_input(r, delta)
 		elif r.finished():
@@ -235,7 +235,7 @@ func _physics_process(delta: float) -> void:
 			r.car.throttle = float(inp["throttle"])
 			r.car.brake = float(inp["brake"])
 			r.car.steer = float(inp["steer"])
-			r.car.handbrake = false
+			r.car.handbrake = bool(inp.get("handbrake", false))
 
 		r.car.step(delta, terr)
 		_clamp_arena(r.car)
@@ -415,7 +415,7 @@ func _finalize() -> void:
 		player.rank,
 		player.best_lap,
 		player.finish_time,
-		not player.used_handbrake,
+		player.is_clean(),
 		player.lap,
 	)
 	_log("race_finish")

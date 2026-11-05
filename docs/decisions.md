@@ -3340,12 +3340,20 @@ base_y = maxi(top, World.SEA_LEVEL + 2)
 
 ### 5. 待办
 
-1. **`clean` 的语义要重写**：`race_scene.gd:418` 的 `clean = not player.used_handbrake`，
+1. ~~**`clean` 的语义要重写**：`race_scene.gd:418` 的 `clean = not player.used_handbrake`，
    喂给任务 `q_race_wetland_clean`。手刹现在是「认真开」的标志，这个任务等于
    「请用更慢的方法过弯」。正解应是 `clean = off_road_time == 0`，但要动任务语义与
-   已有存档的进度，另外开一轮。
-2. **AI 不用手刹**：`ai_racer.gd` 三处 `"handbrake": false` 写死。给 AI 加手刹会让
-   高难度真的难，但会打破 D-082 的「AI 不超过玩家极速」体感预期，需要单独配额。
+   已有存档的进度，另外开一轮。~~
+   ~~已完成~~（D-086 §4.1）：`race_session.gd` 新增 `is_clean()`
+   （`off_road_time <= 0.001`），`race_scene.gd:418` 改调它；任务文案改为「湿地不出界 /
+   全程保持在路面内完赛」，`goal.key` 仍是 `race_clean_wetland_cross`，**不迁移旧存档
+   进度**——原文担心的「要动已有存档的进度」这一步因此没有发生。
+2. ~~**AI 不用手刹**：`ai_racer.gd` 三处 `"handbrake": false` 写死。给 AI 加手刹会让
+   高难度真的难，但会打破 D-082 的「AI 不超过玩家极速」体感预期，需要单独配额。~~
+   ~~已完成~~（D-086 §4.2）：**实际是两处，不是三处**；`target_speed` 公式逐字未动，
+   手刹只影响 `CarPhysics` 的 DECEL / YAW / GRIP，D-082 配速归一未破，无需单独配额。
+   真正的关键覆盖点是 `race_scene.gd` 的 autopilot / AI 两处把 `handbrake` 透传给
+   `r.car.handbrake`——原文只盯着 `ai_racer.gd` 的返回值，漏了这一层。
 3. **未实机调参**：0.18 / 1.35 是按「漂移有收益、但不是失控」估的；实跑若觉得尾巴太活，
    把 `HANDBRAKE_GRIP` 往 0.26 收一点（`racing_probe` F 段的侧滑断言会立刻报出来）。
 
@@ -3533,8 +3541,226 @@ waypoints 换成近似圆形，它会立刻报出来）。
    `_time = 半日` 时 `sun = sin(π·0.5) = 1`，角度被插值到 `x = −10°`（几乎掠射，地台
    N·L≈0.17，拍出来是暗图），而黎明 `x = −85°` 才是正午该有的角度。取证脚本额外把角度
    掰到 −52° 才拍出可看的图。**这是既有问题，不属本次改动**，另开票。
-3. **`mountain_road` 的 AI 出界 25.2 %**（本次实测副产物，非新赛道）：它是全工程最窄的
+3. ~~**`mountain_road` 的 AI 出界 25.2 %**（本次实测副产物，非新赛道）：它是全工程最窄的
    4.5 m 半宽 + expert 难度，AI 有 1/4 时间在草地上。要么加宽到 5.5，要么把
-   `ai_difficulty` 降到 hard——**但这是既有内容的手感改动，不属 D-085 范围**，另开票。
-4. **`clean` 任务与手刹的关系**（同 D-084 待办 1）：现在手刹是认真开的标志，
-   `q_race_wetland_clean` 却在要求别碰它。
+   `ai_difficulty` 降到 hard——**但这是既有内容的手感改动，不属 D-085 范围**，另开票。~~
+   ~~另开票~~（D-086 §4.3 已结案）：采纳「加宽到 5.5」分支，否决「降难度」分支——`ai_difficulty` 仍 `expert`、`unlock` 仍 `wins:3`，`tracks.json` 已改；**仅剩「AI 手刹 / 加宽后实机观感」未验**，见 D-086 §8。
+4. ~~**`clean` 任务与手刹的关系**（同 D-084 待办 1）：现在手刹是认真开的标志，
+   `q_race_wetland_clean` 却在要求别碰它。~~
+   ~~已完成~~（D-086 §4.1，同 D-084 待办 1）：`clean` 改为 `off_road_time <= 0.001`
+   （`race_session.is_clean()`），任务文案同步改为「全程保持在路面内完赛」；
+   `goal.key` **不迁移**。
+
+---
+
+## D-086 全系统存档槽隔离统一轮 + 竞速三处欠账修复（2026-11-05）
+
+**结论**：8 份玩家状态的路径常量统一改成按槽重算的 `var` / `static var`，一律由
+`Profile.slot_file(filename)` 派生；三个 Autoload 在 `slot_changed` 时**同时**换路径与
+重载内存态。同批修掉竞速第二轮调研留下的三处欠账。全量回归 **54 探针 / 2392 PASS /
+0 FAIL**、`[user://] RESTORED_OK` 零 DIFF。
+
+**背景**：D-076（M7.4 多存档槽）只隔离了 `Progress`（`user://profiles/<id>/progress.json`）
+与 D-078 的 `world.json`；8 份玩家状态仍写死 `user://` 根。玩家从 A 槽切到 B 槽后，B 会
+继承 A 的钓鱼图鉴 / 船只 / 竞速记录 / 蓝图 / 解锁——「继承别人的满图鉴」正是这个 bug 的
+表现。本轮是下一批「钓鱼收集册 / 竞速解锁榜」的正确性前置，先单独做、单独回归，不与玩法
+改动混批。
+
+### 1. 裁决：方案 A
+
+8 份仍写死根路径的玩家状态：
+
+| 文件 | 归属 |
+|---|---|
+| `fishing_journal.json` | `scripts/systems/fishing_system.gd` |
+| `boats.json` | `scripts/systems/boat_system.gd` |
+| `race_records.json` | `scripts/systems/race_system.gd` |
+| `flight_teaching.json` | `scripts/systems/flight_teaching.gd` |
+| `race_replay.jsonl` | `scripts/systems/race_replay_log.gd` |
+| `race_teaching.json` | `scripts/ui/race_teaching_ui.gd` |
+| `blueprint.json` | `scripts/ui/build_screen.gd` |
+| `unlocks.json` | `scripts/vehicles/part_unlocks.gd` |
+
+**裁决：8 份路径 `const` 统一改成按槽重算的 `var` / `static var`，无新增 `const` 兜底。**
+
+**否决方案 B（保留 `const` + 新增派生 `var`）**：`tests/` 下共 **22 处**直接引用这些常量符号
+做独立快照 / 还原（`fishing_probe.gd` 4、`build_screen_probe.gd` 6、`stall_coach_probe.gd` 10、
+`stall_coach_shot.gd` 2）。方案 B 会让探针快照旧根路径、生产写入走槽路径，直接违反 D-010
+并污染真实槽档；改 `var` 后这 22 处引用自动跟随、零改动。
+
+**设备级 3 份刻意保留全局不改**：`flight_settings.gd` 的 `settings.json`、`sfx.gd` 的
+`audio.json`、`alert_beeper.gd` 的 `user://voice`。注意 `settings_panel.gd` 的
+`Profile.read_slot_settings()/write_slot_settings()` 是**按槽覆盖层**（和平模式走槽），与
+设备级 `settings.json` 两码事，不能据此把后者也搬走。
+
+### 2. 实现清单
+
+- **唯一共享入口**：`scripts/core/profile_manager.gd` 新增实例方法 `slot_file(filename)`。
+  刻意不做 `static`——通过 Autoload 单例名 `Profile` 调 `static` 函数会触发
+  `STATIC_CALLED_ON_INSTANCE`，本项目警告即错误。不新增 `class_name`、不让各玩法自造
+  路径工具。
+- **Autoload 顺序**：`Profile` 排在 `Progress / BestiaryData / FishingSystem / RaceSystem /
+  BoatSystem` 之前，玩法系统 `_ready()` 调 `Profile.slot_dir()` 安全。
+- **3 个 Autoload**（`FishingSystem` / `BoatSystem` / `RaceSystem`）：`_ready()` 调
+  `_refresh_path()` 并连 `Profile.slot_changed`；回调必须**同时**换路径与重载内存态
+  （`_load_journal()` / `load_records()`）。只换路径不换内容，下一次 `save_xxx()` 就会把
+  A 槽状态写进 B 槽文件——`RaceSystem._records` 是 Autoload 常驻内存，尤其致命。
+  `BoatSystem` 回调严格复刻 `_ready()` 尾部三行
+  `_refresh_path() / _load_journal() / _grant_default_boat()`，否则新槽「一艘船都没有」。
+- **`FishingSystem._on_slot_changed()` 刻意不重跑 `_refresh_gear_unlocks()`**：
+  `slot_changed` 由 `Profile.select_slot()` 在 `Progress._load()` **之前** emit，此刻 Progress
+  仍挂着上一槽的已领任务，重跑会把 A 槽解锁的渔具误授进 B 槽。新槽 gear 列表以该槽
+  journal 为准。也不额外 `_save_journal()`：所有改动都已即时落盘，换槽时没有待刷脏态。
+- **journal 引用语义（下批收集册的地基）**：`FishingSystem._load_journal()` 是全文件唯一的
+  `journal = {...}` 整体替换，其余全是 `journal["key"] = ...` 原地 mutate；`record_of()`
+  返回的是 `records` 里的**子 Dictionary 引用**。换槽后任何缓存的 `journal` / 子字典 /
+  `record_of()` 返回值都会静默指向旧槽对象且不报错。后续「钓鱼收集册」**不得跨
+  `open()` 生命周期缓存**这三者。
+- **5 个非 Autoload 静态类**：`FlightTeaching` / `RaceReplayLog` / `RaceTeachingUI` /
+  `BuildScreen` / `PartUnlocks` 用 `static var`——探针以类名做类级读取
+  （`BuildScreen.BLUEPRINT_PATH` / `FlightTeaching.SAVE_PATH`）或有静态方法读取
+  （`RaceReplayLog` / `PartUnlocks`），实例 `var` 会取不到值。
+  `PartUnlocks.load_or_new(path)` 默认参数由 `= SAVE_PATH` 改成 `= ""` 空串哨兵
+  （GDScript 默认参数要求常量表达式），函数体内 `_refresh_path()` 后取 `SAVE_PATH`；
+  显式传 `path` 的 `unlock_probe.gd` 语义不变。
+- **`scripts/main.gd`**：成员 `_unlocks` 注入 `Profile.slot_file("unlocks.json")`；`_ready()`
+  连 `slot_changed`，回调重建 `_unlocks` 并 `_build_screen.set_unlocks()`（判空——启动期
+  选槽时工坊台可能还没建）。主场景切槽不重建，故必须补这一步；`build_screen.gd` 的
+  `_unlocks.save()` 调用点同样注入按槽路径。未改 `profile_picker.gd` / `hud.gd`。
+- **`RaceReplayLog` 无持久文件句柄**：`append()` 是「读全量 → append → `MAX_LINES 600`
+  裁剪 → `WRITE` 全量覆写」，所以换槽不需要换句柄，只需 `append()` / `read_lines()` /
+  `clear()` 三处每次现算路径。`MAX_LINES = 600` 不动，分槽后语义自动变成「每槽 600 行」，
+  比全局 600 行更正确。
+
+### 3. 本次实测抓到并修掉的真缺陷
+
+**结论**：`slot_dir()` 无槽时返回的是 `"user://"`（**保留双斜线**），不是派生代码与注释
+原本假设的 `"user:/"`。用 `"%s/%s" % [slot_dir(), filename]` 拼接会产出三斜线的
+`user:///fishing_journal.json`，**8 份路径全部中招**。
+
+- 原实现按 `String.get_base_dir()` 会去掉末尾斜线来推理，据此写下「无槽时逐字节等于旧根
+  路径」的结论。**实测 Godot 4.6.3 对 `"user://progress.json"` 返回 `"user://"`**，双斜线
+  被保留。
+- 这是**生产缺陷，不只是断言写错**：无槽态是新玩家的默认启动态，8 份状态全写到三斜线
+  路径。Godot 虽把 `user:///x` 归一化到同一物理文件、读写「碰巧能用」，但路径契约、
+  探针快照与 D-010 逐字节比对全偏——`tests/` 那 22 处独立快照 / 还原读的正是路径变量，
+  一旦字符串不等，快照与还原就会落到不同文件上。
+- `profile_slot_probe` 新增的 **D0 8 条「无槽回退逐字节相等」**正是抓到它的反向对照；
+  没有这层对照，日常回归的全绿会把这个偏差一直盖住（见 §5）。
+- **修法**：`slot_file()` 改用 `slot_dir().path_join(filename)`。`path_join` 在目录已带
+  尾斜线时不再补第二个斜线，是唯一同时满足「无槽逐字节兼容 `user://<filename>`」与
+  「有槽 `user://profiles/<id>/<filename>` 正确」的拼法。`slot_world_path()` 一并改成
+  `return slot_file(SLOT_WORLD_FILE)`，消除 D-078 遗留的同类三斜线。
+- **排错过程**：初判「`Profile.reload()` 不 emit `slot_changed`，路径变量残留 `default`
+  槽」被证伪——`_collect_paths()` 本来就显式调 8 个 `_refresh_path()`；是 tmp 诊断探针
+  `tmp/path_diag.tscn` 打印实际字符串才定位到斜线。
+- **残留说明**：`Profile.reload()` 确实不 emit `slot_changed`，但生产换槽走 `select_slot()` /
+  `delete_slot()` / `create_slot()` 都 emit，故不影响；探针侧靠 `_collect_paths()` 显式刷新。
+
+### 4. 竞速三处欠账
+
+与存档槽隔离同批落地的还有 D-082~D-085 留下的三处欠账，单列一节记录，避免下批收集册 /
+圈速榜踩到同一个地基。
+
+**1. `clean` 语义反转（D-084 待办 1 / D-085 待办 4）**
+
+`race_session.gd` 新增 `is_clean() -> bool`：`return off_road_time <= 0.001`；
+`race_scene.gd:418` 由 `clean = not player.used_handbrake` 改为 `clean = player.is_clean()`。
+旧判据在 D-084 把手刹从「纯惩罚」变成「认真开车的标志」之后，等于**奖励更慢的玩法**。
+任务 `q_race_wetland_clean` 文案改为「湿地不出界 / 全程保持在路面内完赛」，
+**`goal.key` 保持 `race_clean_wetland_cross` 不迁移旧存档进度**——D-084 待办里担心的
+「要动已有存档的进度」这一步因此没有发生。`results()["used_handbrake"]` 保留作诊断字段；
+倒计时写死 `true`（`race_scene.gd:212`，发车前钉车，刻意）、完赛滑行写死 `false`
+（`:231`，收油防堵车）；两者都不是结算路径，不参与 clean 判定，本次刻意不动。
+
+**2. AI 急弯手刹（D-084 待办 2）**
+
+`ai_racer.gd` 新增 `HANDBRAKE_DIFFICULTIES: Array[String] = ["hard", "expert"]`、
+`HANDBRAKE_MIN_ERR := 0.35`、`HANDBRAKE_MIN_SPEED := 5.0` 与 `_wants_handbrake(err, spd)`；
+`think()` **两处**（原 D-084 待办写「三处」）返回由写死 `false` 改为该函数。
+`target_speed` 公式逐字未动——手刹只影响 `CarPhysics` 的 DECEL / YAW / GRIP，不破 D-082
+的 AI 配速归一（「AI 不超过玩家极速」）。**关键覆盖点**：`race_scene.gd` 的 autopilot 与
+AI 两处把 `handbrake` 透传给 `r.car.handbrake`；没有这一步，`think()` 返回什么都不生效。
+
+**3. `mountain_road` 加宽（D-085 待办 3 的加宽分支）**
+
+`data/racing/tracks.json` 的 `mountain_road` 半宽 **4.5 → 5.5**（实测 AI 25.2 % 时间在
+草地），`ai_difficulty` 仍 `expert`、`unlock` 仍 `wins:3`——即采纳「加宽」分支、不采纳
+「降难度」分支；`canyon_hairpin` 保持 4.5。装饰留白全部由 `layout.half_width` 动态派生，
+加宽会让落点与下限同步 +1.0 m，**无需改 `track_loader.gd`**。实机观感仍列在 §8 待办。
+
+### 5. D-010 与验证
+
+- `tests/save_guard.gd`：`EXTRA_FILES` 原 4 项原样保留，补第 5 项
+  `user://race_records_probe.json`——修 `racing_probe.gd` 在 rc=139 崩于断言之间留下残
+  file 造成的假 DIFF；`_read_tree()` 注释补充槽目录内 JSONL / `.tmp` 逐字节还原
+  （`snapshot_profiles()/restore_profiles()` 已递归覆盖 `user://profiles/` 整树）。
+- `tests/profile_slot_probe.gd` 扩展 **+196 行**：D0（8 条无槽逐字节回退）+ D1–D20
+  （槽 A/B 8 路径分叉且互不相同、三系统内存态双向隔离、RaceReplayLog 切槽写新文件且
+  旧槽事件不变、换槽后 `record_of()` 返回新对象的反向对照）；`_remove_dir_tree()` 递归
+  清理（槽目录里现在有 8 份状态文件，`remove_absolute` 只能删空目录）；看门狗与
+  `_exit_tree` 安全网保证 OK / FAIL / 脚本错误 / 超时四条退出路径都能走到
+  `SaveGuard.restore()`。沿用 `create_slot/delete_slot` 范式，未新建 `.tscn`。
+- `tmp/run_regression.sh`：兜底清理从「4 个根文件名枚举」改为「凡 `tmp/user_backup`
+  里没有的 `user://` 根文本文件一律删（`*.json` / `*.jsonl` / `*.tmp` / `*.cfg`，
+  `progress.json` 显式跳过，以保留「带非空计数 = 内存态未还原」的专用警报）」。
+  `diff -r` 与 `[user://] RESTORED_OK` 判定一字未动。
+
+**验证结果（已实测）**：
+
+| 项 | 结果 |
+|---|---|
+| `ONLY="profile_slot_probe"` 单跑 | **49 PASS / 0 FAIL** |
+| 全量 `bash tmp/run_regression.sh` | **54 探针 / 2392 PASS / 0 FAIL** |
+| `user://` 还原 | **`RESTORED_OK`，零 DIFF** |
+| 基线 2336 → 2392 | **+56**，逐项可解释 |
+| `racing_probe` | 154 → 182（**+28**） |
+| `profile_slot_probe` | 21 → 49（**+28**） |
+
+7 个 `rc=139` 是既有良性 Vulkan 退出崩溃，均在断言全 PASS 之后。
+
+**回归的虚假安全感**：日常 54 探针会把真实 `profiles/` 整体移出，跑在**无槽态**；此时
+动态路径恰好等于旧根路径，全绿**不等于槽态逻辑正确**。槽态只由扩展后的
+`profile_slot_probe` 覆盖——这是本轮必须单独跑它的原因，也是 D-010 双保险不能只靠回归
+脚本的原因。
+
+### 6. 裁决：tmp/run_regression.sh 不入库
+
+- 该文件被 `.gitignore:11 tmp/` 忽略，`git ls-files tmp/run_regression.sh` 为 0
+  （`UNTRACKED/IGNORED`）。
+- **裁决：本次不 `git add -f` 入库。** 理由：脚本含本机硬编码绝对路径
+  （`cd "/c/Users/pc/..."`、`$HOME/AppData/Roaming/Godot/app_userdata/Block Planet`）、
+  面向 Windows Git Bash，公开仓库里对他人不可用；`tmp/` 按项目约定是本地工具 / 日志 /
+  截图目录。
+- **真正入库的 D-010 保障**是 `tests/save_guard.gd` + 每个探针自己的
+  `snapshot()/restore()` + `snapshot_profiles()/restore_profiles()`；回归脚本只是便利
+  外壳，不入库不削弱正确性保证。
+- **另开票**：若要让开源仓库可复现回归，需把脚本参数化（自动探测 `user://` 路径、
+  去掉本机绝对路径）后移入 `tools/` 入库。
+
+### 7. 历史事实订正
+
+本次同时订正两处旧 ADR 的事实错误，避免后来者按错误前提继续推导。订正均以 `~~删除线~~`
+保留原文、就地注明修复结论，不改写历史叙述。
+
+| 位置 | 原文 | 订正 |
+|---|---|---|
+| D-084 §5 待办 1 | 「要动任务语义与已有存档的进度，另外开一轮」 | **已在 D-086 §4.1 完成**；`goal.key` 不迁移，故未动存档进度 |
+| D-084 §5 待办 2 | 「`ai_racer.gd` **三处** `"handbrake": false` 写死」 | 实际是**两处**；且 `race_scene.gd` 把 `handbrake` 透传给 `r.car.handbrake` 才是关键覆盖点 |
+| D-085 §8 待办 4 | 「`clean` 任务与手刹的关系」仍待办 | **已在 D-086 §4.1 修复**：`clean` 改为 `off_road_time <= 0.001`，key 不迁移 |
+| D-085 §8 待办 3 | 「要么加宽到 5.5，要么把 `ai_difficulty` 降到 hard……另开票」 | **已在 D-086 §4.3 结案（半完成）**：采纳加宽、否决降难度；`ai_difficulty` 仍 `expert`、`unlock` 仍 `wins:3`，仅剩「AI 手刹 / 加宽后实机观感」未验 |
+
+D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
+另：D-086 §4.1 结尾原写「倒计时与完赛滑行两处仍写死 `false`」，系本次规格笔误；经竞速只读复核
+`race_scene.gd:212`（倒计时 `true`，发车前钉车）/ `:231`（完赛滑行 `false`）/ `:223`、`:238`
+（autopilot / AI 为 `pin.get("handbrake", false)` 透传，不写死）后已就地订正——属本次 ADR
+自身录入错误，非旧 ADR 事实。
+
+### 8. 待办
+
+- **批次 2**：钓鱼「鱼类收集册 + 四大洋集齐奖励」、竞速「结算屏留存闭环 / 最快圈速榜」，
+  均依赖 D-086 落地（尤其 §2 的 journal 引用语义）。
+- **full 档 12 项窗口截图与真机目检仍待重验**（含 `chunk_mesh_baseline` 逐值重录、
+  `cockpit_instruments_shot` 复跑）。
+- 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、`life_probe` flaky、
+  AI 手刹与 `mountain_road` 实机观感、装饰密度实机掉帧、触屏按钮 / 多指 / 倒计时遮挡目检。

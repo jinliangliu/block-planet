@@ -22,7 +22,9 @@ signal journal_changed
 signal boat_unlocked(boat_id: String)
 
 const DATA_PATH := "res://data/boating/boats.json"
-const JOURNAL_PATH := "user://boats.json"
+## D-086：不再是 const。无槽时按 Profile.slot_dir() 派生回旧根路径
+## "user://boats.json"；建槽后落到 user://profiles/<id>/，切槽即重算并重载。
+var JOURNAL_PATH: String = "user://boats.json"
 
 ## 出海距离分带（米；D-062 P1 起 1 格 = 1 m，格距离即米，HUD 与探针都读这两个阈值）。
 const NEAR_MAX_M := 100.0
@@ -62,8 +64,11 @@ var input_suspended := false
 
 func _ready() -> void:
 	load_data()
+	_refresh_path()
 	_load_journal()
 	_grant_default_boat()
+	if Profile != null:
+		Profile.slot_changed.connect(_on_slot_changed)
 
 
 func _exit_tree() -> void:
@@ -218,6 +223,21 @@ func set_fuel_of(boat_id: String, liters: float) -> void:
 	fuel[boat_id] = clampf(liters, 0.0, cap)
 	journal["fuel"] = fuel
 	_save_journal()
+
+
+## D-086：路径随档案槽重算（无槽逐字节等于旧根路径）。
+func _refresh_path() -> void:
+	if Profile != null:
+		JOURNAL_PATH = Profile.slot_file("boats.json")
+
+
+## 换槽等价于重新开局：换路径 → 重载内存态 → 补发默认木筏，与 _ready() 尾部
+## 三行严格一致。只重跑 _load_journal() 会让新槽「一艘船都没有」。
+## 注意别误引 FishingSystem 的同名 _load_journal()——两者数据源与形状不同。
+func _on_slot_changed(_id: String) -> void:
+	_refresh_path()
+	_load_journal()
+	_grant_default_boat()
 
 
 func _load_journal() -> void:

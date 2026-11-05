@@ -220,9 +220,11 @@ static func _build() -> void:
 			"goal": {"type": "count", "key": "race_new_record", "count": 1},
 			"reward": {"item": 204, "count": 4},
 		},
+		# key 刻意保留旧名：Progress 计数键改名会让旧存档里的完成进度失效，
+		# 本轮只反转 clean 的判据（手刹 → 不出界），不迁移既有任务进度。
 		{
 			"id": "q_race_wetland_clean", "category": Category.QUEST, "prerequisite": "q_race_first",
-			"title": "湿地不拉手刹", "desc": "在「沼泽穿越」赛道比赛中，全程不使用手刹并完成比赛。",
+			"title": "湿地不出界", "desc": "在「沼泽穿越」赛道比赛中，全程保持在路面内完成比赛。",
 			"goal": {"type": "count", "key": "race_clean_wetland_cross", "count": 1},
 			"reward": {"item": 204, "count": 5},
 		},

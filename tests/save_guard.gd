@@ -36,6 +36,11 @@ const EXTRA_FILES := [
 	# U-9：飞行一次性教学提示进度（座舱「低头看 3D 仪表台」）。任何会真实
 	# 起飞到 15 m 以上的探针都可能触发它并新建本文件，必须纳入隔离。
 	"user://flight_teaching.json",
+	# D-086：racing_probe 的临时记录文件。原先既不在 EXTRA_FILES 也不在回归
+	# 兜底清单里，rc=139 崩在 :236-239 之间就会留残 file → 下一次 diff -r 报假
+	# DIFF。登记在此（按 D-010 逐字节还原），回归脚本另有不枚举文件名的兜底。
+	# 注意：不改 racing_probe.gd 本身。
+	"user://race_records_probe.json",
 ]
 
 static var _progress := ""
@@ -97,6 +102,8 @@ static func restore_profiles() -> void:
 
 
 ## 递归读取目录下全部文本文件（路径 -> 文本）。存档都是小 JSON，量级几十份。
+## D-086：槽目录里同样会有 race_replay.jsonl（JSON Lines）与 *.tmp 中间文件；
+## 本函数按纯文本整文件读写、不解析也不改行尾，JSONL 因此也是逐字节还原。
 static func _read_tree(dir_path: String) -> Dictionary:
 	var out: Dictionary = {}
 	var dir := DirAccess.open(dir_path)

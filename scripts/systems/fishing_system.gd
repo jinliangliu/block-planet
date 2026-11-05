@@ -43,7 +43,9 @@ enum State {
 const DATA_ROOT := "res://data/fishing/"
 const SPOTS_PATH := DATA_ROOT + "spots.json"
 const FISH_PATH := DATA_ROOT + "fish.json"
-const JOURNAL_PATH := "user://fishing_journal.json"
+## D-086：不再是 const。无槽时按 Profile.slot_dir() 派生回旧根路径；
+## 建槽后落到 user://profiles/<id>/，切槽即重算并整体重载内存态。
+var JOURNAL_PATH: String = "user://fishing_journal.json"
 
 ## 等待咬钩：基础时长 + 该水层最难那条鱼的难度 × 系数。
 const WAIT_BASE := 2.5
@@ -135,10 +137,13 @@ func _ready() -> void:
 	gear = FishingGear.new()
 	teaching = FishingTeaching.new()
 	load_data()
+	_refresh_path()
 	_load_journal()
 	_refresh_gear_unlocks()
 	if Progress != null:
 		Progress.quest_claimed.connect(_on_quest_claimed)
+	if Profile != null:
+		Profile.slot_changed.connect(_on_slot_changed)
 
 
 func _exit_tree() -> void:
@@ -734,7 +739,28 @@ func session_info() -> Dictionary:
 	}
 
 
-# ────────────────────────── 日志（user://fishing_journal.json） ──────────────────────────
+# ────────────────────────── 日志（按槽派生的 fishing_journal.json） ──────────────────────────
+
+## D-086：路径随档案槽重算。无槽时 Profile.slot_file() 逐字节产出旧根路径
+## "user://fishing_journal.json"，有槽时落到 user://profiles/<id>/。
+func _refresh_path() -> void:
+	if Profile != null:
+		JOURNAL_PATH = Profile.slot_file("fishing_journal.json")
+
+
+## 换槽 = 换路径 + 整体重载内存态。_load_journal() 里的 journal = {...} 是全文件
+## 唯一的 Dictionary 整体替换（其余都是 journal["key"] = ... 原地 mutate），因此
+## 任何缓存过 journal / journal["records"] / record_of() 子字典的旧引用都会在此刻
+## 失效——这正是下一批「钓鱼收集册」要依赖的语义，别把它改成原地清空。
+## 不额外 _save_journal()：每次改动都已即时落盘（见各 _save_journal 调用），换槽
+## 时没有待刷盘的脏态，多写一次只会在 create_slot 这类「未选中任何槽」的事件里
+## 制造一次无谓写盘。也刻意不重跑 _refresh_gear_unlocks()：slot_changed 是在
+## Progress._load() 之前 emit 的，此刻 Progress 还挂着上一槽的已领任务，重跑会把
+## A 槽解锁的渔具误授进 B 槽（新槽的 gear 列表应以该槽 journal 为准）。
+func _on_slot_changed(_id: String) -> void:
+	_refresh_path()
+	_load_journal()
+
 
 func _load_journal() -> void:
 	journal = {"version": 1, "records": {}, "gear": [], "lessons_seen": [], "replay": [],

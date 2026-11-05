@@ -3,7 +3,9 @@ extends CanvasLayer
 ## 竞速教学弹窗（首次比赛 / 首次过检查点 / 首次完圈时各弹一次）。
 ## 已读进度落盘 user://race_teaching.json —— 教学只打扰一次，之后安静让位。
 
-const SAVE_PATH := "user://race_teaching.json"
+## D-086：按槽派生。每场由 race_scene 新建、_ready() 重读盘 → 只需路径派生，
+## 不必连 slot_changed（弹窗活不过一场比赛，不可能跨槽存活）。
+static var SAVE_PATH: String = "user://race_teaching.json"
 
 ## 关掉后不再排队/弹出任何教学（无头探针与自检用，避免弹窗冻结比赛）。
 var enabled := true
@@ -16,7 +18,14 @@ var _body: Label
 var _built := false
 
 
+## D-086：读写入口现算路径；无槽时逐字节等于旧根路径。
+static func _refresh_path() -> void:
+	if Profile != null:
+		SAVE_PATH = Profile.slot_file("race_teaching.json")
+
+
 func _ready() -> void:
+	_refresh_path()
 	layer = 12
 	visible = false
 	_seen = _load_seen()
@@ -26,6 +35,7 @@ func _ready() -> void:
 
 
 func _load_seen() -> Dictionary:
+	_refresh_path()
 	if not FileAccess.file_exists(SAVE_PATH):
 		return {}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
@@ -37,6 +47,7 @@ func _load_seen() -> Dictionary:
 
 
 func _save_seen() -> void:
+	_refresh_path()
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f == null:
 		return

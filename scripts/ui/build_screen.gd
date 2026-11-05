@@ -21,7 +21,9 @@ extends Control
 ## 经济：进阶零件花绿宝石解锁（PartUnlocks + 玩家库存，D-032 Phase 3c）。
 signal test_fly_requested(blueprint: Blueprint)
 
-const BLUEPRINT_PATH := "user://blueprint.json"
+## D-086：按槽派生。探针以 BuildScreen.BLUEPRINT_PATH 做类级读取
+## （build_screen_probe.gd 共 6 处），因此必须是 static var 而非实例 var。
+static var BLUEPRINT_PATH: String = "user://blueprint.json"
 const LAYER_RANGE := 4          ## 建造层可调范围 [-4, 4]
 const PLATFORM_CELLS := 16      ## 平台半径（格）
 const ORBIT_MIN := 6.0
@@ -93,9 +95,17 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
+## D-086：每次 open/close/保存都重读重写，故在入口现算路径即可；无槽时
+## 逐字节等于旧根路径 "user://blueprint.json"。
+static func _refresh_path() -> void:
+	if Profile != null:
+		BLUEPRINT_PATH = Profile.slot_file("blueprint.json")
+
+
 func open() -> void:
 	if visible:
 		return
+	_refresh_path()
 	# 读档：没有存档则从默认可飞套件开局（与解锁种子一致）。
 	var bp := Blueprint.load(BLUEPRINT_PATH)
 	if bp == null or bp.parts.is_empty():
@@ -117,6 +127,7 @@ func open() -> void:
 func close() -> void:
 	if not visible:
 		return
+	_refresh_path()
 	# P2-14：保存失败必须让玩家知道（静默丢失 = 儿童用户「我的飞机没了」）。
 	if not editor.save(BLUEPRINT_PATH):
 		_set_status("自动保存失败：无法写入存档文件。", true)
@@ -511,7 +522,8 @@ func _try_buy(id: String) -> void:
 			_player.inventory.consume_item(ItemTypes.EMERALD, int(res.get("spent", 0)))
 		_selected_id = id
 		# P2-14：解锁落盘失败要提示——否则玩家重启后发现还得再买一次。
-		if not _unlocks.save():
+		# D-086：注入按槽路径，别让 _unlocks.save() 回退到根档。
+		if not _unlocks.save(Profile.slot_file("unlocks.json")):
 			_set_status("解锁保存失败：重启后可能需要重新购买。", true)
 		_set_status("已解锁 %s！" % data.display)
 	else:
@@ -528,6 +540,7 @@ func _emeralds() -> int:
 
 
 func _on_save_clicked() -> void:
+	_refresh_path()
 	if not editor.save(BLUEPRINT_PATH):
 		_set_status("保存失败：无法写入存档文件。", true)
 		return
@@ -541,6 +554,7 @@ func _on_test_fly() -> void:
 		var first := String(errors[0]) if errors.size() > 0 else "未知"
 		_set_status("飞机不完整（%s）：%s" % [first, _hint_for(first)], true)
 		return
+	_refresh_path()
 	if not editor.save(BLUEPRINT_PATH):
 		_set_status("保存失败：无法写入存档文件，本次试飞不会保留蓝图。", true)
 	close()
