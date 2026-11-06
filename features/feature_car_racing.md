@@ -367,6 +367,7 @@ vehicle_id / position[3] / player），但格式是 **JSONL 而非 CSV**，只�
 | `tests/racing_probe.gd` | **182** | 赛道几何（周长/采样/地形分段/检查点/**最小曲率半径**/**中心线不自交**/waypoints 模式/坏数据回落）/ 门平面过门与圈数 / 名次排序 / 记录读写与破纪录 / AI 追线与犯错与**配速归一** / CarPhysics 地形与燃料 / **手刹漂移** / 选择器卡片数与赛道数一致 | `RACING_TEST_OK` |
 | `tests/race_touch_probe.gd` | 38 | 触屏层（自动油门 / 刹车互斥 / 按住语义 / 两个动作信号 / 面板让位） | `RACE_TOUCH_TEST_OK` |
 | `tests/track_decor_probe.gd` | **44** | 主题装饰（6 主题色盘 / 9 条赛道组数 2~10 且实例 >0 / 离中心线 ≥ `half_width+KERB_WIDTH+2.9` / 不投影 / 确定性 / 重复 build 不残留）+ 红白路肩 10 条（节点唯一 / 顶点数 8×size / 红白都存在 / 内外沿偏移 / 高于路面 / 亮度差 ≥0.05） | `TRACK_DECOR_TEST_OK` |
+| `tests/race_result_probe.gd` | **30** | 结算屏留存闭环（参与奖 / 解锁进度 X/N / 下一目标 / 🎉 解锁时刻差集 / 最快圈速榜 / `unlock_hint()` 逐字节不变 / `submit_result()` 原 4 键 / 旧存档缺字段兜底 / 全解锁 / **UI 与数据双层幂等** / 按槽隔离 / 三按钮热区与无第四个 CanvasLayer / 零 DIFF） | `RACE_RESULT_TEST_OK` |
 
 > 上表数字是**运行时 PASS 行数**（含探针里按赛道/载具展开的循环），不是
 > `_check(` 的静态计数；本轮新增断言后的总行数由主理人统一回归时复测。

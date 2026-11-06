@@ -417,6 +417,9 @@ func _finalize() -> void:
 		player.finish_time,
 		player.is_clean(),
 		player.lap,
+		# P0-1 结算幂等令牌：赛道 id + 本场景实例 id（每次 reload_current_scene
+		# 都不同）。刻意不用 _tick——它每帧自增且重开清零，会撞车。
+		"%s|%s" % [String(_track_def.get("id", "")), str(get_instance_id())],
 	)
 	_log("race_finish")
 	_hud.banner("冲线！第 %d 名" % player.rank, Color(1.0, 0.90, 0.40))

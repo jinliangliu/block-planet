@@ -300,8 +300,12 @@ func _tick_reel(delta: float) -> void:
 		_info_label.add_theme_color_override("font_color", WARN_COLOR)
 	else:
 		_info_label.add_theme_color_override("font_color", BODY_COLOR)
-	_drag_label.text = "卸力 %.1f / %.1f（← → 调整）" % [
-		float(_reel_state.get("drag", 0.0)), float(_reel_state.get("drag_max", 2.0))]
+	# D-087 §7 欠账 A：此前每帧无条件覆写成「← → 调整」，把触屏专用的
+	# 「用下方按钮调整」冲掉，而下方明明有按钮。改为与 _build_reel_stage
+	# 共用同一 _drag_hint()，两处不再漂移。
+	_drag_label.text = "卸力 %.1f / %.1f%s" % [
+		float(_reel_state.get("drag", 0.0)), float(_reel_state.get("drag_max", 2.0)),
+		_drag_hint()]
 	if FishingSystem.state != FishingSystem.State.REELING:
 		_finish_reel()
 
@@ -441,13 +445,21 @@ func _build_wait_stage() -> void:
 	_info_label.text = "浮标一动不动，再等等。"
 
 
+## 卸力提示后缀（D-087 §7 欠账 A）：触屏用下方按钮、键盘用 ← →。
+## _build_reel_stage() 与 _tick_reel() 共用，避免每帧覆写冲掉触屏文案。
+func _drag_hint() -> String:
+	if DisplayServer.is_touchscreen_available():
+		return "（用下方按钮调整）"
+	return "（← → 调整）"
+
+
 func _build_reel_stage() -> void:
 	var fish := FishingSystem.get_fish(FishingSystem.reel_state().get("fish_id", ""))
 	# 触屏没有键盘，而卸力是决定断线/跑鱼的核心机制——此前界面上写着「← → 调整」
 	# 但手机根本按不出来（M9 钓鱼完善）。
 	var touch := DisplayServer.is_touchscreen_available()
 	_subtitle.text = "第四步：鱼咬钩了！按住收线，鱼挣扎时松手放线。"
-	_drag_label.text = "卸力 ——" + ("（用下方按钮调整）" if touch else "（← → 调整）")
+	_drag_label.text = "卸力 ——" + _drag_hint()
 	_stage_box.add_child(_fish_bar)
 	_stage_box.add_child(_progress_bar)
 	_stage_box.add_child(_tension_bar)
@@ -587,7 +599,9 @@ func _build_unlock_card(fish: Dictionary) -> void:
 	vbox.add_child(meta)
 
 	var kept := Label.new()
-	kept.text = "已收入生物图鉴（按 F2 查看）"
+	# D-087 §7 欠账 B：静态生物图鉴（F2）没有玩家态，别把孩子引向查不到
+	# 自己记录的百科；真正记着这次钓获的是鱼类收集册。
+	kept.text = "已记入鱼类收集册（钓具界面可查看）"
 	kept.add_theme_font_size_override("font_size", 14)
 	kept.add_theme_color_override("font_color", OK_COLOR)
 	kept.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

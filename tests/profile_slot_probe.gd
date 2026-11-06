@@ -196,6 +196,8 @@ func _run() -> void:
 	_check(BoatSystem.owns("fishing_boat"), "D5 槽A：小渔船已拥有")
 	var a_events := RaceReplayLog.read_events()
 	_check(a_events.size() == 1, "D6 槽A：回放日志 1 条")
+	# P0-1：结算屏视图是 _records 的纯派生，换槽后必须一并换底。
+	var a_view := RaceSystem.build_result_view("desert_ring", {})
 	# 缓存 A 槽 journal 的子字典引用，供换槽后验证「整体替换」语义。
 	var stale: Dictionary = FishingSystem.record_of("clownfish")
 
@@ -208,6 +210,11 @@ func _run() -> void:
 	_check(not BoatSystem.owns("fishing_boat"), "D11 切B：A 的小渔船未串入")
 	_check(not RaceSystem.is_unlocked("wins:1"), "D12 切B：wins:1 未解锁")
 	_check(RaceReplayLog.read_events().is_empty(), "D13 切B：回放日志为空")
+	# P0-1 按槽隔离：A 槽的圈速与解锁进度绝不串进 B 槽的结算屏。
+	var b_view := RaceSystem.build_result_view("desert_ring", {})
+	_check(String(b_view["best_lap_text"]) == "--:--.--"
+		and int(b_view["unlocked_count"]) < int(a_view["unlocked_count"]),
+		"D21 切B：结算屏不显示 A 槽的圈速 / 解锁进度")
 
 	_write_slot_state("tuna", "race_finish", "speedboat")
 	Progress.set_slot(id_sa)
@@ -221,6 +228,11 @@ func _run() -> void:
 	if back_events.size() > 0:
 		action_ok = String((back_events[0] as Dictionary).get("action", "")) == "race_start"
 	_check(action_ok, "D19 切回A：回放内容仍是 A 的事件（B 未串入）")
+	# P0-1 按槽隔离（回程）：切回 A 后结算屏恢复 A 槽的圈速与解锁进度。
+	var back_view := RaceSystem.build_result_view("desert_ring", {})
+	_check(String(back_view["best_lap_text"]) == String(a_view["best_lap_text"])
+		and int(back_view["unlocked_count"]) == int(a_view["unlocked_count"]),
+		"D22 切回A：结算屏恢复 A 槽数据（B 槽未污染）")
 
 	# 换槽后 journal 被整体替换的反向对照：改动新对象不能影响旧缓存引用。
 	var fresh: Dictionary = FishingSystem.record_of("clownfish")

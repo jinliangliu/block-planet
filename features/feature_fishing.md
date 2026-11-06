@@ -235,12 +235,15 @@ stats: casts / catches / escapes / releases
 **未按此实现**：改为 JSON 对象数组、无 position 列、上限 300 条。
 放生只加 `released` 计数与任务计数，**不删图鉴记录**（钓到过就是钓到过）。
 
-### 7.2 与生物图鉴的关系（任务书 §9 未落地）
+### 7.2 与生物图鉴的关系（D-087：改由独立收集册承接）
 
-fish.json 的 id 与图鉴条目 id 一致，但 **bestiary 数据侧没有 `catchable`
-字段、图鉴 UI 也没有钓鱼图标**——「新鱼种解锁卡片」与钓获时间/钓点/钓具记录
-都存在**钓鱼日志**里（FishingUI 消费），未接入 BestiaryData。fish.json 注释里
-「图鉴侧标 catchable:true」的表述与 data/bestiary 实际内容不符，以代码为准。
+fish.json 的 id 与图鉴条目 id 一致，但静态 `BestiaryData` / `BestiaryUI` **没有玩家状态**：
+bestiary 数据侧没有 `catchable` 字段、图鉴 UI 也没有钓鱼图标，fish.json 注释里
+「图鉴侧标 catchable:true」的表述与 `data/bestiary` 实际内容不符，以代码为准。
+D-087 起钓获数 / 最大重量 / 首次钓点由按槽的 `journal["records"]` 承载，在
+`FishingCollectionUI` 里按 4 海域 × 5 格回看；解锁卡片与 HUD Toast 的「已收入生物图鉴」
+同步改为「已记入鱼类收集册」。**收集册没有塞进任务面板**：信息模型不同（目标态进度条
+vs 记录态 20 格），且任意 `quest_claimed` 都会触发任务面板整页刷新，挂 20 格会丢滚动位置。
 
 ### 7.3 教学（teaching.json，5 课）
 
@@ -283,6 +286,9 @@ fish.json 的 id 与图鉴条目 id 一致，但 **bestiary 数据侧没有 `cat
 | 地图选择器 | 四大洋球面 3D 小鱼标记（D-044）/ 图例 🎣 / 介绍页「去钓鱼」按钮，三者判据同源（FishingSystem 钓点表）→ `hud.open_fishing_gear(atlas_region)` |
 | 出海 | 船上「去钓鱼」→ `hud.open_fishing_gear_boat(atlas_region, 距港距离)`：按距离定位唯一可下竿点，其余置灰标注「需航行 X m」 |
 | 教学重看 | 钓具选择界面「重看教学」 |
+| 鱼类收集册（D-087） | 钓具界面「◆ 鱼类收集册 N / 20」按钮 → 独立模态，4 海域 × 5 格，ESC / ✕ 双关闭；单海域集齐可领称号 + 徽章 + 绿宝石 ×3，全 4 海域集齐另有大奖 |
+
+收集册与钓具界面**互斥**：点入口先 `close_fishing_gear()`（走 `_close()` emit）再打开收集册，关闭后按需重开钓具；`_set_player_frozen(bool)` 是布尔非计数，任意时刻只有一个 `is_open()` 为真。展示数据一律在 `open()` / `_refresh()` 当场调 API 读标量，不缓存 `journal`、子字典或 `record_of()` 返回引用（换槽时 `journal` 会被整体替换）。
 
 渔猎界面（FishingUI）四阶段：选饵（显示目标鱼与适配度）→ 配坠（预告抛投
 距离/可达水层）→ 抛投（力量条蓄力）→ 收线（鱼位置/安全区/张力/进度 +
@@ -297,6 +303,7 @@ fish.json 的 id 与图鉴条目 id 一致，但 **bestiary 数据侧没有 `cat
 | `tests/fishing_probe.gd` | **102 断言**：四份数据加载自检（16 钓点 / 20 鱼 / 岸边钓点过滤 / 默认钓具）、纯计算（抛投距离公式与水层边界、饵适配度、铅坠惩罚、装配校验、咬钩门槛）、等咬钩超时（`NO_BITE_FACTOR` 单帧大步长分支）、完整钓获（单鱼种池确定性：等咬钩 → 收线 → 结算，验重量区间、日志 records/replay/stats、Progress 计数折算）、收线三败局（饵不对没鱼 / 卸力最大断线 / 卸力全松跑鱼）、放生与教学、状态机边界（坏钓点 / 缺渔轮 / 非等待态 / 非收线态）、**K 段可钓性（D-083）**：4 个岸钓点最猛鱼 fight ≤ 8 / 入门套装能上 fight 8、上不了 fight 9（正反一对）/ `cast_preview` 报鱼名与 fight 一致 / 空层如实报空 / `line_short` 与线强度严格一致 |
 | `tests/boat_probe.gd` | 出海钓点鱼池非空、距港距离分带（D-042 接线） |
 | `tests/life_probe.gd` / `globe_marker_probe.gd` | 球面小鱼标记（D-044）存在性与计数 |
+| `tests/fishing_collection_probe.gd` | **39 断言（D-087）**：4 海域 × 5 的数据基线 / 按 `region_id` 分组（钉 `spot_ids` 12 处不一致）/ 空 journal 不误发 / 只集齐 3/4 不误发全收集大奖 / 发奖幂等 / 换槽双向隔离 / `record_of()` 新对象反向对照 / 不关界面换槽后 UI 现取刷新 / 成员不缓存玩家态容器 / 按钮三态 / 钓点中文转译 / 两个同名小丑鱼可区分 / SaveGuard 零 DIFF / 模态互斥与早退链 / 触屏文案与解锁卡片 |
 
 > D-010 合规：`fishing_probe` 开局 `SaveGuard.snapshot()`（progress/settings/
 > 竞速三件套 + Progress 内存态），钓鱼日志单独快照原文本；收尾还原文本 +
@@ -304,8 +311,9 @@ fish.json 的 id 与图鉴条目 id 一致，但 **bestiary 数据侧没有 `cat
 > `FishingSystem._exit_tree` 会把探针改乱的日志再写一遍盘），`_exit_tree`
 > 安全网 + 120 s 看门狗兜底；断言全部走「基线差分」，真实存档里已有什么
 > 都不影响结论。
-> 回归基线：日常无头 **54 探针** / 验收全量 **66 探针**
-> （`tmp/run_regression.sh` / `tmp/run_regression.sh full`）。
+> 回归基线（D-087 后）：日常无头 **56 探针 / 2463 PASS** / 验收全量 **68 探针**
+> （`tmp/run_regression.sh` / `tmp/run_regression.sh full`）。本环境单次 600 s
+> 跑不完 56 个探针，日常档需按 ~10 个一组分段串行（每段各自备份 / 还原 / 零 DIFF）。
 
 ---
 
@@ -318,8 +326,8 @@ fish.json 的 id 与图鉴条目 id 一致，但 **bestiary 数据侧没有 `cat
    计数折算；已登记进 `tmp/run_regression.sh` 日常档（42 → 43 探针）。
    断线用例借任务锁装备 `heavy_reel`（drag_max=5 时逃逸速率归零，保证
    断线先于跑鱼的确定性）——发放走 `grant_gear()` 公有接口，不验解锁流。
-2. **图鉴集成未落地**：任务书 §9 的 `catchable` 字段 / 图鉴钓鱼图标 / 解锁
-   卡片入图鉴均未实现，钓获记录只在钓鱼日志（§7.2）。
+2. ~~图鉴集成未落地~~ —— **D-087 已由独立收集册承接**：静态 `BestiaryUI` 无玩家状态，故没有在任务书 §9 的 `catchable` 字段 / 图鉴钓鱼图标上硬叠加，而是新建 `FishingCollectionUI`。钓获记录落在按槽的 `journal["records"]`，可回看 `catch_count / max_weight_kg / first_caught_spot` 与四大洋集齐徽章；解锁卡片与 HUD Toast 的「已收入生物图鉴」同步改为「已记入鱼类收集册」。
+   **遗留**：`inventory` 不落盘，绿宝石只是本局内存态；可回看的持久回报是 `stat_of("bundle_*")` 徽章与收集册点亮，另开票。
 3. **`wind_enabled` 式的统一设置面板不覆盖钓鱼**：钓鱼无面板化设置项
    （教学重看入口在钓具界面内）。
 4. **UI 细节以试玩为准**：力量条手感、安全区宽度（0.18）、张力可视化等

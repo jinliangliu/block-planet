@@ -3764,3 +3764,191 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
   `cockpit_instruments_shot` 复跑）。
 - 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、`life_probe` flaky、
   AI 手刹与 `mountain_road` 实机观感、装饰密度实机掉帧、触屏按钮 / 多指 / 倒计时遮挡目检。
+
+---
+
+## D-087 钓鱼收集册 + 竞速结算屏留存闭环（2026-11-06）
+
+**结论**：钓鱼新增独立模态 `FishingCollectionUI`（复用 HUD 既有层，不新建层）+ 4 个海域
+集齐奖励；竞速结算屏补 5 个「跑完就有收获」元素（最快圈速榜为既有 `layer=10` 的
+`_body` 内屏内 toggle）。两批共用 D-086 的按槽路径与换槽重载，**零新增 `user://`
+存档文件、零新增 `goal.key`、零新增音效、零新增模态层**。全量回归 **56 探针 /
+2463 PASS / 0 FAIL**，6 组分段串行每组 `RESTORED_OK` 零 DIFF。
+
+**背景**：D-086 把 8 份玩家状态按槽隔离，是「一竿之后 / 一局之后」留存闭环的正确性
+前置。此前钓鱼 D-080 / D-083 只做完「一竿之内」——20 种鱼上岸后全塌缩成 `RAW_FISH`、
+图鉴是静态百科、6 个任务一次性；竞速 D-082~D-086 只做完「跑的过程」——第 4 名只有
+一行名次。两条线并行落地，共用 D-086 已固化的 journal 引用语义与 `slot_changed`
+重载，不另造存档层。D-086 §8 的「批次 2」待办即本 ADR，至此结案；其 §2 的引用语义
+约束在本批 §1 逐条兑现。
+
+### 1. 钓鱼：鱼类收集册与四大洋集齐奖励
+
+- **新文件与入口**：`scripts/ui/fishing_collection_ui.gd`（**301 行，全代码搭节点**，
+  **无 `class_name`**）；`scripts/ui/hud.gd:8` 用
+  `const FishingCollectionUIScript := preload(...)` + `var _fishing_collection = null`，
+  照 `profile_picker.gd` 既有范式。**否决规格里建议的 ~~`class_name FishingCollectionUI`~~**：
+  项目铁律（坑 #24）禁止新增 `class_name`，新增后不进
+  `.godot/global_script_class_cache.cfg` 会连带炸掉所有依赖脚本。这个否决的连带成本
+  见 §3 坑 #33。
+
+- **分组键一律用 `region_id`，不用 ~~`spot_ids`~~**：
+
+  | 依据 | 采用 / 否决 | 理由 |
+  |---|---|---|
+  | `fish.json.region_id` | **采用** | 20 种鱼恰好 4 海域 × 5，与「四大洋集齐」一一对应 |
+  | `fish.json.spot_ids` | **否决** | 实测 **12 处**与 `spots.json.fish_pool` 不一致（如大白鲨声明近岸、实际只在远海） |
+  | `spots.json.atlas_region` | **不混用** | int 键，与 `region_id` 是两套体系 |
+
+  `first_caught_spot` 存的是 **spot_id**，须经 `get_spot().name_zh` 转译；
+  `pacific_clownfish` 与 `clownfish` 中文名都叫「小丑鱼」，格子**必须带海域前缀**区分，
+  否则 20 格里会出现两个同名格。
+
+- **`FishingSystem` 只新增 5 个公有 API**：`bundle_ids()` / `bundle_complete()` /
+  `bundle_claimed()` / `all_bundles_complete()` / `claim_bundle()`。
+  **不公开 `save()`、不改 `_load_journal()` 的整体替换语义、不动 `_on_slot_changed()`**——
+  D-086 §2 的地基一字未动。
+
+- **幂等标记的准确表述**（修正此前措辞）：「完成判定」从 `records` **现算**；「已领取」
+  是一次性事件，**必须落标记**才能跨会话幂等。标记复用既有 `journal["stats"]` 的
+  `bundle_<region>` 键（`stat_of()` / `_bump_stat()`），**不新增顶层字段、不碰 `Progress`**。
+  按槽落盘、换槽自然归零，无需任何新的存档文件或迁移。
+
+- **奖励形状**：主奖励是**称号 + 徽章 + 收集册永久点亮**——`stat_of("bundle_*")` 既是
+  幂等闸门也是徽章状态，`open()` 现取显示、随 journal 按槽持久可回看。绿宝石
+  **3（单海域）/ 8（全 4 海域）**只作即时惊喜，**Toast 不承诺「永久拥有」**。
+
+  **理由（必须写明）**：实测 `inventory` **不落盘**——`scripts/main.gd:70-72 / :647`
+  只在场景切换时经 `GameState.carried_inventory` 内存携带，`Progress` 里也没有
+  inventory。绿宝石重启即失，若当主奖励会出现「按钮已领取 ✓、宝石却没了」。
+  这是 **D-076 未覆盖的既有边界，本批不修，另开票**（见 §5）。
+
+- **独立模态、不改 `quest_panel.gd`**，依据用现役理由：
+  ① 信息模型不同——任务面板是**目标态进度条**，收集册是**记录态 20 格** +
+  `max_weight_kg` / `first_caught_spot`；
+  ② `hud.gd` 任意 `quest_claimed` 都触发整页 `refresh()`（清空 + 重建），挂 20 格会
+  丢滚动位置并闪烁；
+  ③ 页签栏几何与 **38 px 触摸热区**。
+  ~~「任务面板已按槽隔离、`FishingSystem` 未隔离」~~ 这条旧论据在 **D-086 后已失效**，
+  本 ADR 不引用。
+
+- **不叠加模态**：入口先 `close_fishing_gear()` 再 `open_fishing_collection()`；
+  `_set_player_frozen(bool)` 是**布尔非计数**，两个模态同时开会在一方关闭时直接解冻。
+  `fishing_gear_ui.gd` 的 `close()` 只置 `visible=false`、**不 emit `closed`**，因此必须走
+  `_close()`。HUD 早退链插入收集册 ESC 分支且**排在钓具分支之前**，
+  `_any_overlay_open()` 纳入收集册。
+
+- **现取约束（D-086 §2 落地）**：UI 成员**只持控件引用**，不跨 `open()` 缓存 `journal` /
+  子字典 / `record_of()` 返回引用——`_load_journal()` 是全文件唯一整体替换，换槽后
+  旧引用会静默指向旧槽对象。
+
+- **并入两处既有欠账**：触屏 REELING 的 `_drag_label.text` 每帧覆盖
+  「（用下方按钮调整）」（抽 `_drag_hint()` 供两处共用）；`fishing_ui.gd` 与 `hud.gd`
+  两处「已收入生物图鉴」改为「**已记入鱼类收集册（钓具界面可查看）**」——静态
+  Bestiary 无玩家状态，原文案是空头支票。
+
+### 2. 竞速：结算屏留存闭环
+
+**现状**：`race_result_ui.gd` 只有「第 N 名 / 共 M 位」一行，冠军才有「🏆 冠军！」，
+第 2/3/4 名整屏零收获反馈。本批补 5 个元素：
+
+| # | 元素 | 数据来源 / 落点 |
+|---|---|---|
+| ① | 参与奖 | 读 `Progress.counters["race_finished_any"]`；`submit_result()` 的 `Events.race_finished.emit` 在 `show_results()` **之前**，累计值已含本场 |
+| ② | 解锁进度 X/N | `entry_of()` 按槽派生 |
+| ③ | 下一目标「还差 N 场」 | 同上，与 ② 同一份数据 |
+| ④ | 🎉 解锁时刻 | `submit_result()` 内**在 `RaceRecords.apply()` 之前**取 before 快照差集，随 `outcome["unlocked_now"]` 返回，**不落盘** |
+| ⑤ | 最快圈速榜 | `RaceResultUI` 既有 `layer=10` 的 `_body` 内**屏内 toggle**；~~第四层 `CanvasLayer` / 子模态 / `_set_player_frozen`~~ 一律不建 |
+
+- **幂等闸必须是 `RaceSystem` 成员级**：`_last_submit_token` / `_last_outcome`
+  （`:54-55`）。写在函数体内会每局重置、幂等闸永不触发。`race_token` 用
+  `"%s|%s" % [track_id, str(get_instance_id())]`（**不用每帧自增的 `_tick`**，否则
+  同一局每帧 token 都不同）；默认 `""` 保证既有调用点行为不变；`_on_slot_changed()`
+  换槽清空（`:422-423`），避免 A 槽 token 拦下 B 槽同赛道提交。
+  `show_results()` 三参签名、`unlock_hint()` 逐字节、`submit_result()` 原 4 键**全部不动**。
+
+- **全部数值按槽派生**（`entry_of()` / `Progress.counters`），**不新增 `user://` 文件、
+  `goal.key`、Sfx 调用、绿宝石 / 零件发放**。D-079 已做到任何名次都有正向收尾音、
+  无失败音，本批**不碰 `sfx.gd`**。
+
+- **事实订正（沿用 D-086 §7 的只读复核）**：~~「倒计时与完赛滑行两处仍写死
+  `false`」~~ 是 D-086 规格笔误，已订正。`race_scene.gd:212` 倒计时是
+  `handbrake = true`（发车钉车，刻意），`:231` 完赛滑行才是 `false`；`:223` / `:238`
+  是 D-086 新加的透传。两处**均非结算路径，本次刻意不动**。
+
+### 3. 本次踩的坑（都可复用）
+
+**坑 #33：`preload` 实例化出的对象在探针里是无类型 Variant，接返回值不能用 `:=`。**
+
+`tests/fishing_collection_probe.gd:298/304/309/318` 原本写
+`var x := _ui.claim_state(...)`，而 `var _ui = null` 无类型（因 §1 禁止新增
+`class_name`，只能靠 preload），GDScript 报 4 个
+`Parse Error: Cannot infer the type of ... variable`。修法：显式标注
+`var x: Dictionary = ...` / `var x: String = ...`（UI 侧签名是
+`claim_state() -> Dictionary` / `cell_text() -> String`）。
+**这是「禁止新增 `class_name` + preload 范式」的连带成本：凡在无类型实例上取返回值，
+一律显式标类型，不能用 `:=` 推断。**
+
+**坑 #34：Parse Error 是 D-010 的间接污染源（最危险的一条）。**
+
+探针场景脚本解析失败 → `_ready()` 不执行 → `get_tree().quit()` 永不调用 → 回归脚本内
+`timeout 600` 才杀它 → 整轮全量被拖到工具时限被 SIGTERM → **还原段未执行** →
+`user://` 残留探针数据。本次残留：`fishing_journal.json` 被换成 20 条假记录（含
+`bundle_all:1`）、`progress.json` 缺失、多出「收集册A / 收集册B」两个测试槽。
+**注意因果链**：一个纯语法错误，最终表现为「玩家真实存档被污染」，中间没有任何一步
+报错说「还原失败」——这正是 D-010 要求每个探针自带 `snapshot()/restore()` +
+`_exit_tree` 安全网 + 看门狗的原因。
+
+修法与善后：先与 10-31 历史备份 `tmp/user_backup2` **逐字节比对确认干净基线**，
+**只移动不删除**地移走残留槽（`tmp/user_profiles_probe_residue*`），用基线覆盖根文件，
+验证零 DIFF。不直接 `rm`，因为无法一眼分辨槽目录里哪些是玩家真档。
+
+**`tmp/run_regression.sh` 加固（同一根因的第二处）**：原开头
+~~`rm -rf tmp/user_backup tmp/user_real_profiles`~~ 在中断时会把上一轮未还原的
+**真实玩家档案**一并删除。改为**先检测 `tmp/user_real_profiles` 并移回 `user://`**
+（`user://profiles` 已存在则另存 stale、**绝不删**），再备份 / 移出。该文件仍被
+`.gitignore:11 tmp/` 忽略，按 **D-086 §6 裁决不入库**。
+
+**单次 600 s 跑不完 56 探针**：本环境每个 Godot 进程启动约 **25 s**，全量连续跑两次
+都在第 **55 / 24** 个探针被 SIGTERM。改为 **6 组分段串行**（10/10/10/10/10/6），
+每组各跑完整「备份 → 移出 `profiles/` → 逐探针 → `diff -r` 还原 →
+`RESTORED_OK`」，互不依赖且每组独立可判。分段不是为了提速，是为了让**每组都有
+自己的还原点**，把坑 #34 的爆炸半径限制在一组内。
+
+### 4. 验证（已实测）
+
+| 项 | 结果 |
+|---|---|
+| 钓鱼 `ONLY="fishing_collection_probe"` 单跑 | **39 PASS / 0 FAIL** |
+| 竞速相关 7 探针串行 | `race_result_probe` **30**、`profile_slot_probe` **51**、`racing_probe` **182**、`race_touch_probe` **38**、`track_decor_probe` **44**、`fishing_probe` **102**、`boat_probe` **27**，全 0 FAIL |
+| 最终全量 | **56 探针 / 2463 PASS / 0 FAIL** |
+| 6 组分段 | **200 / 870 / 592 / 227 / 352 / 222** |
+| `user://` 还原 | 每组 `[user://] RESTORED_OK` 零 DIFF；最终 `diff -r` 亦零 DIFF、无残留 Godot 进程、无未还原移出目录 |
+
+**基线 D-086 的 2392 → 2463 = +71，逐项可解释**：
+
+| 来源 | 增量 |
+|---|---|
+| `profile_slot_probe` 49 → 51 | **+2** |
+| `race_result_probe` 新增 | **+30** |
+| `fishing_collection_probe` 新增 | **+39** |
+| 合计 | **+71** |
+
+**第二层 QA**（防止「全绿但实现走样」）：幂等闸确在成员级且换槽清空、`before` 快照
+在 `apply()` 之前、`show_results()` 三参签名、`unlock_hint()` 函数体**逐字节未动**、
+无新增 `class_name` / `Sfx.play` / `user://` 文件、3 处 `CanvasLayer` 字样全是
+「不新增」注释、两个新探针都自带 `SaveGuard.snapshot()/restore()` + `_exit_tree`
+安全网 + 看门狗。
+
+已知良性 `rc=139`（断言全 PASS 之后的 Vulkan 清理段）。
+
+### 5. 待办
+
+- **`inventory` 不落盘**（D-076 未覆盖的既有边界）：绿宝石只是本局内存态，可回看的
+  持久回报是 `stat_of("bundle_*")` 徽章；要让奖励真正持久需**另开票**。
+- **full 档 12 项窗口截图与真机目检仍待重验**：结算屏变高会改 `race_result.png`，但
+  `racing_shot.gd:106` 只断言采样色数 ≥ 8、非像素 golden；钓鱼收集册 4×5 格与
+  **44 px 热区**需 16:9 / 20:9 目检。
+- **`tmp/run_regression.sh` 参数化后移入 `tools/` 入库**（D-086 §6 已开票）。
+- 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、`life_probe`
+  flaky、AI 手刹与 `mountain_road` 实机观感、装饰密度实机掉帧。

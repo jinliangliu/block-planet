@@ -48,6 +48,12 @@ var pending := {
 ## 从赛道返回主场景后是否直接再开赛道选择器（race_scene 写、main 读后清）。
 var open_selector_on_return := false
 
+## P0-1 结算幂等：同一场比赛（race_scene 传 race_token）重复调用 submit_result()
+## 只提交一次，避免重复写记录 / 重复广播 Events.race_finished / 重复累加任务计数。
+## 两者都是内存态、不落盘；race_token 为空的旧调用点不参与判定，行为逐字节不变。
+var _last_submit_token: String = ""
+var _last_outcome: Dictionary = {}
+
 
 func _ready() -> void:
 	load_data()
@@ -209,6 +215,151 @@ func unlock_hint(unlock: String) -> String:
 	return "已解锁"
 
 
+# ── P0-1 结算屏留存闭环（纯派生，不新增落盘 / 音效 / goal.key）────────
+
+## 当前已解锁的赛道 id 列表。submit_result() 在 RaceRecords.apply() 前后各取一次，
+## 差集就是「本场新解锁」。before 必须在 apply() 之前取：is_unlocked() 读的
+## _records 会被 apply() 就地改写，事后无法还原。
+func _unlocked_track_ids() -> Array[String]:
+	var out: Array[String] = []
+	for item: Variant in _tracks:
+		if not (item is Dictionary):
+			continue
+		var t: Dictionary = item
+		var tid := String(t.get("id", ""))
+		if tid.is_empty():
+			continue
+		if is_unlocked(String(t.get("unlock", "default"))):
+			out.append(tid)
+	return out
+
+
+## 带进度的解锁文案。unlock_hint() 保持逐字节不变（探针钉死它），结算屏用这一条
+## 把「赢 3 场后解锁」变成孩子看得懂的「还差 1 场」。
+func unlock_progress_text(unlock: String) -> String:
+	var u := unlock.strip_edges()
+	if u.is_empty() or u == "default":
+		return "已解锁"
+	var parts := u.split(":")
+	if parts.size() != 2:
+		return "已解锁"
+	var kind := String(parts[0])
+	var target := int(parts[1])
+	var current := 0
+	if kind == "wins":
+		current = RaceRecords.total_wins(_records)
+	elif kind == "record":
+		current = RaceRecords.record_count(_records)
+	else:
+		return "已解锁"
+	var remaining := maxi(target - current, 0)
+	if remaining <= 0:
+		return "已解锁"
+	if kind == "wins":
+		return "还差 %d 场" % remaining
+	return "还差 %d 次破纪录" % remaining
+
+
+## 下一解锁目标：离得最近（remaining 最小）的未解锁赛道；全解锁返回 {}。
+## 并列取 target 小的，再并列优先 wins——孩子先看到「再赢 1 场」最直观。
+func next_unlock_goal() -> Dictionary:
+	var best: Dictionary = {}
+	for item: Variant in _tracks:
+		if not (item is Dictionary):
+			continue
+		var t: Dictionary = item
+		var unlock := String(t.get("unlock", "default"))
+		if is_unlocked(unlock):
+			continue
+		var parts := unlock.split(":")
+		if parts.size() != 2:
+			continue
+		var kind := String(parts[0])
+		var target := int(parts[1])
+		var current := 0
+		if kind == "wins":
+			current = RaceRecords.total_wins(_records)
+		elif kind == "record":
+			current = RaceRecords.record_count(_records)
+		else:
+			continue
+		var cand := {
+			"track_id": String(t.get("id", "")),
+			"name_zh": String(t.get("name_zh", "")),
+			"kind": kind,
+			"current": current,
+			"target": target,
+			"remaining": maxi(target - current, 0),
+			"progress_text": unlock_progress_text(unlock),
+		}
+		if best.is_empty():
+			best = cand
+			continue
+		var cr := int(cand["remaining"])
+		var br := int(best["remaining"])
+		var ct := int(cand["target"])
+		var bt := int(best["target"])
+		var better := cr < br or (cr == br and ct < bt) \
+			or (cr == br and ct == bt and kind == "wins" and String(best["kind"]) != "wins")
+		if better:
+			best = cand
+	return best
+
+
+## 结算屏唯一的数据装配口。**纯读**：不写盘、不 emit、不播音效、不发奖励。
+## 数值全部来自已按档案槽隔离的 _records / Progress.counters，故 D-010 零 DIFF。
+func build_result_view(track_id: String, outcome: Dictionary) -> Dictionary:
+	var unlocked_now: Array[String] = []
+	var raw_unlocked: Variant = outcome.get("unlocked_now", [])
+	if raw_unlocked is Array:
+		for item: Variant in (raw_unlocked as Array):
+			unlocked_now.append(String(item))
+
+	var unlocked_count := _unlocked_track_ids().size()
+	var track_count := _tracks.size()
+	var goal := next_unlock_goal()
+	var entry := entry_of(track_id)
+
+	# 只保留跑过且有有效圈速的赛道，手写选择排序取前 3 快（9 条数据，
+	# 不用 sort_custom/lambda，避免 typed array 与 lambda 的类型告警）。
+	var candidates: Array[Dictionary] = []
+	for item2: Variant in _tracks:
+		if not (item2 is Dictionary):
+			continue
+		var t: Dictionary = item2
+		var e := entry_of(String(t.get("id", "")))
+		var lap := float(e["best_lap_time"])
+		if int(e["total_races"]) <= 0 or lap <= 0.0:
+			continue
+		candidates.append({
+			"name_zh": String(t.get("name_zh", "")),
+			"best_lap_time": lap,
+		})
+	var leaderboard: Array[Dictionary] = []
+	while leaderboard.size() < 3 and not candidates.is_empty():
+		var best_i := 0
+		for i in range(1, candidates.size()):
+			if float(candidates[i]["best_lap_time"]) < float(candidates[best_i]["best_lap_time"]):
+				best_i = i
+		var pick: Dictionary = candidates[best_i]
+		leaderboard.append({
+			"name_zh": String(pick["name_zh"]),
+			"best_lap_text": format_lap(float(pick["best_lap_time"])),
+		})
+		candidates.remove_at(best_i)
+
+	return {
+		"races_total": int(Progress.counters.get("race_finished_any", 0)),
+		"unlocked_count": unlocked_count,
+		"track_count": track_count,
+		"best_lap_text": format_lap(float(entry["best_lap_time"])),
+		"unlocked_now": unlocked_now,
+		"next_goal": goal,
+		"all_unlocked": goal.is_empty(),
+		"leaderboard": leaderboard,
+	}
+
+
 func build_layout(track_id: String) -> TrackLayout:
 	var def := track(track_id)
 	if def.is_empty():
@@ -267,6 +418,9 @@ func _refresh_path() -> void:
 func _on_slot_changed(_id: String) -> void:
 	_refresh_path()
 	load_records()
+	# 换槽后上一场的幂等令牌失效，别让新槽第一场撞上旧令牌。
+	_last_submit_token = ""
+	_last_outcome = {}
 
 
 func load_records() -> void:
@@ -283,11 +437,22 @@ func clear_records() -> void:
 
 
 ## 一场比赛结束后结算：写记录、判破纪录、广播。
-## 返回 {broke_lap, broke_race, entry, first_race}。
+## 返回 {broke_lap, broke_race, entry, first_race, unlocked_now}（前四键保持原样）。
+## race_token 由 race_scene 传入本场唯一值；重复提交同一 token 直接返回缓存，
+## 不重复写盘 / 不重复广播。默认 "" ⇒ 既有无 token 调用点行为逐字节不变。
 func submit_result(track_id: String, vehicle_id: String, rank: int, best_lap: float,
-		total_time: float, clean: bool, laps: int) -> Dictionary:
+		total_time: float, clean: bool, laps: int, race_token: String = "") -> Dictionary:
+	if not race_token.is_empty() and race_token == _last_submit_token:
+		return _last_outcome.duplicate(true)
+	var before := _unlocked_track_ids()
 	var outcome := RaceRecords.apply(_records, track_id, vehicle_id, rank, best_lap,
 		total_time, _now_iso())
+	var after := _unlocked_track_ids()
+	var unlocked_now: Array[String] = []
+	for tid: String in after:
+		if not before.has(tid):
+			unlocked_now.append(tid)
+	outcome["unlocked_now"] = unlocked_now
 	save_records()
 	if bool(outcome["broke_lap"]):
 		new_record.emit(track_id, "best_lap", best_lap)
@@ -296,6 +461,9 @@ func submit_result(track_id: String, vehicle_id: String, rank: int, best_lap: fl
 		new_record.emit(track_id, "best_time", total_time)
 		Events.race_record_beaten.emit(track_id, "best_time")
 	Events.race_finished.emit(track_id, vehicle_id, rank, laps, best_lap, total_time, clean)
+	if not race_token.is_empty():
+		_last_submit_token = race_token
+		_last_outcome = outcome.duplicate(true)
 	return outcome
 
 

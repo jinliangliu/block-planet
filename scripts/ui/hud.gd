@@ -4,6 +4,8 @@ class_name HUD
 ## 桌面环境显示键位提示。
 
 const ProfilePickerScript := preload("res://scripts/ui/profile_picker.gd")
+## 鱼类收集册（D-087）：同样不引入 class_name，由 HUD 以 preload 实例化。
+const FishingCollectionUIScript := preload("res://scripts/ui/fishing_collection_ui.gd")
 
 ## 生命爱心条：5 颗心换算 20 点生命，每颗 4 点。
 const HEART_COUNT := 5
@@ -62,6 +64,16 @@ var _profile_picker = null
 var _fishing_gear: FishingGearUI
 var _fishing_ui: FishingUI
 var _fishing_teaching: FishingTeachingUI
+## 鱼类收集册（D-087）：独立模态，不与三件套叠加；preload 脚本无 class_name，
+## 故用无类型引用（同 _profile_picker）。任意时刻只有一个钓鱼系窗口 is_open()。
+var _fishing_collection = null
+## 最近一次打开钓具界面的上下文（只存标量），供收集册「返回」时原样重开钓具。
+## 刻意由 open_fishing_gear*() 写入，不去读 FishingGearUI 的私有成员。
+var _fishing_gear_atlas := -1
+var _fishing_gear_boat := false
+var _fishing_gear_dist := 0.0
+## 收集册是否由钓具界面进入：true 时关闭后重开钓具，false 时直接解冻回世界。
+var _collection_returning := false
 ## 航海模式界面（D-042）：登船期间可见。
 var _boat_hud: BoatHUD
 ## 赛道选择器（feature_car_racing）：模态窗口，选完切到竞速场景（独立场景）。
@@ -322,6 +334,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _map_selector != null and _map_selector.is_open():
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 			close_map_selector()
+			get_viewport().set_input_as_handled()
+		return
+	# 鱼类收集册（D-087）为独立模态，不与三件套叠加：进入前已先关钓具，
+	# 故此分支必须排在三件套之前；ESC 关闭后按需重开钓具（见 open_fishing_collection）。
+	# 收集册 open() 结尾已重设 MOUSE_MODE_VISIBLE，抵消关钓具时 _on_manual_closed()
+	# 的短暂 CAPTURED（两步在同一同步函数内连续完成，不 defer、不挂信号回调）。
+	if _fishing_collection != null and _fishing_collection.is_open():
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			close_fishing_collection()
 			get_viewport().set_input_as_handled()
 		return
 	# 钓鱼三件套同为模态窗口：教学 → 渔猎 → 钓具，ESC 逐层关闭最上面那层。
@@ -2906,6 +2927,7 @@ func _any_overlay_open() -> bool:
 		or (_fishing_gear != null and _fishing_gear.is_open()) \
 		or (_fishing_ui != null and _fishing_ui.is_open()) \
 		or (_fishing_teaching != null and _fishing_teaching.is_open()) \
+		or (_fishing_collection != null and _fishing_collection.is_open()) \
 		or (_track_selector != null and _track_selector.is_open())
 
 
@@ -3234,6 +3256,13 @@ func _build_fishing(root: Control) -> void:
 	_fishing_teaching.closed.connect(_on_fishing_teaching_closed)
 	root.add_child(_fishing_teaching)
 
+	# 鱼类收集册（D-087）：独立模态，preload 脚本无 class_name（同 _profile_picker）。
+	_fishing_collection = FishingCollectionUIScript.new()
+	_fishing_collection.closed.connect(_on_fishing_collection_closed)
+	_fishing_collection.reward_claimed.connect(_on_fishing_bundle_claimed)
+	root.add_child(_fishing_collection)
+	_fishing_gear.collection_requested.connect(_on_fishing_collection_requested)
+
 	FishingSystem.fish_caught.connect(_on_fish_caught)
 	FishingSystem.new_species_unlocked.connect(_on_new_species)
 
@@ -3261,6 +3290,10 @@ func open_fishing_gear_boat(atlas_region: int, distance_m: float) -> void:
 	if not _fishing_gear.is_open():
 		Events.notice.emit("这片海域还没有开放的钓点")
 		return
+	# 记录来源，供收集册「返回」时原样重开（只存标量，不读 FishingGearUI 私有态）。
+	_fishing_gear_atlas = atlas_region
+	_fishing_gear_boat = true
+	_fishing_gear_dist = distance_m
 	_set_player_frozen(true)
 	if not DisplayServer.is_touchscreen_available():
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -3273,6 +3306,9 @@ func open_fishing_gear(atlas_region: int) -> void:
 	if not _fishing_gear.is_open():
 		Events.notice.emit("这片海域还没有开放的钓点")
 		return
+	_fishing_gear_atlas = atlas_region
+	_fishing_gear_boat = false
+	_fishing_gear_dist = 0.0
 	_set_player_frozen(true)
 	if not DisplayServer.is_touchscreen_available():
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -3281,6 +3317,72 @@ func open_fishing_gear(atlas_region: int) -> void:
 func _on_fishing_gear_closed() -> void:
 	_set_player_frozen(false)
 	_on_manual_closed()
+
+
+# ────────────────────────── 鱼类收集册（D-087） ──────────────────────────
+## 从钓具界面点「鱼类收集册」。不叠加模态：两步必须在**同一个同步函数**里连续
+## 完成（不 call_deferred、不放到 closed 信号回调里再开），否则中间帧会
+## MOUSE_MODE_CAPTURED 且玩家短暂解冻（tab-lessons 补充①）。
+## close_fishing_gear() 走 _close() emit closed → _on_fishing_gear_closed() 解冻，
+## 紧接着 open_fishing_collection() 重新冻结并把鼠标设回 VISIBLE，净效果无闪烁。
+func _on_fishing_collection_requested() -> void:
+	_collection_returning = true
+	close_fishing_gear()
+	open_fishing_collection()
+
+
+## 关闭钓具界面：必须走 _close()（emit closed）而非 close()（只置 visible=false），
+## 否则 _on_fishing_gear_closed() 的解冻与任何未来加进去的清理逻辑都会被静默跳过。
+func close_fishing_gear() -> void:
+	if _fishing_gear == null or not _fishing_gear.is_open():
+		return
+	_fishing_gear._close()
+
+
+func open_fishing_collection() -> void:
+	if _fishing_collection == null:
+		return
+	# open() 内部 _refresh() 现取当前槽 journal；不依赖任何换槽信号。
+	_fishing_collection.open()
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## ESC 关闭（早退链用）。UI 的 ✕ 直接调 FishingCollectionUI.close()，两条路径
+## 都汇到 closed 信号 → 本回调，行为一致。
+func close_fishing_collection() -> void:
+	if _fishing_collection == null:
+		return
+	_fishing_collection.close()
+
+
+func _on_fishing_collection_closed() -> void:
+	if _collection_returning:
+		_collection_returning = false
+		# 返回原钓点：open_fishing_gear* 内部会重新 freeze(true)，玩家全程不解冻。
+		if _fishing_gear_boat:
+			open_fishing_gear_boat(_fishing_gear_atlas, _fishing_gear_dist)
+		else:
+			open_fishing_gear(_fishing_gear_atlas)
+		if _fishing_gear != null and _fishing_gear.is_open():
+			return
+	# 没有可返回的钓具（或从别处直接打开）：解冻回世界，用基于
+	# _any_overlay_open() 的判断收鼠标，不用只认四个覆盖层的 _on_manual_closed()。
+	_set_player_frozen(false)
+	_on_inventory_closed()
+
+
+## 集齐奖励：claim_bundle() 已在 FishingSystem 内落 stats 标记（幂等闸门 +
+## 徽章状态）。这里只发「这一局」的即时惊喜绿宝石 + 温和 Toast——
+## 不承诺「永久拥有」（inventory 不落盘，是 D-076 未覆盖的既有边界，本批不修）。
+func _on_fishing_bundle_claimed(reward: Dictionary) -> void:
+	var count := int(reward.get("count", 0))
+	if _player != null and count > 0:
+		_player.inventory.add_item(int(reward.get("item", ItemTypes.EMERALD)), count)
+		_refresh_hotbar()
+	_show_toast("%s！绿宝石 ×%d 已放进口袋" % [
+		String(reward.get("title", "◆ 收藏家")), count])
 
 
 ## 装备整备完成 → 打开渔猎界面（FishingSystem 里已经 start_fishing 过）。
@@ -3363,7 +3465,10 @@ func _on_fish_caught(fish_id: String, spot_id: String, _gear: Dictionary) -> voi
 
 func _on_new_species(fish_id: String) -> void:
 	var entry := FishingSystem.get_fish(fish_id)
-	Events.notice.emit("新鱼种：%s 已收入生物图鉴" % String(entry.get("name_zh", fish_id)))
+	# D-087：静态生物图鉴（F2）无玩家态，真正记录钓获的是鱼类收集册——
+	# 别再把孩子引向一本查不到自己记录的百科（§7 欠账 B 第二处）。
+	Events.notice.emit("新鱼种：%s 已记入鱼类收集册（钓具界面可查看）" % [
+		String(entry.get("name_zh", fish_id))])
 
 
 # ────────────────────────── 竞速（feature_car_racing） ──────────────────────────

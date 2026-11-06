@@ -848,6 +848,87 @@ func discovered_count() -> int:
 	return records.size()
 
 
+# ────────────────────────── 四大洋收集册（D-087） ──────────────────────────
+## 收集册按 data/fishing/fish.json 的 region_id（字符串）分组，**不用 spot_ids**
+## 反推：二者有 12 处不一致（如 great_white_shark 声明在近岸、实际只在远海
+## fish_pool 里），用 spot_ids 会把远海鱼错分到近岸组。分组是静态表计算，
+## 不随存档槽变；「是否集齐」一律从 journal["records"] 现算，「是否已领奖」
+## 才落 journal["stats"] 的一次性标记（见 claim_bundle）。
+const BUNDLE_REGIONS: Array[String] = [
+	"pacific_ocean", "atlantic_ocean", "indian_ocean", "arctic_ocean",
+]
+## 海域中文名（奖励称号用；UI 组标题另用 FishingCollectionUI.REGION_TITLES，
+## 二者取值一致但各管一处，均不复用 RegionAtlas 的 int 键——裁决 5）。
+const BUNDLE_TITLES := {
+	"pacific_ocean": "太平洋",
+	"atlantic_ocean": "大西洋",
+	"indian_ocean": "印度洋",
+	"arctic_ocean": "北冰洋",
+	"all": "四大洋",
+}
+## 集齐奖励的即时惊喜量级（与现有任务链 1~6 绿宝石同量级，D-087 默认假设）。
+## 注意 inventory 不落盘（main.gd 仅跨场景内存携带 GameState.carried_inventory），
+## 绿宝石是「这一局」的惊喜；真正随存档槽持久、可回看的是 stat_of 徽章状态。
+const BUNDLE_REWARD_SINGLE := 3
+const BUNDLE_REWARD_ALL := 8
+
+
+## 某海域的 5 个 fish_id（从静态 fish_list 现算，顺序同 JSON）。
+func bundle_ids(region_id: String) -> Array[String]:
+	var out: Array[String] = []
+	for item_value: Variant in fish_list:
+		var entry: Dictionary = item_value
+		if String(entry.get("region_id", "")) == region_id:
+			out.append(String(entry.get("id", "")))
+	return out
+
+
+## 是否集齐：从 records 现算，绝不落盘。空组（如 region_id="all"）视为未集齐。
+func bundle_complete(region_id: String) -> bool:
+	var ids := bundle_ids(region_id)
+	if ids.is_empty():
+		return false
+	for id: String in ids:
+		if catch_count(id) <= 0:
+			return false
+	return true
+
+
+## 「已领取」是一次性事件：必须落标记才能跨会话 / 跨切槽幂等。标记放在既有
+## journal["stats"]，随 JOURNAL_PATH 按槽落盘、随 _load_journal 整体替换归零。
+func bundle_claimed(region_id: String) -> bool:
+	return stat_of("bundle_" + region_id) > 0
+
+
+func all_bundles_complete() -> bool:
+	for region_id: String in BUNDLE_REGIONS:
+		if not bundle_complete(region_id):
+			return false
+	return true
+
+
+## 唯一写入点。未集齐 / 已领过 / 非法海域均返回空字典（幂等闸门）。返回的
+## reward 交给 HUD 发绿宝石 + Toast；称号 / 徽章的「永久点亮」不靠这条字典，
+## 而是收集册每次 open() 现取 bundle_claimed() 显示，随 journal 按槽持久。
+func claim_bundle(region_id: String) -> Dictionary:
+	var is_all := region_id == "all"
+	if not is_all and not BUNDLE_REGIONS.has(region_id):
+		return {}
+	var complete := all_bundles_complete() if is_all else bundle_complete(region_id)
+	if not complete or bundle_claimed(region_id):
+		return {}
+	_bump_stat("bundle_" + region_id)
+	_save_journal()
+	journal_changed.emit()
+	return {
+		"item": ItemTypes.EMERALD,
+		"count": BUNDLE_REWARD_ALL if is_all else BUNDLE_REWARD_SINGLE,
+		"title": "◆ %s收藏家" % String(BUNDLE_TITLES.get(region_id, "海洋")),
+		"badge": region_id,
+		"region_id": region_id,
+	}
+
+
 ## 回放日志（最近 REPLAY_CAP 条，先发生的在前）。
 const REPLAY_CAP := 300
 

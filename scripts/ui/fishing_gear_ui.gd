@@ -12,6 +12,8 @@ extends Control
 signal closed
 ## 装备整备完成，请求打开渔猎界面。
 signal start_requested
+## 请求打开鱼类收集册（D-087）。HUD 收到后先关钓具、再开收集册（不叠加模态）。
+signal collection_requested
 
 const PANEL_BG := Color(0.97, 0.95, 0.88)
 const PANEL_BORDER := Color(0.62, 0.47, 0.27)
@@ -34,6 +36,8 @@ var _gear_rows: Dictionary = {}
 var _hint: Label
 var _detail: Label
 var _start_button: Button
+## 鱼类收集册入口（D-087）：不带完成度徽标的纯按钮，文字在 _refresh() 现取刷新。
+var _collection_button: Button
 
 
 func _ready() -> void:
@@ -132,6 +136,14 @@ func _build() -> void:
 	_start_button.pressed.connect(_on_start)
 	row.add_child(_start_button)
 
+	# 鱼类收集册入口（D-087）：独立可点 Button，不塞进 _refresh_hint() 的纯文本里。
+	# 触摸热区 ≥44px（同排按钮 42px 是历史值，新入口按裁决 6 取 44）。
+	_collection_button = Button.new()
+	_collection_button.custom_minimum_size = Vector2(0, 44)
+	_collection_button.focus_mode = Control.FOCUS_NONE
+	_collection_button.pressed.connect(func() -> void: collection_requested.emit())
+	row.add_child(_collection_button)
+
 	var close := Button.new()
 	close.text = "关闭"
 	close.custom_minimum_size = Vector2(100, 42)
@@ -228,6 +240,13 @@ func _refresh() -> void:
 	for kind: String in FishingGear.KINDS:
 		_rebuild_gear_row(kind)
 	_refresh_hint()
+	_refresh_collection_button()
+
+
+## 完成度徽标每次打开钓具界面都现取（discovered_count 是标量，不缓存容器）。
+func _refresh_collection_button() -> void:
+	_collection_button.text = "◆ 鱼类收集册 %d / %d" % [
+		FishingSystem.discovered_count(), FishingSystem.fish_list.size()]
 
 
 func _rebuild_spot_row() -> void:
