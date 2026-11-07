@@ -85,6 +85,11 @@ func _run() -> void:
 	_hud = main_scene.get_node("UI")
 	if _hud._map_selector != null and _hud._map_selector.is_open():
 		_hud.close_map_selector()
+	# D-076 起窗口态启动自动弹 ProfilePicker（main.gd:214 只豁免无头）。回归把
+	# profiles/ 移出后空槽态必弹，其米白模态卡片会盖住仪表台四角的屏幕取样点，
+	# 让「非白屏」断言读到 0.949 而误判。显式关闭，恢复 D-076 之前的取证条件。
+	if _hud._profile_picker != null and _hud._profile_picker.is_open():
+		_hud.close_profile_picker()
 	var spawner: MobSpawner = main_scene.get_node("MobSpawner")
 	spawner._spawn_timer = 9999.0
 	spawner._passive_timer = 9999.0
@@ -202,19 +207,29 @@ func _check_panel_not_white(img: Image) -> void:
 		return
 	# 诊断打点：区分「贴图绑定失效」与「SubViewport 内容为白」。
 	var sv := panel.get_node_or_null("CockpitSubViewport") as SubViewport
+	var corner_bright := 1.0
 	if sv != null:
 		print("DBG sv_size=", sv.size, " mode=", sv.render_target_update_mode,
 			" transparent=", sv.transparent_bg)
 		var ti := sv.get_texture().get_image()
 		if ti != null and ti.get_width() > 0:
+			var cc := ti.get_pixel(8, 8)
+			corner_bright = maxf(cc.r, maxf(cc.g, cc.b))
 			print("DBG tex_size=", ti.get_size(), " center=", ti.get_pixel(ti.get_width() / 2, ti.get_height() / 2),
-				" corner=", ti.get_pixel(8, 8))
+				" corner=", cc)
 		var cl := sv.get_child(0) as Control if sv.get_child_count() > 0 else null
 		if cl != null:
 			print("DBG cluster_size=", cl.size, " children=", cl.get_child_count())
 			var plate := cl.get_child(0) as Control if cl.get_child_count() > 0 else null
 			if plate != null:
 				print("DBG plate_size=", plate.size, " visible=", plate.visible)
+	# 坑 #20 反向对照：把「贴图内容非白」与「屏幕取样非白」拆成两条并列断言，
+	# 再加一条取证环境守卫。若模态米白卡片遮挡，屏幕取样会亮到 0.949 而贴图仍深色，
+	# 一眼区分「取证被遮挡」与「面板真白屏」，不会让遮挡伪装成白屏缺陷。
+	_check(corner_bright < 0.3,
+		"SubViewport 贴图角点内容非白（最亮通道 %.3f < 0.3）" % corner_bright)
+	_check(_hud._profile_picker == null or not _hud._profile_picker.is_open(),
+		"前置守卫：取证时无 ProfilePicker 模态遮挡")
 	var mat_dbg: StandardMaterial3D = plane.get_surface_override_material(0) as StandardMaterial3D
 	if mat_dbg != null:
 		print("DBG mat albedo_tex=", mat_dbg.albedo_texture, " albedo=", mat_dbg.albedo_color,

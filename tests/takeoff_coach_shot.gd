@@ -180,17 +180,38 @@ func _run() -> void:
 			break
 	await _snap("coach_6_success.png")
 
-	# ⑦ 成功横幅停留 3.5 s 后教练区收起、卡片缩回原高度（巡航不占屏）。
-	# 先缓爬保住离地高度（掉回 15 m 以下会重新显示「爬升中」），再等横幅过期。
+	# ⑦ D-074 Gap A 是**双门槛**：横幅 SUCCESS_HOLD(3.5 s) 过期后，还要
+	# AGL >= SAFE_AGL(40 m) 才返回空字典收起教练区；未到 40 m 会持续提示
+	# 「继续爬升到安全高度」（takeoff_coach.gd:148，防新手在谷地提前下降）。
+	# 旧探针只等 _agl()>20 就停爬，实测停在 38.2 m → 断言必然红，是规格过时
+	# 造成的机会性失败（10-27 恰好爬到 41.3 m 才侥幸全绿）。
+	# 等真实时间一律用墙钟（坑 #1：帧数 ≠ 时间）；横幅计时器走 _process(delta)。
+	# 且不能持续压杆：controls.pitch 是角速度目标而非姿态（坑 #21），一直压 0.4
+	# 会抬头失速、把 68 m 掉回 32 m，反而重新触发「继续爬升」。改成松杆 + 被动
+	# 高度配平（D-074）、低于门槛才轻拉的构造式保高循环。
 	_set_pitch(0.4)
-	for i in range(300):
+	for i in range(600):
 		await get_tree().physics_frame
-		if _agl() > 20.0:
+		if _agl() >= TakeoffCoach.SAFE_AGL + 2.0:
 			break
-	for i in range(280):
+	var hold_ms := int((TakeoffCoach.SUCCESS_HOLD + 0.5) * 1000.0)
+	var t_start := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t_start < hold_ms:
 		await get_tree().physics_frame
+		if _agl() < TakeoffCoach.SAFE_AGL + 2.0:
+			_set_pitch(0.15)
+		else:
+			_set_pitch(0.0)
+	_set_pitch(0.0)
+	# 坑 #2：process_frame 在 _process 之前发出，至少等 3 帧让 coach 的
+	# _process(delta) → step_for() 真正跑到「横幅过期 + AGL 达标」的那一帧。
+	for i in range(3):
+		await get_tree().process_frame
+	# 反向对照守卫：去掉 SAFE_AGL 门槛或保高循环，本条先红，不会静默误报。
+	_check(_agl() >= TakeoffCoach.SAFE_AGL,
+		"前置守卫：横幅过期时仍维持安全高度 %.1f m >= SAFE_AGL %.0f m" % [_agl(), TakeoffCoach.SAFE_AGL])
 	_check(not _hud._coach_main.is_visible_in_tree(),
-		"起飞成功横幅过期后教练区收起（卡片缩回原高度，巡航不占屏）")
+		"起飞成功横幅过期且已到安全高度后教练区收起（卡片缩回原高度，巡航不占屏）")
 	await _snap("coach_7_cruise.png")
 
 	SaveGuard.restore()

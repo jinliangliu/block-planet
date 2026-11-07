@@ -64,6 +64,17 @@ func _run() -> void:
 	spawner._despawn_all()
 	if hud._map_selector != null and hud._map_selector.is_open():
 		hud.close_map_selector()
+	# D-076 起 main.gd:214 在「无任何档案槽」时启动自动弹 ProfilePicker，门控只豁免
+	# 无头态。回归脚本把 profiles/ 整体移出 ⇒ 窗口探针必然是空槽态 ⇒ 必然弹窗，
+	# HUD._set_player_frozen(true) 置 player.input_locked，吞掉 ③ 的 W 推油与
+	# ⑩ 的鼠标环顾。此处显式关闭以恢复 D-076 之前的自动化条件；
+	# close → closed → _on_profile_picker_closed 只解冻并恢复 mouse_mode，不写档。
+	if hud._profile_picker != null and hud._profile_picker.is_open():
+		hud.close_profile_picker()
+	await get_tree().process_frame
+	# 反向对照守卫：去掉上面「关 picker」，本条先红，③/⑩ 也红，不会静默假绿。
+	_check(not player.input_locked,
+		"前置守卫：档案选择器已关闭、玩家输入未冻结（③/⑩ 反向对照）")
 
 	var craft: Aircraft = null
 	# 轮询等待而非死等固定帧数：本探针是**窗口探针**（飞机由 main.gd:126的

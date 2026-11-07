@@ -3946,9 +3946,182 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
 
 - **`inventory` 不落盘**（D-076 未覆盖的既有边界）：绿宝石只是本局内存态，可回看的
   持久回报是 `stat_of("bundle_*")` 徽章；要让奖励真正持久需**另开票**。
-- **full 档 12 项窗口截图与真机目检仍待重验**：结算屏变高会改 `race_result.png`，但
-  `racing_shot.gd:106` 只断言采样色数 ≥ 8、非像素 golden；钓鱼收集册 4×5 格与
-  **44 px 热区**需 16:9 / 20:9 目检。
+  **归工作流 ③ / 任务 #44**：背包落盘技术可行且低代价；区块 / 地形改动落盘应回避。
+- **14 项窗口截图已由 D-088 补齐并全量跑绿**（70 探针 / 2778 PASS / 0 FAIL）；
+  **仅剩真机目检**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、装饰密度，以及
+  `chunk_mesh_baseline` full 档重录。
 - **`tmp/run_regression.sh` 参数化后移入 `tools/` 入库**（D-086 §6 已开票）。
 - 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、`life_probe`
   flaky、AI 手刹与 `mountain_road` 实机观感、装饰密度实机掉帧。
+
+---
+
+## D-088 full 档截图验收：D-087 双 UI 取证探针 + 4 条历史窗口 FAIL 收口（2026-11-06）
+
+**结论**：**不改任何生产脚本**，只补两个窗口截图探针并登记进 `tmp/run_regression.sh`
+（该脚本被 `.gitignore:11 tmp/` 忽略，按 D-086 §6 不入库）。full 档窗口
+**12 → 14**、总量 **68 → 70**；合计 **70 探针 / 2778 PASS / 0 FAIL**，
+`[user://] RESTORED_OK` 零 DIFF。同批收口 4 条历史窗口 FAIL，**全部探针侧局部修、
+零生产脚本改动**；并就地订正 D-087 §5 的过时待办（见 §5）。
+
+**背景**：D-087 §5 留下「full 档 12 项窗口截图与真机目检仍待重验」，且 D-087 新增的
+钓鱼收集册、竞速结算屏两个 UI **无任何截图证据**——上一批只跑无头探针，模态是否
+真的画得出来、20:9 是否裁切，全靠推断。本批裁定不为取证改生产代码，只补探针。
+
+### 1. 裁决与新增文件
+
+| 文件 | 内容 | 断言 |
+|---|---|---|
+| `tests/fishing_collection_shot.gd` / `.tscn` | 5 张 PNG（16:9 / 20:9 × 默认 / 滚到底 / 全收集） | **50 PASS** |
+| `tests/race_result_shot.gd` / `.tscn` | 4 张 PNG（16:9 / 20:9 × 默认 / 圈速榜展开） | **51 PASS** |
+| `tmp/run_regression.sh` | 窗口列表登记两个新探针；新增 `SHOT_ONLY="a b"` | 受保护段逐字未动 |
+
+- `race_result_shot` **手写 outcome 字典**、走 `show_results()` 三参签名，
+  **不调 `RaceSystem.submit_result()`**——避免为了取证而写竞速记录（见 §2 第 3 条）。
+- `SHOT_ONLY="a b"` 配合 `ONLY=" "` 跳过无头组，用于单独目检某几张 PNG。
+- **受保护段（备份 / 移出 `profiles/` / `diff -r` / `RESTORED_OK`）逐字未动**；
+  `tmp/` 仍被 `.gitignore:11` 忽略、不入库。
+
+### 2. 关键技术结论（都可复用）
+
+**1. 比例切换只能改窗口尺寸，不能靠 `--resolution`。**
+
+`project.godot` 是 `window/stretch/mode=canvas_items` + `aspect=expand`，命令行
+`--resolution` 在此组合下无效；必须 `get_window().size = Vector2i(...)`。
+16:9 = **1280×720**、20:9 = **1280×576**。`expand` 的真实语义是
+**逻辑视口高恒 720、宽按窗口宽高比扩展**（20:9 → 逻辑 **1600×720**），
+物理 PNG 像素仍等于窗口尺寸。首版断言写死 ~~「逻辑宽 1280」~~ 因此 FAIL 一次，
+改为「**高恒 720 且宽高比与窗口一致**」。探针根 `extends Node`，只能取
+`get_viewport().get_visible_rect().size`；`get_viewport_rect()` 是 `CanvasItem`
+方法，在 `Node` 上直接 Parse Error。
+
+**2. `_capture()` 把「PNG 尺寸 / 状态 / 断言」耦合在一起**（防坑 #20「证据图与断言
+脱钩」）：断言 `img.get_width() == win.x && img.get_height() == win.y`。图存了但尺寸
+不对时立刻 FAIL，不留下「看起来有图、其实取的是上一比例」的假证据。
+
+**3. D-010 新形态：不调写接口 ≠ 零写盘。**
+
+`FishingSystem._exit_tree()` 会**无条件 `_save_journal()`**，而 `fishing_journal.json`
+**不在 `SaveGuard.EXTRA_FILES`** 里；所以「探针不调 `claim_bundle()`」并不等于
+零写盘。钓鱼探针必须四步：
+① 开局快照 `JOURNAL_PATH` 的**原文本**；
+② 还原时按开局路径**逐字节写回**（文件原本不存在则删除）；
+③ 置 `FishingSystem.journal_ok = false` 拒写；
+④ 最后 `SaveGuard.restore()`。
+权威出处 `docs/decisions.md:2213`。
+
+对照：竞速侧 `RaceSystem` **无 `_exit_tree` / `_notification`**，`race_records.json`
+只由 `submit_result()` 显式写，不调即不主动写盘；`Progress._exit_tree` 补写
+`progress.json` 由 `SaveGuard.restore()` 兜住。**两侧不对称，不能套同一套善后。**
+
+**4. headless 早退也必须配对快照 / 还原。**
+
+两个探针的 `_exit_tree()` **无条件 `_restore()`**。若把 `SaveGuard.snapshot()`
+放在 headless 早退分支**之后**，误跑无头时就会用**空 static 快照**去删真档，并把
+`JOURNAL_PATH` 设成空串——这正是 D-087 §3 坑 #34 的变体（还原段比断言更早被绕过）。
+修法：把 `SaveGuard.snapshot()` 与 `JOURNAL_PATH` 文本快照**上移到所有早退分支之前**。
+已用 `ONLY="fishing_collection_shot race_result_shot"` headless 冒烟验证两个
+`SHOT_SKIP` + `RESTORED_OK`。
+
+**5. `race_result_20x9.png` 顶部标题被裁，是探针复用实例所致，非生产缺陷。**
+
+探针复用同一 `RaceResultUI` 实例，16:9 阶段已滚到底；而 `show_results()` 只清
+`_body`、复位 `_leaderboard_open`，**不复位 `ScrollContainer.scroll_vertical`**。
+生产侧 `race_scene.gd:168` 每局 `RaceResultUI.new()`、`:426` 只调一次
+`show_results()`，不存在复用，故**无生产缺陷、不改 `race_result_ui.gd`**。
+探针侧加 `_scroll_top()` + 「默认态从顶部开始（`scroll_vertical ≤ 1`）」
+构造式断言，把「截图碰巧好看」变成「构造保证从顶部开始」。
+
+### 3. 4 条历史窗口 FAIL 的因果链与修法
+
+**结论**：4 条 FAIL 里 **3 条同一根因**（空槽弹窗），**1 条独立根因**（起飞教练双门槛）；
+**全部探针侧局部修，零生产脚本改动**。
+
+**同一根因：D-076 起的空槽自动弹窗。**
+
+`scripts/main.gd:214` 在「无档案槽」时自动 `open_profile_picker()`，门控**只豁免
+`headless`**；回归脚本把 `profiles/` 整体移出 ⇒ 窗口探针**必然空槽 ⇒ 必然弹窗**。
+`hud.gd:3041 _set_player_frozen(true)` → `player.input_locked = true` 吞掉飞行输入，
+米白模态卡片还遮挡像素取样点。于是
+`flight_view_probe` ③ W 推油 / ⑩ 鼠标环顾 与 `cockpit3d_shot` 仪表台四角采样
+（最亮通道 **0.949**）同时 FAIL——**不是三个独立 bug**。三个老探针原先只关
+`_map_selector`，没管 picker。
+
+修法：显式 `close_profile_picker()` + **前置守卫**；`cockpit3d_shot` 另加
+「**SubViewport 贴图角点内容非白（0.114 < 0.3）**」断言，用来区分「模态遮挡」
+与「真白屏」——否则一张米白卡片和一次渲染失败在四角采样上长得一样。
+
+**反向对照（非空闸）**：去掉「关 picker」后 `flight_view_probe` **3 FAIL**
+（守卫 + ③ + ⑩）、`cockpit3d_shot` **2 FAIL**（守卫 + 四角），而
+「贴图角点非白」**仍 PASS**；恢复正式版全绿。这组对照证明修法确实打在根因上，
+不是把断言放宽蒙混过去。
+
+**独立根因：`takeoff_coach_shot` 的机会性断言。**
+
+D-074 Gap A 是**双门槛** `SUCCESS_HOLD = 3.5 s` + `SAFE_AGL = 40 m`，旧探针只等
+`_agl() > 20` 就停爬，实测停在 **38.2 m**（10-27 恰好爬到 41.3 m 才侥幸全绿，
+属机会性断言）。修法是多因素组合：等真实时间用**墙钟**（坑 #1）、爬到
+`SAFE_AGL + 2` 后**松杆 + 被动高度配平**、低于门槛才轻拉（坑 #21：
+`controls.pitch` 是**角速度目标**不是姿态，持续压 0.4 会抬头失速把 68 m 掉回
+32 m）、末尾 3 个 `process_frame`（坑 #2）。实测 **42.9 m，8 PASS / 0 FAIL**。
+
+**如实记录**：该修复是多因素组合，**单点反向对照（旧 `>20` 门槛 / 恢复持续压杆）
+未稳定复现，不宣称单点非空闸**——与上面 picker 那组可复现的反向对照区别对待，
+不把「没复现」写成「已证伪」。
+
+**过程中的一次 Parse Error**：`_check` 插进 `if sv != null:` 块中间导致 GDScript
+缩进错误（坑 #17），拖到 SIGTERM；已按 D-010 核查存档 `diff -r` 为空、无残留、
+未污染——与 D-087 §3 坑 #34 同类，但这次还原段守住了。
+
+**生产侧另开票（本批明确不做）**：`main.gd:214` 门控追加
+`and not get_tree().current_scene.scene_file_path.begins_with("res://tests/")`。
+本批选择探针侧显式关 picker；改生产门控会把「测试环境」概念泄进主场景，
+该缺口仍列 §6 待办。
+
+### 4. 最终验收实测
+
+| 段 | 探针数 | 结果 |
+|---|---|---|
+| 窗口段 | **14** | **315 PASS / 0 FAIL**，`[user://] RESTORED_OK` 零 DIFF |
+| 无头段 | **56** | **2463 PASS / 0 FAIL**，6 组（10/10/10/10/10/6）每组独立备份 → 移出 `profiles/` → 逐探针 → `diff -r` → `RESTORED_OK` |
+| **合计** | **70** | **2778 PASS / 0 FAIL** |
+
+窗口段 14 探针逐项：
+
+| 探针 | PASS | 探针 | PASS |
+|---|---|---|---|
+| `flight_e2e_shot` | 12 | `flight_shot` | 0（纯截图无断言，已知） |
+| `flight_hud_shot` | 45 | `flight_view_probe` | 56 |
+| `flight_panel_shot` | 12 | `racing_shot` | 12 |
+| `takeoff_coach_shot` | 8 | `coach_cockpit_shot` | 22 |
+| `cockpit_instruments_shot` | 17 | `flight_director_shot` | 9 |
+| `cockpit3d_shot` | 4 | `stall_coach_shot` | 17 |
+| `fishing_collection_shot` | **50** | `race_result_shot` | **51** |
+
+- 窗口 12 → **14**（新增两个 D-087 UI 取证探针），总量 68 → **70**；
+  **315 + 2463 = 2778**。
+- 无残留 Godot 进程、无未还原移出目录；`crash_recover_probe rc=139`
+  是已知良性 Vulkan 清理段（断言全 PASS 之后）。
+- 回归脚本曾被沙箱 `[safe-delete]` 提示 `tmp/user_backup` 批量删除确认，但
+  **`RESTORED_OK` 已打印、`diff=0`，非回归失败**——工具交互提示，不是断言失败。
+
+### 5. D-087 §5 订正
+
+本批顺手订正同日 ADR D-087 §5 的两处过时表述，避免后来者按旧待办继续推导。
+
+| 位置 | 原文 | 订正后 |
+|---|---|---|
+| D-087 §5「full 档」条 | 「**full 档 12 项窗口截图与真机目检仍待重验**……钓鱼收集册 4×5 格与 44 px 热区需 16:9 / 20:9 目检」 | **14 项窗口截图已由 D-088 补齐并全量跑绿**（70 探针 / 2778 PASS / 0 FAIL）；**仅剩真机目检**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、装饰密度，以及 `chunk_mesh_baseline` full 档重录 |
+| D-087 §5「`inventory` 不落盘」条 | 「要让奖励真正持久需**另开票**」 | 追加 **归工作流 ③ / 任务 #44**：背包落盘技术可行且低代价；区块 / 地形改动落盘应回避 |
+
+`tmp/run_regression.sh` 参数化入库那条**保持待办**（见 §6），未改。
+
+### 6. 待办
+
+- **真机目检**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、装饰密度。
+- **`chunk_mesh_baseline` full 档重录**。
+- **`main.gd:214` 生产侧豁免缺口**（§3 末的另开票）：把「测试环境」概念挡在
+  门控外，或另选等价方案；本批刻意未做。
+- **`tmp/run_regression.sh` 参数化后移入 `tools/` 入库**（D-086 §6 已开票）。
+- 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、
+  `life_probe` flaky、AI 手刹与 `mountain_road` 实机观感。

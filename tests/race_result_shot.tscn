@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/race_result_shot.gd" id="1_rrsh"]
+
+[node name="RaceResultShot" type="Node"]
+script = ExtResource("1_rrsh")
