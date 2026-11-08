@@ -333,9 +333,9 @@ func _refresh_alerts() -> void:
 func alerts() -> Array[Dictionary]:
 	var list: Array[Dictionary] = []
 	if stalled:
-		list.append(_alert("stall_full", AlertLevel.WARNING, "失速了！推杆低头"))
+		list.append(_alert("stall_full", AlertLevel.WARNING, "失速了！按【↓】低头"))
 	elif stall_warning:
-		list.append(_alert("stall", AlertLevel.CAUTION, "要失速了，推杆低头"))
+		list.append(_alert("stall", AlertLevel.CAUTION, "要失速了，按【↓】低头"))
 	if overspeed:
 		list.append(_alert("overspeed", AlertLevel.WARNING, "飞太快！收油减速"))
 	# 地形前视（D-072 P2b，置顶优先级）：装山是秒级致命威胁。

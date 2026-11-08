@@ -209,7 +209,7 @@ func _apply_lighting() -> void:
 	if is_day():
 		var t := _time / DAY_LENGTH
 		var sun := sin(PI * t)
-		_light.rotation_degrees.x = lerpf(-85.0, -10.0, sun)
+		_light.rotation_degrees.x = lerpf(-10.0, -85.0, sun)
 		_light.light_energy = maxf(lerpf(0.2, 1.0, sun) * sun_mul, 0.2)
 		_light.light_color = Color(1.0, 0.98, 0.92) * _sky_tint
 		if _env != null:

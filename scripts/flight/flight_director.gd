@@ -56,6 +56,8 @@ const MIN_DIST := 30.0       # 下滑角分母下限（防止贴脸时角度飙�
 const DEV_CLAMP := 12.0      # 单轴偏差角钳制（度）
 const GAIN_PX_PER_DEG := 11.0  # 偏差 1° → 十字偏移 11 px
 const MAX_OFF := 120.0       # 十字偏移限幅（px，s=1 基准）
+const CRUISE_FADE_DIST := 800.0  # 巡航段：距目标 > 此值（m）时指引十字淡出，
+                                 # 避免「飞离机场后十字长期贴边红」误导儿童（D-054 留项）
 const CAPTURE_DEG := 1.5     # 捕获阈值（两轴都小于它 = 已对准，绿色 + 括号）
 ## 红色阈值。**不能设太小**：起飞段 pitch 从 0 起，8° 爬升指令是常态，阈值
 ## 6° 会让每次起飞都满屏报警（首版实测）。12° 才是「真的偏了一大截」。
@@ -87,6 +89,7 @@ var _target := Vector3.ZERO
 var _has_target := false
 var _mode := Mode.OFF
 var _dev_h := 0.0
+var _dist_h := 0.0
 var _dev_v := 0.0
 var _s := 1.0
 var _lock_hdg := 0.0
@@ -139,6 +142,7 @@ func refresh(craft_pos: Vector3, fi: FlightInstruments) -> void:
 		return
 	var to := _target - craft_pos
 	var dist_h := Vector2(to.x, to.z).length()
+	_dist_h = dist_h
 	var m := mode_for(fi.nav_active, fi.altitude_agl, fi.vertical_speed,
 		dist_h, fi.airspeed_kmh)
 	if m == Mode.OFF:
@@ -240,6 +244,11 @@ func _draw() -> void:
 	var c := size * 0.5
 	var p := c + cross_offset(_dev_h, _dev_v, s)
 	var col := _color_for()
+	# D-090：巡航段且远离目标时指引十字淡出（仅降透明度，不改模式/几何/文案）——
+	# 化解「飞离机场后十字长期贴边红」让儿童误以为「一直飞错」（D-054 留项）。
+	if _mode == Mode.CRUISE and _dist_h > CRUISE_FADE_DIST:
+		var f := clampf(1.0 - (_dist_h - CRUISE_FADE_DIST) / 4000.0, 0.3, 1.0)
+		col.a *= f
 	var arm := ARM * s
 	var t := maxf(2.0, ARM_T * s)
 	var gap := GAP * s

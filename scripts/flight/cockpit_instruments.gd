@@ -968,26 +968,37 @@ class _RoundGauge extends Control:
         draw_rect(win, COL_SEAM, false, maxf(1.0, s))
         # 盘标签（SPD / ALT）：贴数字窗上沿当「窗标题」，不放盘顶——盘顶
         # 正是指针 12 点方向的必经之路，实测指针从字上穿过糊成一团。
-        draw_string(ThemeDB.fallback_font,
+        _outlined(ThemeDB.fallback_font,
             Vector2(win.position.x, win.position.y - 3.0 * s), _label,
             HORIZONTAL_ALIGNMENT_CENTER, win_w,
-            int(maxf(7.0, 9.0 * s)), COL_MARK_DIM)
+            int(maxf(10.0, 12.0 * s)), COL_MARK_DIM)
         var fs := int(maxf(12.0, 25.0 * s))
-        draw_string(ThemeDB.fallback_font,
+        _outlined(ThemeDB.fallback_font,
             Vector2(win.position.x + 3.0 * s, win.get_center().y + float(fs) * 0.36),
             num, HORIZONTAL_ALIGNMENT_LEFT, win_w * 0.66, fs, col)
         var us := unit.strip_edges()
         if not us.is_empty():
-            draw_string(ThemeDB.fallback_font,
+            _outlined(ThemeDB.fallback_font,
                 Vector2(win.position.x + win_w * 0.60, win.get_center().y + 3.0 * s),
                 us, HORIZONTAL_ALIGNMENT_RIGHT, win_w * 0.36,
-                int(maxf(7.0, 9.0 * s)), COL_MARK_DIM)
+                int(maxf(10.0, 12.0 * s)), COL_MARK_DIM)
 
     func _thick_seg(p0: Vector2, p1: Vector2, w: float, col: Color) -> void:
         var d := (p1 - p0).normalized()
         var nrm := Vector2(-d.y, d.x) * (w * 0.5)
         draw_colored_polygon(PackedVector2Array([
             p0 + nrm, p1 + nrm, p1 - nrm, p0 - nrm]), col)
+
+    # D-090：本作 Godot 4.6.3 无 draw_string_with_outline，用「四向偏移黑描边 + 居中正文」
+    # 的手动描边（与 flight_tactical_map.gd 同范式），提升小字号在亮天空下的可读性。
+    func _outlined(font: Font, pos: Vector2, txt: String, align: int, width: float,
+            size: int, color: Color) -> void:
+        var o := 2.0
+        draw_string(font, pos + Vector2(-o, 0.0), txt, align, width, size, Color(0, 0, 0))
+        draw_string(font, pos + Vector2(o, 0.0), txt, align, width, size, Color(0, 0, 0))
+        draw_string(font, pos + Vector2(0.0, -o), txt, align, width, size, Color(0, 0, 0))
+        draw_string(font, pos + Vector2(0.0, o), txt, align, width, size, Color(0, 0, 0))
+        draw_string(font, pos, txt, align, width, size, color)
 
 
 # ── 竖向条状指示器（D-052：油门 / 燃油，填掉盘排两侧的空白）──────
@@ -1019,8 +1030,8 @@ class _VBar extends Control:
         draw_rect(Rect2(0.0, 0.0, w, h), COL_RING_D, true)
         draw_rect(Rect2(0.0, 0.0, w, 1.0 * s), COL_RING, true)
         # 条顶标签（THR / FUEL）：画在条自己头上，不侵占航向带。
-        draw_string(ThemeDB.fallback_font, Vector2(0.0, 9.0 * s), _label,
-            HORIZONTAL_ALIGNMENT_CENTER, w, int(maxf(7.0, 8.0 * s)), COL_PLATE_TXT)
+        _outlined(ThemeDB.fallback_font, Vector2(0.0, 9.0 * s), _label,
+            HORIZONTAL_ALIGNMENT_CENTER, w, int(maxf(10.0, 12.0 * s)), COL_PLATE_TXT)
         var slot := Rect2(4.0 * s, 12.0 * s, w - 8.0 * s, h - 30.0 * s)
         draw_rect(slot, Color(0.02, 0.025, 0.035), true)
         # 填充自下而上 + 10 段分隔线（与 HUD 油门条的 █/░ 同语言）。填充色
@@ -1033,6 +1044,17 @@ class _VBar extends Control:
             draw_rect(Rect2(slot.position.x, yy, slot.size.x, 1.0 * s),
                 Color(0.0, 0.0, 0.0, 0.45), true)
         # 百分比：条底独立黑带（不叠在填充上——橙底白字实测读不清）。
-        draw_string(ThemeDB.fallback_font, Vector2(0.0, h - 3.0 * s),
+        _outlined(ThemeDB.fallback_font, Vector2(0.0, h - 3.0 * s),
             "%d" % int(round(_ratio * 100.0)), HORIZONTAL_ALIGNMENT_CENTER, w,
-            int(maxf(7.0, 9.0 * s)), COL_MARK)
+            int(maxf(11.0, 12.0 * s)), COL_MARK)
+
+
+    # D-090：与 _RoundGauge._outlined 同实现（本作 Godot 4.6.3 无 draw_string_with_outline）。
+    func _outlined(font: Font, pos: Vector2, txt: String, align: int, width: float,
+            size: int, color: Color) -> void:
+        var o := 2.0
+        draw_string(font, pos + Vector2(-o, 0.0), txt, align, width, size, Color(0, 0, 0))
+        draw_string(font, pos + Vector2(o, 0.0), txt, align, width, size, Color(0, 0, 0))
+        draw_string(font, pos + Vector2(0.0, -o), txt, align, width, size, Color(0, 0, 0))
+        draw_string(font, pos + Vector2(0.0, o), txt, align, width, size, Color(0, 0, 0))
+        draw_string(font, pos, txt, align, width, size, color)

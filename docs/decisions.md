@@ -4311,3 +4311,63 @@ full 档 **73 探针 / 2876 PASS / 0 FAIL**；无头 **57 / 2511 PASS**、窗口
   `quest_shot` **16 PASS**、`sailing_journal_shot` **34 PASS** 均有断言。
 - **回归全绿不关闭真机目检待办**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、
   `chunk_mesh_baseline` full 档重录仍待办（见 §6「未做 / 另开票」与 D-088 §6）。
+
+## D-090 飞行美术与交互优化（5 项低风险视觉/交互改动 + 明确不做项，2026-11-08）
+
+**结论**：承接用户「把飞行玩法美术过一遍，优化美术设计和人机交互，如需确认按照默认的进行」
+的默认裁决口径，对飞行体验做一次**纯视觉 / 纯文案 / 纯光照**的收口。落地 **5 项自包含、
+零存档路径影响、对儿童与中低端 Android 正收益高**的改动（A1 仪表可读性、A2 失速文案、
+A4 FD 巡航淡出、C1 #12 太阳高度曲线、C2 距离雾），并把 5 项**明确不做 / 另开票**项如实登记。
+**不新增 `class_name`、不触碰任何 `user://` 写路径、不引入新存档字段**。
+
+**范围**：本批只动 5 个文件——`scripts/flight/flight_director.gd`、
+`scripts/flight/cockpit_instruments.gd`、`scripts/flight/flight_instruments.gd`、
+`scripts/systems/day_night.gd`、`scenes/main.tscn`。均为既有系统的局部视觉/文案/光照参数，
+无新机制、无新文件、无新 Autoload、无新存档键。
+
+### 1. 抉择依据（默认裁决口径）
+
+- 两路只读调研（2D HUD/UI、3D 相机/座舱）产出 P0/P1/P2 清单；其中 P0/P1 多数涉及跨系统
+  管线（风切变 HUD、移动端安全区、蓝图重心可视化）或需真机目检（触屏热区、DPI），本批
+  **按「低风险、自包含、零存档影响」三道闸筛出 5 项**，其余如实归「明确不做 / 另开票」。
+- **代码是唯一事实来源**：所有改动点均在 `feature_flight.md` 既有章节里有对应描述，本次
+  是「把既有留项 / 已知缺陷落地」，不是新设计。
+
+### 2. 五项改动
+
+| 项 | 文件 | 改动 | 依据 |
+|---|---|---|---|
+| **A1 仪表可读性** | `cockpit_instruments.gd`（`_RoundGauge`/`_VBar` 绘制） | 5 处 `draw_string` → `draw_string_with_outline`，并抬升小字号下限：盘标签 SPD/ALT、盘单位、竖条标签 THR/FUEL 由 `maxf(7~8, 9*s)` 提到 `maxf(10~11, 12*s)`，盘数字保留 `maxf(12,25*s)` 但加 `2px` 黑描边，竖条百分比 `maxf(7,9*s)`→`maxf(11,12*s)`；统一 `outline_width=2, Color(0,0,0)` | 7–9px 无描边小标签在天光背景上儿童难读；加描边+下限提升亮天空下的可读性，零额外几何成本 |
+| **A2 失速文案** | `flight_instruments.gd` `alerts()` | `stalled`「失速了！推杆低头」→「失速了！按【↓】低头」；`stall_warning`「要失速了，推杆低头」→「要失速了，按【↓】低头」 | 原「推杆」对键盘儿童不直观，且与原 `StallCoach`「按【↓】低头」不一致；改为键位一致表述。已 grep 确认 `tests/` 仅 2 处**注释**引用旧词，**无断言**依赖旧文案 |
+| **A4 FD 巡航淡出** | `flight_director.gd` | 新增常量 `CRUISE_FADE_DIST=800.0`、字段 `_dist_h`（`refresh()` 记录水平距离）、`_draw()` 在 `Mode.CRUISE && _dist_h>800` 时仅降 `col.a`（`f=clampf(1-(dist-800)/4000, 0.3, 1.0)`） | 化解「飞离机场后十字长期贴边红」让儿童误以为「一直飞错」（D-054 留项）。**仅降透明度，不改模式/几何/文案**，与既有 `OFF`/`visible` 逻辑、探针断言 `label_text()`/`_color_for()` 零冲突 |
+| **C1 #12 太阳高度曲线** | `scripts/systems/day_night.gd` `_apply_lighting()` | `lerpf(-85.0,-10.0,sun)` → `lerpf(-10.0,-85.0,sun)` | 原写法正午 `sun=1` 得 −10° 掠射，世界偏暗；交换两端后正午近天顶 −85° 俯射、黎明/黄昏近地平线，符合昼夜物理 |
+| **C2 距离雾** | `scenes/main.tscn` `Environment_main` | `fog_enabled=true`、`fog_mode=1`(EXP)、`fog_density=0.004`、`fog_aerial_perspective=0.35` | 软化 256 m 低模环边界，提升飞行高度沉浸感；原环境无雾，低模 4 m 粗网格在飞行高度看边界突兀；零额外几何成本 |
+
+### 3. 明确不做 + 另开票清单
+
+| 项 | 原因（如实写） | 归处 |
+|---|---|---|
+| **风切变 HUD 告警** | `WindModel.is_shear_active()` 已实现，但 `FlightInstruments.alerts()` 与 `BEEP_CODES` 均无 windshear 条目，HUD 无专属通道——属跨系统管线，风险高 | 另开票（风速切变告警通道） |
+| **座舱抖动** | D-075 已通过 `shake_envelope()` 五路分量 + 去怠速地板修复，仅余可设置关闭（`camera_shake_enabled`）的微抖，**非缺陷** | 不做 |
+| **U-3 / U-4 移动端安全区 / 字号 DPI** | 需真机 insets 适配与按物理密度取字号，非纯代码可验 | 另开票（真机目检） |
+| **U-11 / U-12 蓝图重心可视化 / 触屏低头引导** | 数据已在算（`Airframe.com`/`lift_center`、蓝图 `aggregate().com`），只差界面绘制/手势设计 | 另开票 |
+| **机场辨识度强化** | 需 `airport_builder` + `flight_markers` 改动，超出「纯视觉收口」范围 | 另开票 |
+
+### 4. 风险与回归影响
+
+- **5 文件均不触碰 `user://` 写路径**：`day_night.gd` 无写盘；FD 透明度、`cockpit_instruments` 描边、失速文案、`main.tscn` 雾参数均不进存档。**D-010 存档污染风险为零**。
+- **无 `class_name` 新增**，5 处 GDScript 改动均为局部绘制/文案/常量，静态体检 `git diff --check` rc=0、无警告。
+- 改动属「渲染层表现」，既有的 FD 模式机、失速警告状态机、`label_text()`/`_color_for()` 等被探针断言依赖的契约**均未改**。
+
+### 5. 验证基线（D-010 零 DIFF 门）
+
+- 飞行相关无头探针（15 项）跑冒烟 + 全量：`cockpit_instruments_probe` / `flight_director_probe` /
+  `flight_instruments_probe` / `stall_coach_probe` / `terrain_warning_probe` / `fd_yield_probe` /
+  `cockpit_interior_probe` / `cockpit_align_probe` / `cockpit_shake_probe` / `flight_probe` /
+  `wind_flight_probe` / `takeoff_coach_probe` / `flight_assist_probe` / `flight_reset_probe` /
+  `crash_recover_probe`。
+- 门禁：**0 FAIL、0 SCRIPT ERROR / Parse Error、`[user://] RESTORED_OK`、最终 `diff -r` rc=0**。
+- **窗口截图 PNG（视觉目检项）**：`cockpit_instruments_shot` / `flight_director_shot` /
+  `stall_coach_shot` / `flight_hud_shot` / `coach_cockpit_shot` / `cockpit3d_shot` 等产出后
+  **交由用户在真机目检**——与 D-088/D-089 一致的「回归全绿不关闭真机目检」口径，本批
+  不改视觉目检待办的性质。
