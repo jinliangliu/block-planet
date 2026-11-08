@@ -53,10 +53,27 @@ const WIND_TURN_PERIOD := 240.0
 var boats: Array = []
 var load_problems: PackedStringArray = PackedStringArray()
 
-## 持久化日志：{"version": 1, "owned": [...], "current": "...",
-##              "fuel": {boat_id: 升}}。
+## 持久化日志（version 2，D-089）：{"version": 2, "owned": [...],
+##              "current": "...", "fuel": {boat_id: 升},
+##              "sail": {"total_m", "farthest_m", "bands", "badges"}}。
+## 扩展的是 D-086 八份之一，不新增第 9 份 user:// 文件；旧档缺 sail 键由
+## _load_journal() 逐字段兜底，不需要迁移脚本。
 var journal: Dictionary = {}
 var journal_ok := false
+
+## 里程防抖（同 Progress.SAVE_INTERVAL_MS）：record_sail() 只改内存 + 标脏，
+## _process() 合并到至多每 1.5 s 一次落盘；_exit_tree（仅标脏时）/ claim_badge 仍立即写。
+const SAVE_INTERVAL_MS: int = 1500
+const JOURNAL_KEYS: Array[String] = ["owned", "current", "fuel"]
+const SAIL_BANDS: Array[String] = ["near", "mid", "far"]
+## 里程碑徽章（累计里程阈值，米）。badges 里存一次性标记，随槽持久、可回看；
+## 不写 Progress.counters（避开 slot_changed 早于 Progress._load() 的串档陷阱）。
+const SAIL_BADGES: Array[String] = ["sail_100", "sail_500", "sail_1000"]
+const SAIL_BADGE_TARGETS: Dictionary = {
+	"sail_100": 100.0, "sail_500": 500.0, "sail_1000": 1000.0,
+}
+var _dirty: bool = false
+var _last_save_msec: int = 0
 
 ## 模态面板打开时为真：Boat 不读输入（地图选择器 / 钓具界面/ 教学浮层）。
 var input_suspended := false
@@ -72,6 +89,23 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	# D-089 / D-010：只在本次会话确实改过 journal 时补写。version 1 旧档由
+	# _load_journal() 在内存里宽容升级为 version 2，「读到旧档」不等于「玩家改过
+	# 存档」；无条件写盘会让玩家只是打开游戏再退出就被改写存档，探针在
+	# SaveGuard.restore() 逐字节还原文件后，Autoload 退出期又把内存态覆盖回去
+	# （回归 diff -r 报假 DIFF）。未标脏时磁盘文件就是权威；标脏时仍立即
+	# flush，保证 1.5 s 防抖窗口没到就退出也不丢里程。
+	if _dirty:
+		_save_journal()
+
+
+## 里程落盘防抖：record_sail() 每 0.1 s 一拍，不能每拍都写盘。
+## journal_ok=false（损坏档保护 / 探针拒写闸）时直接跳过，别空转。
+func _process(_delta: float) -> void:
+	if not _dirty or not journal_ok:
+		return
+	if Time.get_ticks_msec() - _last_save_msec < SAVE_INTERVAL_MS:
+		return
 	_save_journal()
 
 
@@ -240,13 +274,24 @@ func _on_slot_changed(_id: String) -> void:
 	_grant_default_boat()
 
 
+## 宽容读档（D-089 version 1 → 2 不需要迁移脚本）：缺 sail 键 / 类型错 /
+## 子键缺失一律逐字段填默认，不抛错、不写盘。缺文件仍直接 return
+## （journal_ok=true）；损坏 JSON 保持 push_error + return、journal_ok 保持
+## false ⇒ _save_journal() 拒写，保护原档（同 flight_teaching.gd:134-136）。
+## 顺带清脏位：_on_slot_changed() 必须严格保持三行，清脏放这里才不会在
+## 换槽后下一帧把 A 槽状态补写进 B 槽文件。
 func _load_journal() -> void:
-	journal = {"version": 1, "owned": [], "current": "", "fuel": {}}
+	journal = {
+		"version": 2, "owned": [], "current": "", "fuel": {},
+		"sail": _default_sail(),
+	}
 	journal_ok = false
+	_dirty = false
+	_last_save_msec = Time.get_ticks_msec()
 	if not FileAccess.file_exists(JOURNAL_PATH):
 		journal_ok = true
 		return
-	var file := FileAccess.open(JOURNAL_PATH, FileAccess.READ)
+	var file: FileAccess = FileAccess.open(JOURNAL_PATH, FileAccess.READ)
 	if file == null:
 		return
 	var parsed: Variant = JSON.parse_string(file.get_as_text())
@@ -254,26 +299,154 @@ func _load_journal() -> void:
 		push_error("BoatSystem: %s 解析失败，本次不回写以保护原档" % JOURNAL_PATH)
 		return
 	var data: Dictionary = parsed
-	for key: String in ["owned", "current", "fuel"]:
+	for key: String in JOURNAL_KEYS:
 		if data.has(key):
 			journal[key] = data[key]
+	journal["sail"] = _parse_sail(data.get("sail", null))
 	journal_ok = true
 
 
+static func _default_sail() -> Dictionary:
+	return {
+		"total_m": 0.0, "farthest_m": 0.0,
+		"bands": {"near": 0, "mid": 0, "far": 0},
+		"badges": {},
+	}
+
+
+static func _num_or_zero(value: Variant) -> float:
+	if typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
+		return maxf(0.0, float(value))
+	return 0.0
+
+
+static func _int_or_zero(value: Variant) -> int:
+	if typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
+		return maxi(0, int(value))
+	return 0
+
+
+## 只认结构、不信任类型：老档缺 sail 时整块用默认值，坏子键单独兜底。
+static func _parse_sail(value: Variant) -> Dictionary:
+	var out: Dictionary = _default_sail()
+	if typeof(value) != TYPE_DICTIONARY:
+		return out
+	var src: Dictionary = value
+	out["total_m"] = _num_or_zero(src.get("total_m", null))
+	out["farthest_m"] = _num_or_zero(src.get("farthest_m", null))
+	var bands_value: Variant = src.get("bands", null)
+	if typeof(bands_value) == TYPE_DICTIONARY:
+		var bands_src: Dictionary = bands_value
+		var bands: Dictionary = out["bands"]
+		for key: String in SAIL_BANDS:
+			bands[key] = _int_or_zero(bands_src.get(key, null))
+		out["bands"] = bands
+	var badges_value: Variant = src.get("badges", null)
+	if typeof(badges_value) == TYPE_DICTIONARY:
+		var badges_src: Dictionary = badges_value
+		var badges: Dictionary = {}
+		for key_value: Variant in badges_src.keys():
+			badges[String(key_value)] = _int_or_zero(badges_src[key_value])
+		out["badges"] = badges
+	return out
+
+
 ## 原子写（先 .tmp 再 rename，同 FishingSystem）：FileAccess WRITE 会先把
-## 原文件截断，进程被信号打断就会丢档。
+## 原文件截断，进程被信号打断就会丢档。D-089 只补脏位 / 时间戳，不重造原子写。
 func _save_journal() -> void:
 	if not journal_ok:
 		return
-	var text := JSON.stringify(journal)
-	var tmp := JOURNAL_PATH + ".tmp"
-	var file := FileAccess.open(tmp, FileAccess.WRITE)
+	var text: String = JSON.stringify(journal)
+	var tmp: String = JOURNAL_PATH + ".tmp"
+	var file: FileAccess = FileAccess.open(tmp, FileAccess.WRITE)
 	if file == null:
 		return
 	file.store_string(text)
 	file.close()
 	DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp),
 		ProjectSettings.globalize_path(JOURNAL_PATH))
+	_dirty = false
+	_last_save_msec = Time.get_ticks_msec()
+
+
+# ────────────────────────── 出海里程与里程碑徽章（D-089） ──────────────────────────
+
+## 返回**拷贝**（bands / badges 子字典也是新建），绝不返回 journal["sail"]
+## 内部引用——D-086 §2 的整体替换陷阱：换槽后缓存的旧引用会静默指向旧槽对象。
+func sail_state() -> Dictionary:
+	var out: Dictionary = _default_sail()
+	var sail_value: Variant = journal.get("sail", null)
+	if typeof(sail_value) != TYPE_DICTIONARY:
+		return out
+	var src: Dictionary = sail_value
+	out["total_m"] = float(src.get("total_m", 0.0))
+	out["farthest_m"] = float(src.get("farthest_m", 0.0))
+	var bands_src: Variant = src.get("bands", null)
+	if typeof(bands_src) == TYPE_DICTIONARY:
+		var bands: Dictionary = out["bands"]
+		for key: String in SAIL_BANDS:
+			bands[key] = _int_or_zero((bands_src as Dictionary).get(key, null))
+		out["bands"] = bands
+	var badges_src: Variant = src.get("badges", null)
+	if typeof(badges_src) == TYPE_DICTIONARY:
+		var badges: Dictionary = out["badges"]
+		for k: Variant in (badges_src as Dictionary).keys():
+			badges[String(k)] = _int_or_zero((badges_src as Dictionary)[k])
+		out["badges"] = badges
+	return out
+
+
+## 唯一累计入口。step_m 是**相邻两次采样的船体 XZ 位移长度**（不是离港距离）；
+## harbor_distance_m < 0（无港口）时不更新 farthest_m。bands 只在有位移的采样
+## （step_m > 0）累加一次，语义是「有位移的采样拍数」，不是「到访次数」，也不做
+## 独立收集册——停泊时 boat.gd 仍以 step_m=0 上报以刷新 farthest_m，若照常 +1
+## 会把计数刷成「0.1 s 采样次数」。只改内存 + 标脏，落盘交给 _process() 防抖。
+func record_sail(step_m: float, harbor_distance_m: float, band: String) -> void:
+	var sail_value: Variant = journal.get("sail", null)
+	if typeof(sail_value) != TYPE_DICTIONARY:
+		journal["sail"] = _default_sail()
+	var sail: Dictionary = journal["sail"]
+	sail["total_m"] = float(sail.get("total_m", 0.0)) + maxf(0.0, step_m)
+	if harbor_distance_m >= 0.0:
+		sail["farthest_m"] = maxf(float(sail.get("farthest_m", 0.0)), harbor_distance_m)
+	if step_m > 0.0:
+		var bands_value: Variant = sail.get("bands", null)
+		var bands: Dictionary = bands_value if typeof(bands_value) == TYPE_DICTIONARY else {}
+		var band_key: String = band if SAIL_BANDS.has(band) else "near"
+		bands[band_key] = int(bands.get(band_key, 0)) + 1
+		sail["bands"] = bands
+	journal["sail"] = sail
+	_dirty = true
+
+
+func badge_of(key: String) -> int:
+	var state: Dictionary = sail_state()
+	var badges: Dictionary = state["badges"]
+	return int(badges.get(key, 0))
+
+
+## 幂等闸门（对齐 FishingSystem.bundle_claimed()）：未达标 / 已领过 / 非法 key
+## 均返回 false。领取是一次性事件，落标记后立即写盘，不丢关键进度。
+func claim_badge(key: String) -> bool:
+	if not SAIL_BADGES.has(key):
+		return false
+	if badge_of(key) > 0:
+		return false
+	var state: Dictionary = sail_state()
+	if float(state.get("total_m", 0.0)) < float(SAIL_BADGE_TARGETS.get(key, 0.0)):
+		return false
+	var sail_value: Variant = journal.get("sail", null)
+	if typeof(sail_value) != TYPE_DICTIONARY:
+		journal["sail"] = _default_sail()
+	var sail: Dictionary = journal["sail"]
+	var badges_value: Variant = sail.get("badges", null)
+	var badges: Dictionary = badges_value if typeof(badges_value) == TYPE_DICTIONARY else {}
+	badges[key] = 1
+	sail["badges"] = badges
+	journal["sail"] = sail
+	_save_journal()
+	journal_changed.emit()
+	return true
 
 
 # ────────────────────────── 海况模型 ──────────────────────────

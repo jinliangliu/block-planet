@@ -817,6 +817,11 @@ bash tmp/run_regression.sh          # 日常：无头逻辑探针（快）
 bash tmp/run_regression.sh full     # 验收：无头 + 窗口截图（须目检截图）
 ```
 
+> **历史快照**：以下本节各 D-0xx 行的探针数 / PASS / FAIL（含「46 个日常无头
+> 探针」「2186 PASS / 0 FAIL」等）是实施当时的验收数字，不代表当前基线；
+> 当前基线见 `docs/decisions.md` D-089 与 `features/feature_fishing.md`
+> （日常无头 57 探针 / 验收全量 73 探针）。
+
 当前 **46 个日常无头探针**（`tmp/run_regression.sh`：2026-10-23 新增 `fishing_probe`，2026-10-24 新增 `stall_coach_probe`、D-072 P2b 新增 `terrain_warning_probe`、2026-10-26 D-073 新增 `poi_route_probe` 含 24 断言）；`full` 验收档 = 46 无头 + 12 窗口截图探针，最近一次全量 **2186 PASS / 0 FAIL**、`[user://] RESTORED_OK`（2026-10-24，D-071 失速让位后；D-073 起 daily 46 探针全绿，full 档待重验）。
 D-070（PC 操控定稿：鼠标 = 驾驶员视角，飞机只由键盘操纵）后：`flight_probe` 149 → **146**（拆鼠标杆 −4、新增「无隐性杆源」闸 +1）、`flight_view_probe` 47 → **55**（新增 ⑩ 段 8 条：视野跟随 / 杆量零写入 / 眼位刚性 / 偏航限幅 ±2.4 rad / 状态与视野均不自动回正 / recenter 归位），full 档总数相应变为 **56 探针 / 2179 PASS**（以 D-070 回归实测为准）。
 D-061 新增 `landing_quality_probe`（45 断言：A 评分边界 19 + B 任务改造 13 + C 呼号边沿 7 + D 端到端落地 6）。

@@ -6,6 +6,7 @@ class_name HUD
 const ProfilePickerScript := preload("res://scripts/ui/profile_picker.gd")
 ## 鱼类收集册（D-087）：同样不引入 class_name，由 HUD 以 preload 实例化。
 const FishingCollectionUIScript := preload("res://scripts/ui/fishing_collection_ui.gd")
+const SailingJournalUIScript := preload("res://scripts/ui/sailing_journal_ui.gd")
 
 ## 生命爱心条：5 颗心换算 20 点生命，每颗 4 点。
 const HEART_COUNT := 5
@@ -74,6 +75,9 @@ var _fishing_gear_boat := false
 var _fishing_gear_dist := 0.0
 ## 收集册是否由钓具界面进入：true 时关闭后重开钓具，false 时直接解冻回世界。
 var _collection_returning := false
+## 我的航海记录（D-089 阶段 3）：独立模态；preload 脚本无 class_name，
+## 故与 _profile_picker / _fishing_collection 一样用无类型引用。
+var _sailing_journal_ui = null
 ## 航海模式界面（D-042）：登船期间可见。
 var _boat_hud: BoatHUD
 ## 赛道选择器（feature_car_racing）：模态窗口，选完切到竞速场景（独立场景）。
@@ -286,6 +290,7 @@ func _build() -> void:
 	_build_mission_panel(root)
 	_build_settings_panel(root)
 	_build_profile_picker(root)
+	_build_sailing_journal(root)
 	_build_fishing(root)
 	_build_racing(root)
 	# 航海模式主界面（D-042）：登船后显形，替代徒步 HUD 关注方位/海况/航向/油量。
@@ -343,6 +348,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _fishing_collection != null and _fishing_collection.is_open():
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 			close_fishing_collection()
+			get_viewport().set_input_as_handled()
+		return
+	# 我的航海记录（D-089 阶段 3）为独立模态，不与钓鱼三件套叠加，只响应 ESC。
+	if _sailing_journal_ui != null and _sailing_journal_ui.is_open():
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			close_sailing_journal()
 			get_viewport().set_input_as_handled()
 		return
 	# 钓鱼三件套同为模态窗口：教学 → 渔猎 → 钓具，ESC 逐层关闭最上面那层。
@@ -742,6 +753,15 @@ func _build_action_buttons(root: Control) -> void:
 	settings_button.focus_mode = Control.FOCUS_NONE
 	settings_button.pressed.connect(_toggle_settings_panel)
 	_anchor_bottom_right(root, settings_button, 572.0, 138.0)
+
+	# 任务（D-089）：移动端没有 J 键，此前触屏完全打不开任务与成就面板。
+	# 排在设置右侧，同属「面板行」；与 J 键同语义，直接复用 open_quest_panel()。
+	var task_button := Button.new()
+	task_button.text = "任务"
+	task_button.custom_minimum_size = Vector2(76, 76)
+	task_button.focus_mode = Control.FOCUS_NONE
+	task_button.pressed.connect(func(): open_quest_panel())
+	_anchor_bottom_right(root, task_button, 658.0, 138.0)
 
 
 func _build_hotbar(root: Control) -> void:
@@ -2915,6 +2935,9 @@ func _on_inventory_sold(result: Dictionary) -> void:
 
 ## 是否有任一覆盖层处于打开状态（决定关闭后是否收回鼠标捕获）。
 func _any_overlay_open() -> bool:
+	# 我的航海记录（D-089 阶段 3）：独立语句，不动下面整段续行链（坑 #17）。
+	if _sailing_journal_ui != null and _sailing_journal_ui.is_open():
+		return true
 	return (_box_overlay != null and _box_overlay.visible) \
 		or (_craft_overlay != null and _craft_overlay.visible) \
 		or (_trade_overlay != null and _trade_overlay.visible) \
@@ -3369,6 +3392,50 @@ func _on_fishing_collection_closed() -> void:
 			return
 	# 没有可返回的钓具（或从别处直接打开）：解冻回世界，用基于
 	# _any_overlay_open() 的判断收鼠标，不用只认四个覆盖层的 _on_manual_closed()。
+	_set_player_frozen(false)
+	_on_inventory_closed()
+
+
+# ────────────────────────── 我的航海记录（D-089 阶段 3） ──────────────────────────
+## 面板实例挂 root（与 _profile_picker / _fishing_collection 同层）；触屏入口
+## 按钮必须挂 _touch_walk：驾驶飞机时该容器整体隐藏，改由 _flight_touch 接管。
+## 桌面态 _touch_walk 为 null，不建按钮，也不补键盘快捷键（入口另开票）。
+func _build_sailing_journal(root: Control) -> void:
+	_sailing_journal_ui = SailingJournalUIScript.new()
+	_sailing_journal_ui.closed.connect(_on_sailing_journal_closed)
+	root.add_child(_sailing_journal_ui)
+	if _touch_walk == null:
+		return
+	var journal_button := Button.new()
+	journal_button.text = "航海"
+	journal_button.custom_minimum_size = Vector2(76, 76)
+	journal_button.focus_mode = Control.FOCUS_NONE
+	journal_button.pressed.connect(func(): open_sailing_journal())
+	_anchor_bottom_right(_touch_walk, journal_button, 744.0, 138.0)
+
+
+## open() 内部已 refresh()（每次按当前槽现取 BoatSystem.sail_state()），
+## HUD 侧不重复刷新。is_any_panel_open() 守卫防启动期 ProfilePicker 叠层；
+## 重复打开被静默忽略是期望行为，探针要刷新请直接调 UI 自身 refresh()。
+func open_sailing_journal() -> void:
+	if _sailing_journal_ui == null or is_any_panel_open():
+		return
+	_sailing_journal_ui.open()
+	_set_player_frozen(true)
+	if not DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## 必须走会 emit closed 的 close()，不能自己置 visible=false，否则玩家不解冻。
+func close_sailing_journal() -> void:
+	if _sailing_journal_ui == null:
+		return
+	_sailing_journal_ui.close()
+
+
+## 收鼠标用基于 _any_overlay_open() 的 _on_inventory_closed()，
+## 不用只认四个覆盖层的 _on_manual_closed()。
+func _on_sailing_journal_closed() -> void:
 	_set_player_frozen(false)
 	_on_inventory_closed()
 

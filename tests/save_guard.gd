@@ -41,6 +41,10 @@ const EXTRA_FILES := [
 	# DIFF。登记在此（按 D-010 逐字节还原），回归脚本另有不枚举文件名的兜底。
 	# 注意：不改 racing_probe.gd 本身。
 	"user://race_records_probe.json",
+	# D-089：BoatSystem._exit_tree() 无条件 _save_journal()。有槽时由
+	# snapshot_profiles() 覆盖整树，但日常回归跑无槽态会落 legacy 根文件；
+	# 不登记则退出期凭空留文件 → 下次 diff -r 假 DIFF（同 D-088 §2 的四步）。
+	"user://boats.json",
 ]
 
 static var _progress := ""
@@ -77,6 +81,13 @@ static func restore() -> void:
 	Progress.counters = _counters.duplicate()
 	Progress.states = _states.duplicate()
 	Progress._quiz_correct_since_reward = _quiz
+	# D-089：FishingSystem / BoatSystem 的 _exit_tree() 在引擎关停期（本函数返回
+	# 之后）还会调一次 _save_journal()，把刚逐字节还原的文件覆盖成内存态——
+	# version 1 的 boats.json 就是这样被升级成 version 2、导致 D-010 假 DIFF。
+	# journal_ok=false 是生产侧既有的拒写闸（同 D-088 §2），在此统一置位，凡
+	# 走本助手的探针退出期一律不写盘；boats.json 已登记在 EXTRA_FILES 内。
+	FishingSystem.journal_ok = false
+	BoatSystem.journal_ok = false
 
 
 ## 档案槽目录（user://profiles/）快照 / 还原。单独暴露一对，是给那些保留

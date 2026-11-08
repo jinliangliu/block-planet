@@ -2688,9 +2688,9 @@ daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照
 - 全工程**没有任何地方全量遍历 `Category` 枚举**（`grep` 确认，唯一一处是 `quest_panel.gd:166-167` 的显式白名单），故新增枚举值不会在别处多渲染一组。
 
 ### 待办（不阻塞本轮）
-1. **`cards_read` 埋点**：`game-design.md` 声称「读过卡片 → 答得出题」闭环成立，但读侧无观测点，该设计意图目前无法验证。需 1~2 行埋点 + 「地理知识」类课程。
-2. **移动端无法打开任务面板**：J 键是唯一入口，触屏面板行（`hud.gd:603-640`）没有「任务」按钮——手机上现在就打不开任务面板，属**既有缺口非本次引入**。补一个 76×76 按钮即可，但会改动 HUD 布局（有截图探针基线），故单列。
-3. 环保课勿复用 `protected_blocked`（语义是「试图伤害保护动物被拦截」，做成就等于鼓励孩子去打），建议改走「浏览保护动物图鉴条目」。既有成就 `a_protect_1` 存在同一问题，一并报备。
+1. **`cards_read` 埋点**：`game-design.md` 声称「读过卡片 → 答得出题」闭环成立，但读侧无观测点，该设计意图目前无法验证。需 1~2 行埋点 + 「地理知识」类课程。**〔已由 D-089 结案：`map_selector.gd:1001` 埋点 + 课堂 `cls_cards3`；按「打开详情次数」计数未去重，去重另开票〕**
+2. **移动端无法打开任务面板**：J 键是唯一入口，触屏面板行（`hud.gd:603-640`）没有「任务」按钮——手机上现在就打不开任务面板，属**既有缺口非本次引入**。补一个 76×76 按钮即可，但会改动 HUD 布局（有截图探针基线），故单列。**〔已由 D-089 结案：`hud.gd:757-765` 新增 76×76 触屏「任务」按钮，`quest_panel.gd` 面板内热区统一 44 px；真机可点性仍待目检〕**
+3. 环保课勿复用 `protected_blocked`（语义是「试图伤害保护动物被拦截」，做成就等于鼓励孩子去打），建议改走「浏览保护动物图鉴条目」。既有成就 `a_protect_1` 存在同一问题，一并报备。**〔已由 D-089 结案：只做文案 / 注释诚实订正（层次 1）；「图鉴 `protected_viewed`」层次 2 会让已有存档进度作废，另开票〕**
 
 ## D-078（2026-10-31）M9 和平模式开关：`GameState.peaceful`，只管怪物
 
@@ -3762,6 +3762,8 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
   均依赖 D-086 落地（尤其 §2 的 journal 引用语义）。
 - **full 档 12 项窗口截图与真机目检仍待重验**（含 `chunk_mesh_baseline` 逐值重录、
   `cockpit_instruments_shot` 复跑）。
+  **〔历史快照：12 项 / 70 探针 / 2778 PASS 为 D-088 当时基线，数字不改；窗口数已由
+  14 → 16，当前基线见 D-089 §7；44 px 真机目检仍待办〕**
 - 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、`life_probe` flaky、
   AI 手刹与 `mountain_road` 实机观感、装饰密度实机掉帧、触屏按钮 / 多指 / 倒计时遮挡目检。
 
@@ -3828,7 +3830,7 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
   `max_weight_kg` / `first_caught_spot`；
   ② `hud.gd` 任意 `quest_claimed` 都触发整页 `refresh()`（清空 + 重建），挂 20 格会
   丢滚动位置并闪烁；
-  ③ 页签栏几何与 **38 px 触摸热区**。
+  ③ 页签栏几何与 **38 px 触摸热区**。**〔交叉引用：此处 38 px 是 D-087 当时的引用，原文保留不改；该页签 / 关闭 / 操作热区已由 D-089 统一改为 44 px，见 D-089 §6〕**
   ~~「任务面板已按槽隔离、`FishingSystem` 未隔离」~~ 这条旧论据在 **D-086 后已失效**，
   本 ADR 不引用。
 
@@ -3917,6 +3919,8 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
 
 ### 4. 验证（已实测）
 
+> **历史快照**：本节数字（56 探针 / 2463 PASS / 0 FAIL）为 D-087 当时基线，数字保留不改；D-089 之后当前基线见 **D-089 §7 / `features/feature_fishing.md`**。
+
 | 项 | 结果 |
 |---|---|
 | 钓鱼 `ONLY="fishing_collection_probe"` 单跑 | **39 PASS / 0 FAIL** |
@@ -3950,6 +3954,7 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
 - **14 项窗口截图已由 D-088 补齐并全量跑绿**（70 探针 / 2778 PASS / 0 FAIL）；
   **仅剩真机目检**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、装饰密度，以及
   `chunk_mesh_baseline` full 档重录。
+  **〔历史快照：上面「14 项 / 70 探针 / 2778 PASS」为 D-088 当时基线，数字一个不改；当前 full 档窗口数已由 14 → 16（D-089 新增 `sailing_journal_shot`、并把 `quest_shot` 登记为带断言窗口探针）。「44 px 热区真机目检」代码已改、真机目检未做，仍保留待办；当前基线见 D-089 §7 / `features/feature_fishing.md`〕**
 - **`tmp/run_regression.sh` 参数化后移入 `tools/` 入库**（D-086 §6 已开票）。
 - 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、`life_probe`
   flaky、AI 手刹与 `mountain_road` 实机观感、装饰密度实机掉帧。
@@ -3963,6 +3968,8 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
 **12 → 14**、总量 **68 → 70**；合计 **70 探针 / 2778 PASS / 0 FAIL**，
 `[user://] RESTORED_OK` 零 DIFF。同批收口 4 条历史窗口 FAIL，**全部探针侧局部修、
 零生产脚本改动**；并就地订正 D-087 §5 的过时待办（见 §5）。
+
+> **历史快照**：以上「12 → 14 / 68 → 70 / 70 探针 / 2778 PASS」为 D-088 当时基线，数字一个不改；当前 full 档窗口数已由 14 → 16，当前基线见 **D-089 §7 / `features/feature_fishing.md`**。
 
 **背景**：D-087 §5 留下「full 档 12 项窗口截图与真机目检仍待重验」，且 D-087 新增的
 钓鱼收集册、竞速结算屏两个 UI **无任何截图证据**——上一批只跑无头探针，模态是否
@@ -4086,6 +4093,8 @@ D-074 Gap A 是**双门槛** `SUCCESS_HOLD = 3.5 s` + `SAFE_AGL = 40 m`，旧探
 | 无头段 | **56** | **2463 PASS / 0 FAIL**，6 组（10/10/10/10/10/6）每组独立备份 → 移出 `profiles/` → 逐探针 → `diff -r` → `RESTORED_OK` |
 | **合计** | **70** | **2778 PASS / 0 FAIL** |
 
+> **历史快照，本批之后当前基线见 D-089 §7 / `features/feature_fishing.md`**：上表与本节所有数字（**70 探针 / 2778 PASS / 0 FAIL**、**14 窗口 / 315 PASS / 0 FAIL**、**56 无头 / 2463 PASS / 0 FAIL**）均为 D-088 当时基线，**数字一个不改**；D-089 之后 full 档窗口数已由 14 → 16、总量 70 → 73（57 无头 + 16 窗口），当前 PASS / FAIL 实测以 D-089 §7 为准。
+
 窗口段 14 探针逐项：
 
 | 探针 | PASS | 探针 | PASS |
@@ -4114,6 +4123,8 @@ D-074 Gap A 是**双门槛** `SUCCESS_HOLD = 3.5 s` + `SAFE_AGL = 40 m`，旧探
 | D-087 §5「full 档」条 | 「**full 档 12 项窗口截图与真机目检仍待重验**……钓鱼收集册 4×5 格与 44 px 热区需 16:9 / 20:9 目检」 | **14 项窗口截图已由 D-088 补齐并全量跑绿**（70 探针 / 2778 PASS / 0 FAIL）；**仅剩真机目检**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、装饰密度，以及 `chunk_mesh_baseline` full 档重录 |
 | D-087 §5「`inventory` 不落盘」条 | 「要让奖励真正持久需**另开票**」 | 追加 **归工作流 ③ / 任务 #44**：背包落盘技术可行且低代价；区块 / 地形改动落盘应回避 |
 
+> **历史快照**：上表订正列里的「full 档 12 项 / 14 项 / 70 探针 / 2778 PASS」为 D-088 当时基线，数字一个不改；当前 full 档窗口数已由 **14 → 16**（D-089 新增 `sailing_journal_shot`、并把 `quest_shot` 登记为带断言窗口探针）。表中「44 px 热区真机目检」**仍需保留**——代码侧已由 D-089 统一改 44 px，真机目检未做；当前基线见 **D-089 §7 / `features/feature_fishing.md`**。
+
 `tmp/run_regression.sh` 参数化入库那条**保持待办**（见 §6），未改。
 
 ### 6. 待办
@@ -4125,3 +4136,178 @@ D-074 Gap A 是**双门槛** `SUCCESS_HOLD = 3.5 s` + `SAFE_AGL = 40 m`，旧探
 - **`tmp/run_regression.sh` 参数化后移入 `tools/` 入库**（D-086 §6 已开票）。
 - 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、
   `life_probe` flaky、AI 手刹与 `mountain_road` 实机观感。
+- **D-089 交叉引用（本批之后仍待办）**：上面「真机目检」（触屏 44 px 热区、字形回退、
+  多指、倒计时遮挡）与 `chunk_mesh_baseline` full 档重录，在 D-089 后**依然待办**——
+  D-089 只完成代码侧 44 px 热区统一与 `quest_shot` 入口断言，**真机目检未做**。
+  当前 full 档窗口数已由 D-088 的 **14 → 16**（新增 `sailing_journal_shot`，并把
+  `quest_shot` 从 0 PASS 纯取证探针登记为带断言窗口探针）。
+
+---
+
+## D-089 航海长期目标 + 专属面板 + 按槽持久化；D-077 三条待办收口（2026-11-08）
+
+**结论**：本 ADR 收口同批两件事，主体分**两节**：**第一节**（§1-§5）「航海长期目标 +
+专属面板 + 按槽持久化」，**第二节**（§6）「D-077 三条待办收口」（并附回归登记与
+③ `inventory` 边界）；§7 单列验收基线。儿童向、**单机离线**，**无 QTE、无付费、无联网**。
+full 档由 D-088 的 56 无头 + 14 窗口登记为 **57 无头 + 16 窗口 = 73 探针**（探针数量为
+已登记确定值）；本批最终 PASS / FAIL 实测数字一律不在正文写，见 **§7 验收基线**。
+
+**范围**：本批不动 `achievements()` 28 枚既有成就、不动 `progress_manager.gd`、不新增
+第 9 份 `user://` 存档文件；区块 / 地形改动落盘回避。`inventory` 不落盘归**工作流 ③ /
+任务 #44**，**不进本批 ②**。
+
+### 1. 航海长期目标：裁决与数据模型
+
+- **裁决**：累计出海里程 + 三档里程碑徽章（**100 / 500 / 1000 m**）+ 专属面板
+  `scripts/ui/sailing_journal_ui.gd` + **按槽持久化**。目标是给「每局出海」一个可回看的
+  长期进度，儿童向、单机离线，无 QTE、无付费、无联网。
+- **不新增第 9 份 `user://` 文件**：扩展既有 `user://boats.json`，`version 1 → 2`，
+  新增 `sail` 子字典 `{total_m, farthest_m, bands:{near,mid,far}, badges:{}}`。
+  旧档缺 `sail` 由 `BoatSystem._load_journal()` **逐字段兜底**，**不需要迁移脚本**——
+  「读到旧档」不等于「玩家改过存档」（这条是 §5 修复的语义前提）。
+- **同名不同物，务必分清**：上面的 `user://boats.json` 是玩家存档；静态船型表
+  `data/boating/boats.json` 是只读资源，**本批一字未改**。
+
+### 2. 里程语义与唯一采样落点（最重要）
+
+**累计里程 = 相邻两次采样的「船体 XZ 位移长度」之和**，**绝不是离港距离累加**。
+反例必须写清：船停在离港 200 m 不动，若「每拍加 200」是**错误实现**；正确实现每拍
+位移为 0、累计不涨。这是本批最容易静默走样的一处。
+
+- **唯一采样落点**：`scripts/vehicles/boat.gd` 的 `_emit_readings()` → `_sample_sail()`，
+  每 `READINGS_INTERVAL = 0.1 s` 一拍。**绝不放进 `snapshot()`**——实测 `snapshot()`
+  有 3 个调用方（`boat.gd:232`、`boat_hud.gd:48`、`hud.gd:3301`），放进去会按调用
+  次数重复计里程。
+- **`readings_changed` 是全仓零 `.connect` 的死信号**，故采样在 `_emit_readings()`
+  内**直接调用** `_sample_sail()`，不依赖信号连接。
+- **`piloted` 硬闸**：非驾驶态不采样；用节点 `global_position` 而非 `physics.pos`；
+  只取 **XZ 平面差**以消掉波浪 Y bob；**首次采样只播种**（不产生里程）；
+  `max_step = maxf(physics.max_speed() * READINGS_INTERVAL * 4.0, 5.0)` 作传送护栏，
+  超阈值的跳变按传送丢弃；`rebase_anchors_after_shift()` 同步 `_sail_prev` 锚点；
+  `farthest_m` **只在有效采样时更新**。
+
+### 3. 工程取值、bands 两层语义与落盘
+
+**工程取值**：`SAIL_MIN_STEP_M := 0.05`、`SAIL_MIN_SPEED_MPS := 0.5`、
+`SAIL_BADGES` 三档（100 / 500 / 1000 m）。依据最慢船型 **raft `max_speed_mps 5.0` 的 10%**。
+`SAIL_MIN_SPEED_MPS * READINGS_INTERVAL = 0.5 * 0.1 = 0.05`，与 `SAIL_MIN_STEP_M`
+**恒等**；保留前者作**速度语义锚点**，并**刻意不引入 `physics.speed()` 判据**——
+否则手动打节拍的探针物理速度恒 0，会让「里程反例」用例静默失效。
+
+**`bands` 两层语义必须如实写清，不得含糊成「到访次数」**：
+
+| 层 | 语义 | 说明 |
+|---|---|---|
+| 数据层 `BoatSystem.record_sail()` | **有位移的采样拍数** | 只在 `step_m > 0.0` 累加；长航程可达几千，**绝不等于到访次数** |
+| UI 层裁决 | **布尔式到访**：「已去过 ✓ / 还没去过」 | 避免 6-12 岁儿童把「拍数」误读成「到访次数」 |
+
+**落盘**：`SAVE_INTERVAL_MS := 1500` 防抖，`_dirty` + `_last_save_msec` + `_process()`
+合并写；`_save_journal()` 用 `.tmp` + `rename_absolute` **原子写**；`claim_badge()`
+**立即写**（一次性事件不丢，不等待防抖窗）；`journal_ok = false` 既是**损坏档保护**，
+也是**探针拒写闸**。
+
+### 4. 专属面板 UI 范式与 HUD 挂接
+
+- `scripts/ui/sailing_journal_ui.gd` 为 `extends Control`、**无 `class_name`**（项目铁律）；
+  面板暴露 **7 个只读查询 API** 供探针断言。
+- HUD 侧沿用 **D-087 范式**：`const SailingJournalUIScript := preload(...)` +
+  **无类型** `var _sailing_journal_ui = null`（**坑 #33**：接返回值禁用 `:=`）。
+- 入口按钮挂 `_touch_walk`（触屏），桌面自然无入口；`_any_overlay_open()` 用**独立 `if`**
+  增一条，**绝不改原有的反斜杠续行链**（**坑 #17**）。
+- `hud.gd` 共 **6 处插入**：`:9` preload、`:80` 成员、`:293` `_build_sailing_journal(root)`、
+  `:353-358` ESC 早退、`:2938-2940` `_any_overlay_open()`、`:3399-3442` 四函数 + 入口按钮。
+
+### 5. 本批新发现的 D-010 新形态（引擎关停期二次写盘）
+
+D-010 的既有形态是「不调写接口 ≠ 零写盘」（见 **D-088 §2 第 3 条**，权威出处
+`docs/decisions.md:2213`）。本批出现**第二处、成因不同**的新形态：
+
+- **现象**：本机基线 `user://boats.json` 是 **version 1**，探针读到后内存**宽容升级为 v2**；
+  `SaveGuard.restore()` 已把文件**逐字节还原成 v1**，但引擎关停期 Autoload
+  `BoatSystem._exit_tree()` 又**无条件写内存态 v2** 覆盖回去，回归 `diff -r` 报 DIFF。
+  首次实测还原目标 `{"current":"raft","fuel":{},"owned":["raft"],"version":1}` 被写成 v2。
+- **修复两处**：
+  ① `BoatSystem._exit_tree()` 改为**仅 `_dirty` 时补写**——读到旧档 ≠ 玩家改过存档；
+     标脏时仍 flush，**防抖语义不变**。
+  ② `tests/save_guard.gd:restore()` 末尾统一置 `FishingSystem.journal_ok = false` /
+     `BoatSystem.journal_ok = false`，**挡住所有走该助手的探针退出期二次写盘**。
+- `tests/save_guard.gd` 的 `EXTRA_FILES` 由 **5 项增至 6 项**（新增 `user://boats.json`）。
+- 三个新探针采用**三层闭合**：① 两个拒写闸最前 → ② 两份 `JOURNAL_PATH` 拨回开局值并
+  逐字节回写 / 删除 → ③ 最后 `SaveGuard.restore()`。
+- `sailing_journal_probe.gd` 新增 **E3 / E4 静态断言**把该不变量钉进**入库探针**
+  （回归脚本本身不入库）。
+- **反向对照**：把真实存档还原成 v1 后重跑 8 个无头探针，`RESTORED_OK`、
+  `boats.json` 仍是 v1、`reg_userdiff.txt` 为空。
+
+### 6. 第二节：D-077 三条待办收口（含回归登记与 ③ inventory 边界）
+
+**回归登记**：`tmp/run_regression.sh`（`.gitignore:11 tmp/` 忽略，**不入库**）由
+56 无头 + 14 窗口改为 **57 无头 + 16 窗口 = 73**；新增 `sailing_journal_probe`、
+`quest_shot`、`sailing_journal_shot`。`quest_shot` 原为 **0 PASS 纯手动取证探针**且不在
+full 档，登记后 **44 px / 三页签 / 入口断言**才自动跑。**入库的 D-010 保障**是
+`tests/save_guard.gd` + 各探针 snapshot / restore；脚本参数化后移 `tools/` **仍属待办**。
+
+**③ `inventory` 不落盘**：归**工作流 ③ / 任务 #44**，**不进本批 ②**；区块 / 地形改动
+落盘应回避。
+
+**D-077 三条待办收口**（原文见 D-077「待办（不阻塞本轮）」三条，保留不删）：
+
+1. **触屏「任务」入口**：`hud.gd:757-765` 新增 **76×76 Button**（`right_margin 658.0`）；
+   `quest_panel.gd` 面板内 **38 / 30 / 36 px 热区统一改 44**（`:70` close_btn 44×44、
+   `:81` 120×44、`:293` 110×44、`:336` (0,44)）；**刻意不改 `UiKit.make_close()`**
+   （7 个面板共用，改它会越界）。`quest_shot.gd` 由 0 PASS 纯取证扩成**带断言窗口探针**，
+   桌面兜底用隐藏 `Control` host 显式 `_build_action_buttons(touch_host)`；
+   **第三页签「探索课堂」截图正常，44 px 热区与三页签断言已实跑通过**；
+   **真机可点性仍待目检**。
+2. **`cards_read` 埋点**：`map_selector.gd:1001` `_open_card_detail()` 一行
+   `Progress.notify("cards_read")`（卡片 gui_input / 上一张 / 下一张 **三入口汇聚**）；
+   新增课堂 `cls_cards3`（`prerequisite` **留空**、goal count **3**、reward
+   **item 204 ×2**）；`progress_manager.gd` **零改动**。**如实写**：按「打开详情次数」
+   计数**未去重**，desc「不同地方」是**近似表述**，去重**另开票**。
+3. **环保课**：只做**层次 1 文案 / 注释诚实订正**——`quest_data.gd` 的 `a_protect_1`
+   desc 改「3 次遇到受保护的动物，都放下了手里的工具」，`player.gd:1106` 注释改为
+   「记一笔『试图伤害保护动物被拦截』」；**不改** `protected_blocked` goal key、
+   **不动埋点**、**不改成就判据**、**不动 `achievements()` 28 枚**。
+   **层次 2「图鉴 `protected_viewed`」会让已有存档进度作废，另开票**。
+4. **`tests/life_probe.gd` 新增 11 条断言**：卡片三入口 `cards_read +3`、
+   `lessons().size()==8`、`cls_cards3` prerequisite 留空、`goal_progress()`、`claim()`、
+   落盘往返、`a_protect_1` desc **不含「了解」防回退**；**删掉危险的换槽差分段**——
+   它会建 3 个真实槽并触发首槽迁移 `user://progress.json`，而 `life_probe` 是**内联快照
+   范式**，Parse Error / SIGTERM 时根档无法自还原，属**坑 #34 翻版**。
+
+#### 未做 / 另开票（真机目检统一裁决）
+
+- **字形回退（D-088 §6 已开票项的具体实例）**：本批新增面板
+  `scripts/ui/sailing_journal_ui.gd:111` 的标题是 `"⛵ 我的航海记录"`。目检
+  `tmp/sailing_journal_16x9.png` 与 `tmp/sailing_journal_20x9.png` 两张证据图，
+  **⛵ 在桌面字体下渲染成「黄色三角 + 字母 A」的缺字回退方块**（标题其余文字、
+  面板布局、20:9 标题不裁切均正常）。项目内 `fishing_gear_ui.gd:281`、
+  `race_result_ui.gd:166` 等处同样在用 emoji，属既有全局字体方案范围，**本批刻意不改、
+  不单独扩大字体方案范围**，留到真机目检统一裁决。**如实写**：桌面截图已复现缺字
+  回退，但按用户已定的 **① 遗留项归真机目检，不在 D-089 改代码**。
+
+### 7. 验收基线
+
+full 档 **73 探针 / 2876 PASS / 0 FAIL**；无头 **57 / 2511 PASS**、窗口 **16 / 365 PASS**。
+
+| 段 | 探针数 | 结果 |
+|---|---|---|
+| 无头段 | **57** | **2511 PASS / 0 FAIL**，6 组分段（10/10/10/10/10/7） |
+| 窗口段 | **16** | **365 PASS / 0 FAIL**，2 组分段（8/8） |
+| **合计** | **73** | **2876 PASS / 0 FAIL** |
+
+- **8 段全部 `[user://] RESTORED_OK` 零 DIFF**；最终 `diff -r` **rc=0**。
+- **D-010 终态**：`user://boats.json` 逐字节仍是 **version 1**（与跑前副本一致）、
+  `tmp/reg_userdiff.txt` 空、无未还原 `tmp/user_real_profiles*`、无残留 Godot 进程。
+- **与 D-088 对账**：**70 / 2778 → 73 / 2876**，增量恰好 = `sailing_journal_probe` **37** +
+  `life_probe` **11** + `quest_shot` **16** + `sailing_journal_shot` **34**（合计 **+98**）。
+- **9 个探针 `rc=139`**：`village_probe` / `life_probe` / `flight_probe` /
+  `crash_recover_probe` / `world_coord_probe` / `low_ring_probe` /
+  `cockpit_interior_probe` / `cockpit_align_probe` / `terrain_warning_probe`。全部
+  **FAIL=0** 且日志末尾各自的 `*_OK` 标记已打印，属**已知 Vulkan 清理段良性退出**；
+  D-088 当时只有 **3 个**（`village` / `crash_recover` / `terrain_warning`），本次
+  频率上升但无断言丢失。**如实记录为观察项、不判为回归失败，也不写作「零异常」**。
+- `flight_shot` **PASS=0** 是**历史纯取证探针**（本就无断言），**不是假绿**；新增的
+  `quest_shot` **16 PASS**、`sailing_journal_shot` **34 PASS** 均有断言。
+- **回归全绿不关闭真机目检待办**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、
+  `chunk_mesh_baseline` full 档重录仍待办（见 §6「未做 / 另开票」与 D-088 §6）。

@@ -997,6 +997,8 @@ func _open_card_detail(index: int) -> void:
 	_detail_title.text = String(card["title"])
 	_detail_text.text = String(card["text"])
 	_detail_art.queue_redraw()
+	# 卡片 gui_input / 上一张 / 下一张 三个入口都汇到这里，统一记一笔阅读量。
+	Progress.notify("cards_read")
 	_card_detail.visible = true
 	_card_detail.z_index = 10
 

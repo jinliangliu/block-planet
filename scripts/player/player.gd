@@ -1103,7 +1103,7 @@ func _attack_mob(mob: Mob) -> void:
 	if not toast.is_empty():
 		Events.notice.emit(toast)
 	if not bool(outcome["ok"]):
-		# 保护动物与幼体免伤：记一笔「了解保护动物」，用于对应成就。
+		# 保护动物与幼体免伤：记一笔「试图伤害保护动物被拦截」，用于对应成就。
 		if bool(outcome["protection"]):
 			Progress.notify("protected_blocked")
 		return

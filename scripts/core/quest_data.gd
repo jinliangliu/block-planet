@@ -279,6 +279,12 @@ static func _build() -> void:
 			"goal": {"type": "count", "key": "flew_distance", "count": 300},
 			"reward": {"item": 204, "count": 2},
 		},
+		{
+			"id": "cls_cards3", "category": Category.CLASSROOM, "prerequisite": "",
+			"title": "卡片小探险家", "desc": "翻开不同地方的知识卡片，认识地貌和住在那里的动物吧。",
+			"goal": {"type": "count", "key": "cards_read", "count": 3},
+			"reward": {"item": 204, "count": 2},
+		},
 	]
 
 	_achievements = [
@@ -436,7 +442,7 @@ static func _build() -> void:
 	# 保护动物（M8.2 / M8.3）
 	{
 		"id": "a_protect_1", "category": Category.EXPLORE, "prerequisite": "",
-		"title": "动物守护者", "desc": "了解 3 种受保护的动物，并且没有伤害它们。",
+		"title": "动物守护者", "desc": "3 次遇到受保护的动物，都放下了手里的工具",
 		"goal": {"type": "count", "key": "protected_blocked", "count": 3},
 		"reward": {"item": 204, "count": 3},
 	},

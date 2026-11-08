@@ -381,8 +381,9 @@ vehicle_id / position[3] / player），但格式是 **JSONL 而非 CSV**，只�
    `srgb_to_linear()`，否则红块渲染成粉红；且顶点色按 1/255 量化，比对不能 `==`。
 
 D-010 合规：存档 `user://race_records.json` 与 `race_replay.jsonl` 由探针
-读写时走 user:// 备份/还原；回归基线（D-088 后）：日常无头 **56 探针** /
-验收全量 **70 探针**（56 无头 + 14 窗口，`tmp/run_regression.sh` / `full` 档）。
+读写时走 user:// 备份/还原；回归基线（D-089 后）：日常无头 **57 探针** /
+验收全量 **73 探针**（57 无头 + 16 窗口，`tmp/run_regression.sh` / `full` 档）。
+本批 full 档实测 **2876 PASS / 0 FAIL**，8 段 `RESTORED_OK` 零 DIFF、最终 `diff -r` rc=0。
 结算屏截图见 `tests/race_result_shot.gd`（16:9 / 20:9 × 默认 / 圈速榜展开）。
 
 ---

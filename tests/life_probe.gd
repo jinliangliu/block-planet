@@ -1076,6 +1076,68 @@ func _run() -> void:
 	)
 	hud._map_selector._close_card_detail()
 	_check(not hud._map_selector._card_detail.visible, "详情浮层可关闭")
+
+	# ── 知识卡片阅读计数（D-089 阶段 1）：一律用「调用前后差值」，不钉存档绝对值 ──
+	# 埋点统一放在 _open_card_detail()，覆盖卡片点击 / 上一张 / 下一张三个入口。
+	var cards_baseline: int = int(Progress.counters.get("cards_read", 0))
+	hud._map_selector._open_card_detail(0)
+	var cards_after_open: int = int(Progress.counters.get("cards_read", 0))
+	_check(cards_after_open - cards_baseline == 1, "点开知识卡片：cards_read +1")
+
+	var cards_prev_button: Button = null
+	var cards_next_button: Button = null
+	var cards_detail_buttons: Array = hud._map_selector.find_children("*", "Button", true, false)
+	for card_node: Variant in cards_detail_buttons:
+		var detail_button := card_node as Button
+		if detail_button == null:
+			continue
+		if detail_button.text == "上一张":
+			cards_prev_button = detail_button
+		elif detail_button.text == "下一张":
+			cards_next_button = detail_button
+	_check(cards_prev_button != null and cards_next_button != null,
+		"详情浮层含上一张 / 下一张翻页按钮")
+	if cards_prev_button != null:
+		var before_prev: int = int(Progress.counters.get("cards_read", 0))
+		cards_prev_button.pressed.emit()
+		_check(int(Progress.counters.get("cards_read", 0)) - before_prev == 1,
+			"上一张翻页：cards_read +1")
+	if cards_next_button != null:
+		var before_next: int = int(Progress.counters.get("cards_read", 0))
+		cards_next_button.pressed.emit()
+		_check(int(Progress.counters.get("cards_read", 0)) - before_next == 1,
+			"下一张翻页：cards_read +1")
+	hud._map_selector._close_card_detail()
+
+	var cards_total: int = int(Progress.counters.get("cards_read", 0))
+	_check(cards_total - cards_baseline == 3, "卡片 / prev / next 三入口合计 cards_read +3")
+	_check(QuestData.lessons().size() == 8, "探索课堂共 8 课（含卡片小探险家）")
+	var cards_lesson: Dictionary = {}
+	for lesson_entry: Dictionary in QuestData.lessons():
+		if String(lesson_entry["id"]) == "cls_cards3":
+			cards_lesson = lesson_entry
+	_check(not cards_lesson.is_empty() and String(cards_lesson["prerequisite"]).is_empty(),
+		"卡片小探险家是独立根课程（prerequisite 留空）")
+	var cards_goal: Dictionary = {}
+	if not cards_lesson.is_empty():
+		cards_goal = cards_lesson["goal"]
+	var cards_progress: Vector2i = Progress.goal_progress(cards_goal)
+	_check(cards_progress.y == 3 and cards_progress.x == mini(cards_total, 3),
+		"新课进度为 [%d, 3]（实测 %s）" % [cards_progress.x, cards_progress])
+	var cards_reward: Dictionary = Progress.claim("cls_cards3")
+	_check(not cards_reward.is_empty() and int(cards_reward.get("count", 0)) == 2,
+		"读满卡片后可领取课程奖励")
+	_check(FileAccess.file_exists(Profile.slot_save_path()),
+		"课程领奖后进度已落盘往返（%s）" % Profile.slot_save_path())
+
+	# 防回退：环保课文案只做层次 1 订正，不得再出现「了解」这种与埋点不符的说法。
+	var protect_desc: String = ""
+	for achievement_entry: Dictionary in QuestData.achievements():
+		if String(achievement_entry["id"]) == "a_protect_1":
+			protect_desc = String(achievement_entry["desc"])
+	_check(not protect_desc.is_empty() and not protect_desc.contains("了解"),
+		"动物守护者文案与实际埋点一致（不含「了解」）")
+
 	hud.close_map_selector()
 	_check(not hud._map_selector.is_open() and player.is_physics_processing(),
 		"关闭选择器后玩家恢复物理处理")

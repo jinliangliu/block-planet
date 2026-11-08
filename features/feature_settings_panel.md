@@ -265,9 +265,12 @@ D-010 合规：`settings_panel_probe` 先快照真实 `user://settings.json`，�
 `FlightSettings.set_current(default_settings())` 隔离单例，结束原样还原
 （`_restore_settings()` 幂等还原 + `_exit_tree` 安全网 + 90 秒看门狗，
 防协程猝死时还原不执行）；按钮点击走 `pressed.emit()`，与真实点击同路。
-回归基线：日常无头 **43 探针**（新增 `fishing_probe`，见
-`features/feature_fishing.md`）/ 验收全量 **54 探针**（含 11 个窗口截图，
-`tmp/run_regression.sh` / `tmp/run_regression.sh full`）全绿、存档逐字节还原；
+回归基线（D-089 后）：日常无头 **57 探针** / 验收全量 **73 探针**
+（57 无头 + 16 窗口截图，`tmp/run_regression.sh` / `tmp/run_regression.sh full`），
+本批 full 档实测 **2876 PASS / 0 FAIL**，8 段 `RESTORED_OK` 零 DIFF、最终 `diff -r` rc=0，
+存档逐字节还原。D-058 落地时此处记 43 / 54（含 11 窗口、新增 `fishing_probe`，
+见 `features/feature_fishing.md`），属历史实施快照口径，当前基线以
+`docs/decisions.md` D-089 为准。
 `settings_panel_probe` 62 PASS（26 + 23 + 9 + 4）、`flight_settings_probe`
 35 PASS（31 + 4）。风场行为由 `wind_flight_probe` 专责（40 断言）。
 

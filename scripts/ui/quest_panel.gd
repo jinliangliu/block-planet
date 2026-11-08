@@ -67,6 +67,7 @@ func _ready() -> void:
 	header.add_child(title)
 	# 关闭按钮：UiKit 统一透明底 + 红色 ✕，避免 Godot 默认按钮底盖住面板色。
 	var close_btn := UiKit.make_close()
+	close_btn.custom_minimum_size = Vector2(44, 44)
 	close_btn.pressed.connect(close)
 	header.add_child(close_btn)
 
@@ -77,7 +78,7 @@ func _ready() -> void:
 		var btn := Button.new()
 		btn.text = TAB_TITLES[i]
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = Vector2(120, 38)
+		btn.custom_minimum_size = Vector2(120, 44)
 		btn.add_theme_font_size_override("font_size", 18)
 		btn.add_theme_color_override("font_color", TITLE_COLOR)
 		var idx := i
@@ -289,7 +290,7 @@ func _make_entry(entry: Dictionary, show_status: bool) -> Control:
 
 	var action := Button.new()
 	action.focus_mode = Control.FOCUS_NONE
-	action.custom_minimum_size = Vector2(110, 30)
+	action.custom_minimum_size = Vector2(110, 44)
 	action.add_theme_font_size_override("font_size", 14)
 	var entry_id := String(entry["id"])
 	if state == Progress.State.DONE:
@@ -332,7 +333,7 @@ func _build_quiz_section() -> void:
 		var btn := Button.new()
 		btn.text = _quiz_options[i]
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = Vector2(0, 36)
+		btn.custom_minimum_size = Vector2(0, 44)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.add_theme_font_size_override("font_size", 15)
 		btn.disabled = _quiz_busy

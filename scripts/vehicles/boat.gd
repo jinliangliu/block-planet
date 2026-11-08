@@ -6,9 +6,9 @@ extends CharacterBody3D
 ## 本节点只做「把状态搬进场景」——浮水/地形碰撞/骑乘座位/读数广播。
 ## 船模是 BoatModel（程序化盒子拼装）。
 ##
-## 世界尺度（D-030）：1 格 = 0.5 m。水线 = SEA_LEVEL + 1（水填到 y≤22，
-## 可浮面在 23）。船体碰撞盒半高 1.1，底落在水线略下方——深水不搁浅，
-## 滩涂地形高出水线时自然被碰撞盒挡住（搁浅）。
+## 世界尺度（D-062 P1 起 1 格 = 1 m；D-030 的 0.5 m/格 已废止）。水线 =
+## SEA_LEVEL + 1（水填到 y≤22，可浮面在 23）。船体碰撞盒半高 1.1，底落在
+## 水线略下方——深水不搁浅，滩涂地形高出水线时自然被碰撞盒挡住（搁浅）。
 ##
 ## 驾驶输入（piloted 且 use_player_input 且 BoatSystem.input_suspended 为假）：
 ##   W/S → 油门加/减（S 是倒车，油门取负）   A/D → 左/右舵
@@ -16,7 +16,7 @@ extends CharacterBody3D
 ## 探针把 use_player_input 置否、直接写 physics.throttle/steer 走同一路径。
 ##
 ## 航线数据（HUD 与钓鱼分带共用）：harbor_pos 由 Main 摆船时注入
-## （港口泊位），距港距离 = 横向距离 × 0.5 m。
+## （港口泊位），距港距离 = XZ 横向距离直接 .length()（1 格 = 1 m，不乘系数）。
 
 ## 读数广播节流（秒）：与 Aircraft 一致。
 const READINGS_INTERVAL := 0.1
@@ -37,6 +37,16 @@ const REFUEL_RADIUS := 14.0
 const REFUEL_RATE := 2.0
 ## 油料落盘节流（秒）：骑行中定期存，避免每次抖动都写盘。
 const FUEL_SAVE_INTERVAL := 2.0
+## 里程采样噪声地板（D-089，主理人裁定值）：0.05 m ≈ 0.5 m/s × 0.1 s 采样
+## 间隔，即最慢木筏极速 5.0 m/s 的 10%。piloted 硬闸不可省；不照搬
+## :199 的 speed() > 3.0（那是加油判据，会丢掉木筏大半航程）。
+## 如实标注：SAIL_MIN_SPEED_MPS × READINGS_INTERVAL = 0.5 × 0.1 = 0.05，与
+## SAIL_MIN_STEP_M 恰好相等，故 _sample_sail() 里的 maxf 恒返回 0.05 ——
+## SAIL_MIN_SPEED_MPS 当前只是速度语义锚点，**不构成独立速度判据**。
+## 刻意不引入 physics.speed() 判据：探针手动写 global_position 打节拍，物理
+## 速度恒 0，加它会使全部里程反例断言静默失效（本批禁止跑 Godot，无法实测）。
+const SAIL_MIN_STEP_M: float = 0.05
+const SAIL_MIN_SPEED_MPS: float = 0.5
 
 ## 每帧读数变化时广播（节流到 READINGS_INTERVAL），航海 HUD 监听。
 signal readings_changed(snapshot: Dictionary)
@@ -66,6 +76,10 @@ var _refuel_noticed := false
 var _bob_phase := 0.0
 ## 最近一次算出的海况（HUD 风向显示用；不重算，保证与物理同一份）。
 var _last_sea: Dictionary = {}
+## 累计出海里程采样（D-089）：只存上一拍的 XZ 节点坐标（Vector2 标量值），
+## 不跨帧持有任何玩家态容器，换槽后由 set_piloted() 复位。
+var _sail_prev: Vector2 = Vector2.ZERO
+var _sail_has_prev: bool = false
 
 
 func _ready() -> void:
@@ -211,7 +225,50 @@ func _emit_readings(delta: float) -> void:
 	if _readings_timer > 0.0:
 		return
 	_readings_timer = READINGS_INTERVAL
+	# D-089 唯一采样落点：节流到每 0.1 s 一次。绝不放进 snapshot()（它被
+	# BoatHUD._draw() 每渲染帧调用，里程会随帧率翻倍），也不挂
+	# readings_changed（全仓零 connect，是死信号）。snapshot() 保持纯读。
+	_sample_sail()
 	readings_changed.emit(snapshot())
+
+
+## D-089 累计里程 = 相邻两拍的**节点 XZ 位移长度之和**，不是离港距离累加。
+func _sample_sail() -> void:
+	# ① 硬闸：无人船不记里程。_emit_readings() 不判断 use_player_input，港湾里
+	# ≥2 艘景观船仍每 0.1 s 广播；WIND_PUSH × WIND_MAX_MPS 还会让停泊船缓慢漂流。
+	if not piloted:
+		_sail_has_prev = false
+		return
+	# ② ③：XZ 平面 + 节点 global_position。波浪 bob 让 Y 摆 ±0.2 m，用 3D
+	# distance_to 会给停泊船凭空造 0.5~1 m/s 垂直里程；physics.pos 是纯逻辑
+	# 积分，搁浅时 move_and_slide 挡住节点而 pos 仍前进 ⇒ 虚增。
+	var here: Vector2 = Vector2(global_position.x, global_position.z)
+	# ④ 首次采样（含登船）只播种不累加。
+	if not _sail_has_prev:
+		_sail_prev = here
+		_sail_has_prev = true
+		return
+	var step: float = here.distance_to(_sail_prev)
+	_sail_prev = here
+	# ⑤ 传送护栏：5.0 m 地板。超限时只更新 prev，不累加、farthest_m 也不更新
+	# （≥4096 m 的浮动原点搬迁另由 rebase_anchors_after_shift() 同步 prev）。
+	var max_step: float = maxf(physics.max_speed() * READINGS_INTERVAL * 4.0, 5.0)
+	if step > max_step:
+		return
+	# ⑥ 噪声过滤：小于 0.05 m 的抖动不累加里程，但仍是「通过护栏的有效采样」，
+	# 照常上报（step_m=0）让 farthest_m 记录到过的最远处。
+	# 如实标注：SAIL_MIN_SPEED_MPS × READINGS_INTERVAL 与 SAIL_MIN_STEP_M 同为
+	# 0.05，此 maxf 恒等于 0.05（见 :40-48）；速度常量不产生独立过滤效果。
+	# counted=0 仍上报，但 BoatSystem.record_sail() 只在 step_m>0 时累加 bands，
+	# 静止不会把分带计数刷成采样次数。
+	var min_step: float = maxf(SAIL_MIN_STEP_M, SAIL_MIN_SPEED_MPS * READINGS_INTERVAL)
+	var counted: float = step if step >= min_step else 0.0
+	# ⑨ 无港口时 band 取 near、farthest_m 不更新（record_sail 内按负距离判）。
+	var dist: float = distance_to_harbor()
+	if dist < 0.0:
+		BoatSystem.record_sail(counted, -1.0, "near")
+		return
+	BoatSystem.record_sail(counted, dist, BoatSystem.band_of(dist))
 
 
 ## 最近一次物理帧算出的海况（HUD 显示用，不重算）。
@@ -255,6 +312,9 @@ func seat_transform() -> Transform3D:
 func set_piloted(value: bool, who: Player = null) -> void:
 	piloted = value
 	rider = who if value else null
+	# ⑦ 登 / 离船切换时清上一拍，避免把「登船前的位移」或「离船期间的传送」
+	# 算成这次驾驶的里程。
+	_sail_has_prev = false
 	if value:
 		boarded.emit(who)
 	else:
@@ -291,10 +351,15 @@ func setup_world(world: World, day_night: DayNightCycle) -> void:
 func rebase_anchors_after_shift(delta: Vector3) -> void:
 	if harbor_pos != Vector3.ZERO:
 		harbor_pos += delta
+	# ⑧ 节点位置由 Main 组遍历整体 +delta，上一拍采样点必须同步平移，
+	# 否则 ≥4096 m 的浮动原点搬迁会被算成一段巨额里程。
+	_sail_prev += Vector2(delta.x, delta.z)
 
 
 ## 摆一艘船：parent 下的新节点，落位 at、船头朝向 facing（rotation.y）。
-## use_player_input=false 的实例是港口里泊着的装饰船（不读输入、不广播）。
+## use_player_input=false 的实例是港口里泊着的装饰船（不读输入；但 _emit_readings()
+## 不判断 use_player_input，读数广播仍每 0.1 s 发生，里程靠 _sample_sail() 的
+## piloted 硬闸排除，不是靠「不广播」）。
 static func spawn(parent: Node, at: Vector3, facing: float, which_boat_id: String,
 		use_input: bool = true) -> Boat:
 	var boat := Boat.new()

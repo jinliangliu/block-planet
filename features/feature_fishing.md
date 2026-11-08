@@ -311,12 +311,15 @@ vs 记录态 20 格），且任意 `quest_claimed` 都会触发任务面板整�
 > `FishingSystem._exit_tree` 会把探针改乱的日志再写一遍盘），`_exit_tree`
 > 安全网 + 120 s 看门狗兜底；断言全部走「基线差分」，真实存档里已有什么
 > 都不影响结论。
-> 回归基线（D-088 后）：日常无头 **56 探针** / 验收全量 **70 探针**
-> （56 无头 + 14 窗口截图，`tmp/run_regression.sh` / `tmp/run_regression.sh full`）。
+> 回归基线（D-089 后）：日常无头 **57 探针** / 验收全量 **73 探针**
+> （57 无头 + 16 窗口截图，`tmp/run_regression.sh` / `tmp/run_regression.sh full`）。
+> 本批 full 档实测 **2876 PASS / 0 FAIL**，8 段 `RESTORED_OK` 零 DIFF、最终 `diff -r` rc=0。
+> D-089 新增 `sailing_journal_probe`（无头）与 `quest_shot` /
+> `sailing_journal_shot`（窗口，后者 16:9 / 20:9 两档）。
 > D-088 新增 `fishing_collection_shot`（5 张 PNG：16:9 / 20:9 × 默认 / 滚到底 /
 > 全收集）与 `race_result_shot`（4 张 PNG：16:9 / 20:9 × 默认 / 圈速榜展开），
 > 两档比例分别 1280×720、1280×576；`SHOT_ONLY="a b"` 可只跑指定窗口探针。
-> 本环境单次 600 s 跑不完 56 个探针，日常档需按 ~10 个一组分段串行（每段各自
+> 本环境单次 600 s 跑不完 57 个探针，日常档需按 ~10 个一组分段串行（每段各自
 > 备份 / 还原 / 零 DIFF）。
 
 ---
