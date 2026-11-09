@@ -8,8 +8,8 @@ extends Node
 ##   ③b 渐变带「限高不加剧陡壁」：同一批点比较限高后与未限高的单步落差。
 ## 运行：Godot --headless --path . res://tests/terrain_survey_probe.tscn
 
-const CX := 114          # 机场中心格（与 main._airport_center(ASIA) 有交叉断言）
-const CZ := 96
+const CX := 114          # 机场中心格（与 main._airport_center 有交叉断言）
+const CZ := -40          # D-091 机场中心南移到 (114,-40)
 const VALLEY_R := 260    # 谷地盘巡察半径（格）：< world.VALLEY_R(300) 的纯谷地
 const RING_IN := 950     # 环带内半径：> world.VALLEY_RAMP(600, D-073)，已是全量地形
 const RING_OUT := 1500

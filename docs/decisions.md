@@ -4371,3 +4371,85 @@ A4 FD 巡航淡出、C1 #12 太阳高度曲线、C2 距离雾），并把 5 项*
   `stall_coach_shot` / `flight_hud_shot` / `coach_cockpit_shot` / `cockpit3d_shot` 等产出后
   **交由用户在真机目检**——与 D-088/D-089 一致的「回归全绿不关闭真机目检」口径，本批
   不改视觉目检待办的性质。
+
+## D-091 跑道延长 3 倍 + 进近/离场净空通道（2026-11-09）
+
+**结论**：承接用户「飞行模式，跑道太短，在现有基础上延长3倍，另外跑道尽头不要搞障碍物，
+例如高山、树木等，保持航道通畅。」落地两项改动：① 跑道在 D-040（56→112）基础上再延长 3 倍
+→ `RUNWAY_LEN` 112→**336 格（56 m → 168 m）**；② 新增 builder 层「进近/离场净空通道」
+`_clear_approaches()`，在跑道两端各清 `APPROACH_LEN=48` 格、宽 = 跑道半宽 + 两侧 `SHOULDER=4`、
+向上清到 `APPROACH_H=56` 的走廊，削平高山 + 清树，保证起飞/降落航道通畅、无高山树木阻挡。
+为避让村庄 C，机场中心由 `(114,0,96)` 南移到 `(114,0,-40)`（6 个带机场区域共用同一中心）。
+**不新增 `class_name`、不触碰任何 `user://` 写路径、不引入新存档字段**。
+
+**范围**：改 3 个系统/数据文件——`scripts/systems/airport_builder.gd`、
+`scripts/main.gd`、`scripts/world/region_atlas.gd`，以及 3 个探针字面量同步——
+`tests/airport_probe.gd` / `tests/landing_field_probe.gd` / `tests/terrain_survey_probe.gd`。
+`_clear_approaches()` 是 builder 既有流程（`_flatten_ground` → `_clear_approaches` → `_pave_runway`）
+的一环，**无新机制、无新文件、无新 Autoload、无新存档键**。
+
+### 1. 抉择依据（用户原话两条）
+
+- **延长 3 倍**：D-040 已把 56→112，本轮 112×3 → 336 格（168 m）。儿童向体素沙盒、中低端
+  Android，起飞滑跑距离更充裕、降落容错更高，对玩法零负面。
+- **净空通道**：原机场只整平跑道核心区（`RUNWAY_WID` + 施工缘），两端是原始地形（谷地/丘陵/
+  树/山）。延长后两端更可能顶到地形，故在 builder 层**通用**新增 `_clear_approaches()`，
+  覆盖所有区域（含无 valley 限高的 5 区）：向下填 `DIRT` 成平台（`base_y-3..base_y`）、
+  向上清 `AIR` 到 `APPROACH_H`（`base_y+1..base_y+APPROACH_H`），削平高山、清掉树木；
+  宽 = 跑道半宽 + `SHOULDER(4)`，避开翼尖擦树。呼应「跑道尽头不要障碍物，保持航道通畅」。
+- **中心南移避让村庄 C**：村庄 C 由固定偏移 `(16,0,128)` 落到 `z≈160`（`X [42,98]`）。原中心
+  `(114,0,96)` 的 336 长跑道北端 = 96+168 = 264，会穿透村庄 C（跑道 `X [88,140]` 与村 C
+  `X [42,98]` 在 88..98 重叠、南缘 `z=160`）。南移到 `(114,0,-40)`：北端 = −40+168 = 128，
+  与村 C 留 32 格（16 m）间隔；南端 = −40−168 = −208，朝负 Z 无村庄，净空充足。**所有带机场
+  区域共用同一中心**（村 C 偏移与区域无关，各区均须南移避让）。
+- **中心权威链**：`main._airport_center()`（返回中心）→ `region_atlas` 该区域字典的
+  `airport_center` + `flat_zones`（亚洲专属，用于 `world._layered_height` valley 限高、
+  河流抑制）→ `terrain_survey_probe` 交叉断言三处一致，否则 FAIL。故三处必须同步改：
+  `main.gd` 返回 `(114,-40)`、`region_atlas` 亚洲 `airport_center=[114,-40]` 且 `flat_zones`
+  南扩、`terrain_survey_probe` 字面量 `CX=114 / CZ=-40`。
+
+### 2. 改动表
+
+| 文件 | 改动 |
+|---|---|
+| `scripts/systems/airport_builder.gd` | `RUNWAY_LEN` `112 → 336`（注释标注「D-040 基础上延长 3 倍 → 112→336 格（56 m → 168 m）」）；新增常量 `APPROACH_LEN=48` / `APPROACH_H=56` / `SHOULDER=4`；新增实例变量 `_core_min/_core_max`（核心整平区：跑道 + 两侧 `SHOULDER` + 施工缘），`_min_c/_max_c` 在核心区基础上 `±APPROACH_LEN` 伸展为含两端走廊的预加载/重建范围；`_begin()` 用 `half_ws=_half_w+SHOULDER` 算核心区；`_flatten_ground()` 仅整平核心区（不动两端）；新增 `_clear_approaches()`（`build`/`build_field` 均在 `_flatten_ground` 后调用）削平 + 清树两端走廊 |
+| `scripts/main.gd` | `_airport_center()` 统一返回 `Vector3i(114, 0, -40)`（删原 ASIA/其余分支），注释详述南移避让村 C 的几何理由与「必须与 `region_atlas` 同步改」 |
+| `scripts/world/region_atlas.gd` | 亚洲字典 `flat_zones` 两段南扩：`[84,-214,144,134]`（机场 336×52 + 机库 + 施工缘 + 南进近通道）、`[78,-270,146,138]`（机场外缘缓冲，北端止于村 C 以南）；`airport_center` 同步 `[114,-40]`；注释「与 `main._airport_center(ASIA)` 的 `(114,-40)` 必须一致」 |
+| `tests/airport_probe.gd` | 扫描区同步中心 `(114,-40)`、长 337/336；导航灯断言改用 `_airport_center()` 推导 `south_nav_z=ap_center.z-168` / `north_nav_z=ap_center.z+168`（修复负 Z 出生点 `int()` 截断 ±1 偏差） |
+| `tests/landing_field_probe.gd` | `center` 字面量 `Vector3i(114, 0, -40)` |
+| `tests/terrain_survey_probe.gd` | `const CX := 114` / `const CZ := -40`，其余扫描逻辑按 `CZ` 动态适配 |
+
+### 3. 明确不做 + 另开票清单
+
+| 项 | 原因（如实写） | 归处 |
+|---|---|---|
+| 村庄 C 以北进近段近地预警（GPWS，P2b） | 静态几何已留 32 格间隔，但动态近地预警是另一系统（`D-074` Gap A 双门槛仅覆盖起飞段） | 另开票（进近段近地预警） |
+| 窗口截图 PNG 真机目检 | 本批纯几何/地形改动、无 HUD/动画变更；延长后跑道在真机的观感（长跑道占比、进近走廊视觉）仍建议用户目检 | 真机目检（非回归阻塞） |
+| 其余 5 个带机场区域（EUROPE/AFRICA/NA/SA/OCEANIA）的 `flat_zones` | 当前仅亚洲字典含 `flat_zones`/`airport_center`（其余 5 区走 classic 地形、无 valley 限高）；`_clear_approaches` 已 builder 层通用覆盖所有区域，无需为 5 区单独加 `flat_zones` | 不做 |
+
+### 4. 风险与回归影响
+
+- **3 系统/数据文件均不触碰 `user://` 写路径**：`airport_builder` 只写区块网格、`main.gd` 只返回
+  中心常量、`region_atlas` 纯数据。**D-010 存档污染风险为零**。
+- **无 `class_name` 新增**；GDScript 改动 `git diff --check` rc=0、零 tab、无警告。
+- **几何改动前的 `chunk_mesh_baseline` 对比**：本批只改机场周边区块（机场区属「出生点保留窗」外、
+  boot 时不建全量网格），且 `_clear_approaches` 仅削平 + 清树两端走廊，不影响已录制 baseline 的
+  主体地形区块。窗口截图目检项仍待办（见 §3）。
+- **`terrain_survey_probe` 三处中心交叉断言是硬闸**：改一处漏改另一处即 FAIL——本轮三处同步改后
+  该探针 0 FAIL。
+
+### 5. 验证基线（D-010 零 DIFF 门）
+
+- **靶向无头探针（5 项，均 0 FAIL / 退出码 0 / 无 SCRIPT ERROR / Parse Error）**：
+  - `airport_probe`：PASS=18 / `AIRPORT_TEST_OK`（跑道长 336、导航灯南北、cobble 铺装、flat_zones 内整平）
+  - `village_probe`：PASS=38 / `VILLAGE_TEST_OK`（中心南移后未与村庄 A/B/C 碰撞）
+  - `terrain_survey_probe`：PASS=24 / 0 FAIL（`main._airport_center` ≡ `region_atlas.airport_center` ≡ `world` valley center 三处一致）
+  - `landing_field_probe`：PASS=20 / 0 FAIL（降落场中心同步 `(114,-40)`）
+  - `flight_probe`：PASS=146 / 0 FAIL（飞行气动/任务无回归）
+- **整轮回归（`tmp/run_regression.sh headless` 57 无头 + `full` 16 窗口）因沙箱 `[safe-delete]`
+  拦截批量删 `tmp/user_backup`（76 文件 > 50 阈值需交互确认）未能在本环境自动跑完**；已用上述 5 个
+  靶向无头探针替代验证 0 失败。建议在可放行环境或用户手动放行后补跑完整 57 无头 + 16 窗口回归，
+  窗口截图 PNG 交用户真机目检。
+- **唯一已知非回归 FAIL**：`flight_view_probe` 在无头下故意 FAIL ①「跑道上已自动生成可见飞机」——
+  该飞机由 `main.gd:185-186` 的 `DisplayServer.get_name() != "headless"` 守卫才摆上跑道，无头下
+  永远等不到，属窗口探针无头假阴性，**非本改动回归**（与 D-090 同一已知项）。

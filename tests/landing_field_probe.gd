@@ -34,7 +34,7 @@ func _ready() -> void:
 func _run() -> void:
 	# 大陆区走 build()（带机库的完整机场），大洋/极地区走 build_field()。
 	var cases := [
-		{"region": RegionAtlas.ASIA, "airport": true, "center": Vector3i(114, 0, 96)},
+		{"region": RegionAtlas.ASIA, "airport": true, "center": Vector3i(114, 0, -40)},
 		{"region": RegionAtlas.ATLANTIC, "airport": false, "center": Vector3i(8, 0, 8)},
 		{"region": RegionAtlas.ARCTIC, "airport": false, "center": Vector3i(8, 0, 8)},
 		{"region": RegionAtlas.INDIAN, "airport": false, "center": Vector3i(8, 0, 8)},

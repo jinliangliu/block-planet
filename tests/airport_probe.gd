@@ -35,14 +35,14 @@ func _run() -> void:
 	GameState.set_mode(GameState.Mode.SURVIVAL)
 
 	# 1) 机场跑道已生成：统计机场区域内 COBBLESTONE 跑道方块数量。
-	#    机场中心 (114,96)，跑道宽 52 / 长 113（RUNWAY_LEN=112，用户要求长度加倍：
-	#    56→112 格），机库另铺圆石，整条跑道即约 53×113≈6000 块。
-	#    先同步强制加载机场整区：流式 LOAD_RADIUS=2 只保出生点（z=43）周边，
-	#    跑道北端 z=152 距出生点逾百格，不 ensure 则 get_block 对未载区块返 AIR。
-	world.ensure_chunks_in_region(Vector3i(82, 0, 34), Vector3i(146, 0, 158))
+	#    机场中心 (114,-40)，跑道宽 52 / 长 337（RUNWAY_LEN=336，D-091 在 D-040
+	#    加倍基础上再延长 3 倍：112→336 格），机库另铺圆石，整条跑道即约 53×337≈17800 块。
+	#    先同步强制加载机场整区：跑道南端 z≈-208、北端 z≈128，不 ensure 则
+	#    get_block 对未载区块返 AIR。
+	world.ensure_chunks_in_region(Vector3i(82, 0, -264), Vector3i(146, 0, 140))
 	var cobble := 0
 	for x in range(86, 147):
-		for z in range(34, 159):
+		for z in range(-260, 135):
 			for y in range(30, 46):
 				if world.get_block(Vector3i(x, y, z)) == BlockTypes.Block.COBBLESTONE:
 					cobble += 1
@@ -64,12 +64,15 @@ func _run() -> void:
 	_check(on_runway, "出生点落在跑道旁（出生列 %s）" % Vector3i(player.global_position.floor()))
 
 	# 2b) 机场进近导航灯：南端绿门槛（进场）/ 北端红端行（远端），视觉对齐 +Z 进近。
-	#     机场 RUNWAY_LEN=112：出生点落在 center.z-_len/2+3，故南绿在 spawn_z-3、
-	#     北红在 spawn_z+109（均在上方 ensure 的整区内、base_y 高度）。
+	#     导航灯落在跑道两端：z = center.z ∓ RUNWAY_LEN/2。直接用 main 的机场中心推导，
+	#     避免玩家落点浮点（出生点含 +0.5 偏移、且为负值）取整导致的 ±1 格偏差。
+	var ap_center: Vector3i = main_scene._airport_center(GameState.current_region)
+	var south_nav_z := ap_center.z - 168   # origin.z - RUNWAY_LEN/2（RUNWAY_LEN=336，半长 168）
+	var north_nav_z := ap_center.z + 168
 	var ap_nav := false
 	for dx in range(-6, 7):
-		var south := world.get_block(Vector3i(spawn_x + dx, feet_y, spawn_z - 3))
-		var north := world.get_block(Vector3i(spawn_x + dx, feet_y, spawn_z + 109))
+		var south := world.get_block(Vector3i(spawn_x + dx, feet_y, south_nav_z))
+		var north := world.get_block(Vector3i(spawn_x + dx, feet_y, north_nav_z))
 		if south == BlockTypes.Block.NAV_GREEN and north == BlockTypes.Block.NAV_RED:
 			ap_nav = true
 			break
@@ -99,18 +102,18 @@ func _run() -> void:
 	_check(after == before + 1, "生存模式回收飞机退回背包（+1，%d → %d）" % [before, after])
 
 	# 4) 飞行任务航路 / 降落区锚定机场（runway ↔ mission 联动）。
-	#    机场中心随跑道加宽东移到 (114,96)（避开亚洲村庄 A），任务锚点同步。
+	#    机场中心 D-091 南移到 (114,-40)（避让村庄 C），任务锚点同步。
 	#    D-072：锚点 y = 跑道面（base_y+1，探针里用默认 30）——航点不再埋地下。
-	var mm := MissionData.missions_for_airport(Vector3(114.0, 30.0, 96.0))
+	var mm := MissionData.missions_for_airport(Vector3(114.0, 30.0, -40.0))
 	_check(mm.size() == 3, "missions_for_airport 返回三任务")
 	var landing: MissionData = mm[2]
 	_check(landing.type == MissionData.Type.LANDING, "第三个任务为降落")
-	_check(landing.zone_center.distance_to(Vector3(114.0, 0.0, 96.0)) < 0.01,
-		"降落区锚定机场中心 (114,96)")
+	_check(landing.zone_center.distance_to(Vector3(114.0, 0.0, -40.0)) < 0.01,
+		"降落区锚定机场中心 (114,-40)")
 	var circuit: MissionData = mm[1]
 	var anchored := circuit.waypoints.size() == 4
 	for wp: Vector3 in circuit.waypoints:
-		if Vector2(wp.x - 114.0, wp.z - 96.0).length() > 200.0:
+		if Vector2(wp.x - 114.0, wp.z + 40.0).length() > 200.0:
 			anchored = false
 	_check(anchored, "绕点航路绕机场中心（4 点，均在 200 m 内）")
 
@@ -132,7 +135,7 @@ func _run() -> void:
 	var wps := circuit.waypoints
 	var sized := wps.size() == 4
 	var final_on_centerline := sized and is_equal_approx(wps[3].x, 114.0) and is_equal_approx(wps[0].x, 114.0)
-	var spans_runway := sized and wps[0].z > 96.0 + 28.0 and wps[2].z < 96.0 - 28.0
+	var spans_runway := sized and wps[0].z > -40.0 + 28.0 and wps[2].z < -40.0 - 28.0
 	_check(final_on_centerline and spans_runway, "绕点航路末程对准跑道中线（单向进场，x=114）")
 
 	# 端到端：main 经 HUD 注入后，面板实际持有的是锚定机场的任务集。
@@ -141,7 +144,7 @@ func _run() -> void:
 	var live_ok := false
 	if panel != null and panel._missions.size() == 3:
 		var live_landing: MissionData = panel._missions[2]
-		live_ok = live_landing.zone_center.distance_to(Vector3(114.0, 0.0, 96.0)) < 0.01
+		live_ok = live_landing.zone_center.distance_to(Vector3(114.0, 0.0, -40.0)) < 0.01
 	_check(live_ok, "面板降落区已锚定机场（端到端注入生效）")
 
 	# 5) 简易降落场（build_field）：大洋/极地区域的无机库短跑道。

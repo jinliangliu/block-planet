@@ -12,32 +12,34 @@ extends RefCounted
 ## 无机库的短窄跑道，供大洋（岛上）/ 极地（冰面）区域使用；铺装、出生点
 ## 逻辑与机场一致。
 
-const RUNWAY_LEN := 112          # 沿 +Z。用户要求「跑道长度增加一倍」：56 → 112 格
-## （28 m → 56 m）。半长 56 格内：南端 spawn+3 / 停机位 +22 / 机库 4 格，北端
-## 仍留 ≥30 格（15 m）净空供满油门滑跑抬轮；村庄 C 南缘 z=160 与跑道北端
-## （z=153）保持 7 格间隔，亚洲区不冲突（见 main._airport_center 注释）。
-## 沿 X。用户选定「跑道加宽到翼展全包」：翼展 48 格 + 每侧 2 格余量 = 52 格。
-## D-062 P1 起 1 格 = 1 m，故 52 格宽 = 52 m（原 0.5 m/格 时为 26 m；§3.3 表即按
-## 「格数不变、米值翻倍」处置）。（旧值 12 格只有 12 m，比机身碰撞盒 13.2 格还窄，
-## 只是踩着中线滑跑——这是「米误标格」同源错误，已订正。）
+const RUNWAY_LEN := 336          # 沿 +Z。D-091：在 D-040（56→112）基础上「延长 3 倍」→ 112→336 格（56 m → 168 m）。
+## 半长 168 格内：南端 spawn+3 / 停机位 +22 / 机库 4 格，北端仍留 ≥140 格净空供满油门滑跑抬轮。
+## 机场中心由 main._airport_center 南移到 (114,0,-40)（见该函注释）：跑道北端 = -40+168 = 128，
+## 与村庄 C 南缘 z=160 保持 32 格（16 m）间隔，避让村庄结构；南端 = -40-168 = -208，
+## 朝负 Z 无村庄，净空充足。两端再各清 APPROACH_LEN 格进近/离场净空通道（削山 + 清树，见 _clear_approaches）。
+## 沿 X。用户选定「跑道加宽到翼展全包」：翼展 48 格 + 每侧 2 格余量 = 52 格（52 m，D-040 已订正）。
 const RUNWAY_WID := 52
 const CLEAR_H := 12              # 跑道 / 机库上方净空（块）
 const HANGAR_DEPTH := 4
-## 机库宽度（格）。机库宽度与跑道宽度**解耦**：跑道按翼展加宽后不应把这座装饰性
-## 棚屋连带拉宽（它进深仅 4 格、围墙 6 格高、朝跑道只开 3 格门洞，本就不是能停机的
-## 库；拉到 54 格宽 × 4 格深，视觉上就是一堵 54 m 长的大墙挖了个洞，且没有任何玩法
-## 收益——机翼塞不进去）。12 格（= 12 m，P1 后），取体素 0.5 m 化之前的旧跑道
-## 宽度，保持机库原有外观。
+## 机库宽度（格）。机库宽度与跑道宽度**解耦**（D-040 已定）：保持 12 格原有外观，
+## 不被 336 长跑道连带拉宽（它进深仅 4 格，本就不是能停机的库）。
 const HANGAR_WID := 12
-const FIELD_LEN := 32            # 简易降落场：短跑道，够起飞 / 停稳即用
+const FIELD_LEN := 32            # 简易降落场：短跑道，够起飞 / 停稳即用（独立变体，不随机场跑道 3× 延长）
 const FIELD_WID := 10
 const FIELD_CLEAR_H := 8
+## 进近 / 离场净空通道（格）：跑道两端各延伸此长度，削平高山、清除树木，保持航道通畅
+## （呼应 D-091「跑道尽头不要障碍物，例如高山、树木」）。宽度 = 跑道 + 两侧 SHOULDER。
+const APPROACH_LEN := 48
+const APPROACH_H := 56           # 通道上方净空高度（块）：自跑道面向上，覆盖绝大多数树木与丘陵（含谷地 ≤50 的余量）
+const SHOULDER := 4              # 跑道两侧额外净空（格），避开翼尖擦树
 
 var origin := Vector3i.ZERO
 var base_y := 30
 var _world: World
 var _min_c := Vector3i.ZERO
 var _max_c := Vector3i.ZERO
+var _core_min := Vector3i.ZERO
+var _core_max := Vector3i.ZERO
 var _half_w := RUNWAY_WID / 2
 var _len := RUNWAY_LEN
 var _clear_h := CLEAR_H
@@ -48,6 +50,7 @@ var _clear_h := CLEAR_H
 func build(world: World, center: Vector3i) -> Vector3:
 	_begin(world, center, RUNWAY_WID, RUNWAY_LEN, HANGAR_DEPTH, CLEAR_H)
 	_flatten_ground()
+	_clear_approaches()
 	_pave_runway()
 	_mark_approach(false)
 	_build_hangar(center)
@@ -60,6 +63,7 @@ func build(world: World, center: Vector3i) -> Vector3:
 func build_field(world: World, center: Vector3i) -> Vector3:
 	_begin(world, center, FIELD_WID, FIELD_LEN, 0, FIELD_CLEAR_H)
 	_flatten_ground()
+	_clear_approaches()
 	_pave_runway()
 	_mark_approach(true)
 	_end()
@@ -75,10 +79,15 @@ func _begin(world: World, center: Vector3i, wid: int, length: int,
 	_len = length
 	_clear_h = clear_h
 	_probe_base_y(south_extra)
-	_min_c = Vector3i(
-		center.x - _half_w - 2, 0, center.z - length / 2 - south_extra - 2)
-	_max_c = Vector3i(
-		center.x + _half_w + 2, 0, center.z + length / 2 + 2)
+	var half_ws := _half_w + SHOULDER
+	# 整平核心区：跑道 + 两侧 SHOULDER + 施工缘（+2）。
+	_core_min = Vector3i(
+		center.x - half_ws - 2, 0, center.z - length / 2 - south_extra - 2)
+	_core_max = Vector3i(
+		center.x + half_ws + 2, 0, center.z + length / 2 + 2)
+	# 预加载 / 重建范围：在核心区基础上向两端各延伸 APPROACH_LEN（进近/离场净空通道）。
+	_min_c = Vector3i(_core_min.x, 0, _core_min.z - APPROACH_LEN)
+	_max_c = Vector3i(_core_max.x, 0, _core_max.z + APPROACH_LEN)
 	# 预加载（不建网格）：统一放到 _end 的 rebuild_chunks_in_region 一遍完成，
 	# 避免每块「无邻居重建 + 有邻居再重建」的双倍白工（约 530 ms）。
 	# 随后开批量写入：整平/铺面/导航灯数万次 set_block_deferred 跳过逐列维护，
@@ -88,13 +97,41 @@ func _begin(world: World, center: Vector3i, wid: int, length: int,
 
 
 ## 整平地基：清上方（含树木）+ 填 DIRT 地基，统一落在一块平地上。
+## 仅作用于核心区（跑道 + 两侧 SHOULDER + 施工缘）；两端进近/离场净空通道由
+## _clear_approaches 单独处理（削山更高、且不在跑道铺面范围内）。
 func _flatten_ground() -> void:
-	for x in range(_min_c.x, _max_c.x + 1):
-		for z in range(_min_c.z, _max_c.z + 1):
+	for x in range(_core_min.x, _core_max.x + 1):
+		for z in range(_core_min.z, _core_max.z + 1):
 			for y in range(base_y - 3, base_y + _clear_h):
 				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.AIR)
 			for y in range(base_y - 3, base_y):
 				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.DIRT)
+
+
+## 进近 / 离场净空通道：跑道两端各清 APPROACH_LEN 格，宽度 = 跑道 + 两侧 SHOULDER。
+## 自跑道面向上清到 APPROACH_H（削平高山）、下方填 DIRT 成平台，保证起飞/降落航道
+## 在跑道头之外仍通畅（呼应 D-091「跑道尽头不要障碍物，例如高山、树木」）。
+## 北端通道会探入村庄 C 以南的空地（村庄在机场 build 之后才生成，见 main._build_village，
+## 故此处清出的地形随后被村庄结构覆盖，无冲突）。
+func _clear_approaches() -> void:
+	var x0 := origin.x - _half_w - SHOULDER
+	var x1 := origin.x + _half_w + SHOULDER
+	var z_n0 := origin.z + _len / 2 + 1
+	var z_n1 := z_n0 + APPROACH_LEN
+	var z_s1 := origin.z - _len / 2 - 1
+	var z_s0 := z_s1 - APPROACH_LEN
+	for z in range(z_s0, z_s1 + 1):
+		for x in range(x0, x1 + 1):
+			for y in range(base_y - 3, base_y + 1):
+				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.DIRT)
+			for y in range(base_y + 1, base_y + APPROACH_H + 1):
+				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.AIR)
+	for z in range(z_n0, z_n1 + 1):
+		for x in range(x0, x1 + 1):
+			for y in range(base_y - 3, base_y + 1):
+				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.DIRT)
+			for y in range(base_y + 1, base_y + APPROACH_H + 1):
+				_world.set_block_deferred(Vector3i(x, y, z), BlockTypes.Block.AIR)
 
 
 ## 跑道铺面（圆石沥青感）+ 两端 SAND 跑道头（与道面区分，提示起降边界）。
