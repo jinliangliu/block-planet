@@ -190,6 +190,13 @@ func _run() -> void:
 
 	# 机身下方方块应为跑道铺面（COBBLESTONE）或整平地面（DIRT）。
 	if is_instance_valid(craft) and landed > 0:
+		# D-091：停机位 z≈-186 与落地带 z∈[center-26, center+14] 相距百余格，
+		# 长距离移动后落地带所在区块已被流式卸载；world.get_block() 对未加载
+		# 区块返回 AIR（world.gd:583-584），会让⑤读成「无铺面」的假阴性。
+		# 写入数据经 _modified_data 往返不丢，重新确保加载即可读回，无需重铺。
+		world.ensure_chunks_in_region(
+			Vector3i(center.x - 3, 0, center.z - 30),
+			Vector3i(center.x + 3, 0, center.z + 18))
 		var cell := Vector3i(craft.global_position.floor())
 		var block := BlockTypes.Block.AIR
 		for k in range(6):

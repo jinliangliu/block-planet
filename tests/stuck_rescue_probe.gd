@@ -90,14 +90,23 @@ func _run() -> void:
 	# ── A 段：出生点列被 100 格实心柱堵死，复现「脱困落点仍嵌入」环路 ──
 	# 玩家初始就站在出生点列上，柱子一盖脚格 + 头格即实心（嵌入前提立即成立）。
 	# 计数窗口前移到盖柱前：修复后脱困发生在柱子就绪后的前几帧里。
-	var sx := int(spawn_pos.x)
-	var sz := int(spawn_pos.z)
-	var base_y := int(spawn_pos.y)
+	# 负坐标统一 floor 语义，与 _embedded() 的 Vector3i(p.floor()) 同源：
+	# int(-204.5)=-204（向零），floor(-204.5)=-205；D-091 机场中心南移后出生点
+	# z 变负，旧 int() 把柱子盖到相邻列，A1/A4 成对假红。拆柱(:127)复用同变量。
+	var foot_cell := Vector3i(spawn_pos.floor())
+	var sx := foot_cell.x
+	var sz := foot_cell.z
+	var base_y := foot_cell.y
 	var died_a0: int = _died_count
 	var rescues_a0: int = player.stuck_rescues
 	for y in range(base_y, base_y + 100):
 		world.set_block(Vector3i(sx, y, sz), BlockTypes.Block.DIRT)
 	_dbg("A 段柱子就绪: (%d, %d..%d, %d)" % [sx, base_y, base_y + 99, sz])
+	# 反向对照守卫：盖柱必须命中 _embedded() 实际读取的脚格（floor 语义）。
+	# 把 floor 退回 int() 时，负 Z 下此守卫读到 AIR 立即变红，不会静默误报。
+	var probe_feet := Vector3i(player.global_position.floor())
+	_check(world.get_block(probe_feet) == BlockTypes.Block.DIRT,
+		"A0 反向对照：盖柱命中 _embedded 脚格 floor=%s（非 int 截断列）" % str(probe_feet))
 	_check(_embedded(player, world),
 		"A1 柱子就绪后玩家嵌在柱底（%s）" % str(player.global_position))
 	# 等脱困并观察 150 帧：修复后一次送到柱顶（died ≤2），随后不再重入。

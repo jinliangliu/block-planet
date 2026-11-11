@@ -639,9 +639,12 @@ func _c_integration() -> void:
 	var saw_stall := false
 	elapsed = 0.0
 	while not saw_stall and elapsed < PHASE_TIMEOUT:
-		# 姿态上限保护：仰角超过 45° 就松杆到 0.15，避免爬成垂直悬停。
-		_craft.controls.pitch = 0.15 \
-			if float(_craft.snapshot()["pitch_deg"]) > 45.0 else 0.45
+		# 姿态上限保护：controls.pitch 是**角速度目标**（坑 #21），给正值只会
+		# 继续抬头。旧写法「超 45° 松到 0.15」实测仍一路爬到 69.5°，改出段
+		# 要花 8.7 s 压机头、俯冲撞地解体（C12 稳定 FAIL）。超限后改给负角速度
+		# 把机头压回来，让失速发生在可控姿态下（与本段注释的设计意图一致）。
+		_craft.controls.pitch = -0.2 \
+			if float(_craft.snapshot()["pitch_deg"]) > 40.0 else 0.45
 		_latch_step()
 		await get_tree().physics_frame
 		elapsed += get_physics_process_delta_time()

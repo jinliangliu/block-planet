@@ -83,6 +83,11 @@ func _ready() -> void:
 
 func _run() -> void:
 	SaveGuard.snapshot()
+	# 钉死被动高度保持：D-074 Gap B 的启用开关来自磁盘 settings.json
+	# （flight_settings.gd:182 缺键时默认 true，EXPERT 档为 false）。
+	# 不用 set_current(for_difficulty(...)) 整体替换，避免顺带改掉 hud_detail
+	# 等其他影响 HUD 显示的字段（实测磁盘 hud_detail=true、预设为 false）。
+	FlightSettings.current().passive_altitude_hold = true
 	GameState.needs_region_pick = false
 	GameState.current_region = RegionAtlas.ASIA
 
@@ -187,27 +192,50 @@ func _run() -> void:
 	# 造成的机会性失败（10-27 恰好爬到 41.3 m 才侥幸全绿）。
 	# 等真实时间一律用墙钟（坑 #1：帧数 ≠ 时间）；横幅计时器走 _process(delta)。
 	# 且不能持续压杆：controls.pitch 是角速度目标而非姿态（坑 #21），一直压 0.4
-	# 会抬头失速、把 68 m 掉回 32 m，反而重新触发「继续爬升」。改成松杆 + 被动
-	# 高度配平（D-074）、低于门槛才轻拉的构造式保高循环。
+	# 会抬头失速、把 68 m 掉回 32 m，反而重新触发「继续爬升」。
+	# D-091 实测（诊断副本 + 修复后单跑）：满油门压 0.4 爬到 42.8 m 时已近失速
+	# （空速 54 km/h），松杆后机头下坠俯冲加速，4 s 内掉到 35.8 m、空速冲到
+	# 115 km/h；把保高杆从 0.15 改成全程 0.0 后掉高几乎不变 ⇒ 不是
+	# PITCH_DEADZONE 单点问题，D-074 被动高度保持也拉不回这个俯冲。
+	# 本探针只验证教练区状态机与渲染（见头注释），不验证飞行手感：构造式
+	# 重定位到明确安全高度并补足前向空速，隔离掉气动不稳定性。
 	_set_pitch(0.4)
 	for i in range(600):
 		await get_tree().physics_frame
 		if _agl() >= TakeoffCoach.SAFE_AGL + 2.0:
 			break
+	# 与 flight_e2e_shot.gd:133 同款 place() 用法：place() 会清零速度，必须补；
+	# engine 是节点级 engine_running（aircraft.gd:402），place() 不会熄火。
+	if is_instance_valid(_craft):
+		_craft.place(_craft.global_position + Vector3(0.0, 20.0, 0.0), PI)
+		_craft._state.velocity = Vector3(0.0, 0.0, 20.0)
+		_craft.velocity = _craft._state.velocity
+		_craft.controls.throttle = 0.6
+	_set_pitch(0.0)
+	await _wait_physics(4)
 	var hold_ms := int((TakeoffCoach.SUCCESS_HOLD + 0.5) * 1000.0)
 	var t_start := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t_start < hold_ms:
 		await get_tree().physics_frame
-		if _agl() < TakeoffCoach.SAFE_AGL + 2.0:
-			_set_pitch(0.15)
-		else:
-			_set_pitch(0.0)
+		# 松杆 + 被动高度保持维持安全高度；守卫 A/B 兜底失速让位与门槛假绿。
+		_set_pitch(0.0)
 	_set_pitch(0.0)
 	# 坑 #2：process_frame 在 _process 之前发出，至少等 3 帧让 coach 的
 	# _process(delta) → step_for() 真正跑到「横幅过期 + AGL 达标」的那一帧。
 	for i in range(3):
 		await get_tree().process_frame
-	# 反向对照守卫：去掉 SAFE_AGL 门槛或保高循环，本条先红，不会静默误报。
+	# 反向对照守卫 A：takeoff_coach.gd:105-107 失速让位返回空字典会「假绿」
+	# 收起断言，必须排除收起来自失速而非 AGL 达标。
+	var stalled7 := false
+	var warn7 := false
+	if is_instance_valid(_craft):
+		var s7: Dictionary = _craft.snapshot()
+		stalled7 = bool(s7.get("stalled", false))
+		warn7 = bool(s7.get("stall_warning", false))
+	_check(not stalled7 and not warn7,
+		"反向对照守卫：收起不得来自失速让位（stalled=%s warn=%s）"
+			% [str(stalled7), str(warn7)])
+	# 反向对照守卫 B：去掉 SAFE_AGL 门槛或保高循环，本条先红，不会静默误报。
 	_check(_agl() >= TakeoffCoach.SAFE_AGL,
 		"前置守卫：横幅过期时仍维持安全高度 %.1f m >= SAFE_AGL %.0f m" % [_agl(), TakeoffCoach.SAFE_AGL])
 	_check(not _hud._coach_main.is_visible_in_tree(),
