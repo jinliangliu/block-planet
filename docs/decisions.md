@@ -4127,7 +4127,7 @@ D-074 Gap A 是**双门槛** `SUCCESS_HOLD = 3.5 s` + `SAFE_AGL = 40 m`，旧探
 
 **〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**
 
-> **历史快照**：上表订正列里的「full 档 12 项 / 14 项 / 70 探针 / 2778 PASS」为 D-088 当时基线，数字一个不改；当前 full 档窗口数已由 **14 → 16**（D-089 新增 `sailing_journal_shot`、并把 `quest_shot` 登记为带断言窗口探针）。表中「44 px 热区真机目检」**仍需保留**——代码侧已由 D-089 统一改 44 px，真机目检未做；当前基线见 **D-089 §7 / `features/feature_fishing.md`**。
+> **历史快照**：上表订正列里的「full 档 12 项 / 14 项 / 70 探针 / 2778 PASS」为 D-088 当时基线，数字一个不改；当前 full 档窗口数已由 **14 → 16**（D-089 新增 `sailing_journal_shot`、并把 `quest_shot` 登记为带断言窗口探针）。表中「44 px 热区真机目检」**仍需保留**——代码侧已由 D-089 统一改 44 px，真机目检未做；当前基线见 **D-089 §7 / `features/feature_fishing.md`**。**〔D-093 补注：D-092 后已确认基线 74 / 2916 / 0（D-092 §5），D-093 后 75 / 2941 / 0（D-093 §5）；本行及同类历史快照行的「D-089 §7 / `features/feature_fishing.md`」为历史基线指针，数字一个不改〕**
 
 `tmp/run_regression.sh` 参数化入库那条**保持待办**（见 §6），未改。
 
@@ -4350,7 +4350,7 @@ A4 FD 巡航淡出、C1 #12 太阳高度曲线、C2 距离雾），并把 5 项*
 | **A2 失速文案** | `flight_instruments.gd` `alerts()` | `stalled`「失速了！推杆低头」→「失速了！按【↓】低头」；`stall_warning`「要失速了，推杆低头」→「要失速了，按【↓】低头」 | 原「推杆」对键盘儿童不直观，且与原 `StallCoach`「按【↓】低头」不一致；改为键位一致表述。已 grep 确认 `tests/` 仅 2 处**注释**引用旧词，**无断言**依赖旧文案 |
 | **A4 FD 巡航淡出** | `flight_director.gd` | 新增常量 `CRUISE_FADE_DIST=800.0`、字段 `_dist_h`（`refresh()` 记录水平距离）、`_draw()` 在 `Mode.CRUISE && _dist_h>800` 时仅降 `col.a`（`f=clampf(1-(dist-800)/4000, 0.3, 1.0)`） | 化解「飞离机场后十字长期贴边红」让儿童误以为「一直飞错」（D-054 留项）。**仅降透明度，不改模式/几何/文案**，与既有 `OFF`/`visible` 逻辑、探针断言 `label_text()`/`_color_for()` 零冲突 |
 | **C1 #12 太阳高度曲线** | `scripts/systems/day_night.gd` `_apply_lighting()` | `lerpf(-85.0,-10.0,sun)` → `lerpf(-10.0,-85.0,sun)` | 原写法正午 `sun=1` 得 −10° 掠射，世界偏暗；交换两端后正午近天顶 −85° 俯射、黎明/黄昏近地平线，符合昼夜物理 |
-| **C2 距离雾** | `scenes/main.tscn` `Environment_main` | `fog_enabled=true`、`fog_mode=1`(EXP)、`fog_density=0.004`、`fog_aerial_perspective=0.35` | 软化 256 m 低模环边界，提升飞行高度沉浸感；原环境无雾，低模 4 m 粗网格在飞行高度看边界突兀；零额外几何成本 |
+| **C2 距离雾** | `scenes/main.tscn` `Environment_main` | `fog_enabled=true`、`fog_mode=1`(DEPTH)、`fog_density=0.004`、`fog_aerial_perspective=0.35` | 软化 256 m 低模环边界，提升飞行高度沉浸感；原环境无雾，低模 4 m 粗网格在飞行高度看边界突兀；零额外几何成本 |
 
 ### 3. 明确不做 + 另开票清单
 
@@ -4445,6 +4445,7 @@ A4 FD 巡航淡出、C1 #12 太阳高度曲线、C2 距离雾），并把 5 项*
 - **几何改动前的 `chunk_mesh_baseline` 对比**：本批只改机场周边区块（机场区属「出生点保留窗」外、
   boot 时不建全量网格），且 `_clear_approaches` 仅削平 + 清树两端走廊，不影响已录制 baseline 的
   主体地形区块。窗口截图目检项仍待办（见 §3）。
+  **〔实测订正（2026-11-12）：不覆盖式重录得 61 行有效输出中 13 行合法变化，涉及 11 个不同区块坐标，全部归因 D-091；`_clear_approaches()` 仅作用于两端走廊、与 11 个变化坐标的 Z 区间不相交，不是变化成因。旧基准保留不覆盖，新输出见 `tmp/chunk_mesh_baseline.new`。原句「不影响已录制 baseline 的主体地形区块」为当时静态推断，在此以实测为准。full 档正式重录仍列为待办〕**
 - **`terrain_survey_probe` 三处中心交叉断言是硬闸**：改一处漏改另一处即 FAIL——本轮三处同步改后
   该探针 0 FAIL。
 
@@ -4558,3 +4559,69 @@ chunk 全 `loaded=true`、`origin=(0,0)`；落地时 `(7,-3)/(7,-2)` `loaded=fal
 - 窗口截图 PNG 真机目检仍待办（与 D-088~D-091 一致的「回归全绿不关闭真机目检」口径）。
 
 > **D-087 交叉注记（本批已逐条追加「已结案（D-092）」）**：`docs/decisions.md:3819-3826` / `:3951-3953` / `:4124` / `:4151` / `:4156-4157` / `:4242` / `:4250-4251`；另 `features/feature_fishing.md:337`、`features/feature_sailing_journal.md:384-385` 同口径注记。统一措辞：「`inventory` 已按存档槽落盘，本条『不落盘 / 另开票 / 归 #44』口径就此关闭；D-087 奖励形状本批未调整，详见 §3」。
+
+## D-093 主世界程序化天空与天气可见化（用户截图驱动，2026-11-12）
+
+**结论**：承接用户「飞行画面太单调，而且天空及气象都没有渲染出来」的截图反馈，定位到**雾把天空整个接管**这一根因，把主世界从 `BG_COLOR` + 无 Sky 切到**纯代码搭建的程序化天空**（`Sky` + `ProceduralSkyMaterial` + `NoiseTexture2D` 云纹 + `Gradient` 阈值化），并让晴 / 阴 / 雨三档在天空四色、云团色调、雨幕位置上真正可见。**只改 1 个生产文件 `scripts/systems/day_night.gd`，未改 `scenes/main.tscn`**；`ambient_light_source` / `tonemap_mode` / `fog_enabled` / `fog_mode` / `fog_density` / `fog_aerial_perspective` 全部锁回原口径不动，`background_color` 原写回保留（兼容 `tests/life_probe.gd:207`）。**不新增 `class_name`、不写 `user://`、不碰 `velocity`（D-067）、零外部资产（D-020）**。
+
+**范围**：`scripts/systems/day_night.gd`（生产，唯一）；`tests/weather_probe.gd`（9 → 22 PASS，纯增 68 行）；新增 `tests/sky_weather_shot.gd/.tscn`（窗口，12 PASS）；`tmp/run_regression.sh`（gitignore，窗口清单追加 `sky_weather_shot`，16 → 17）。无新机制、无新 Autoload、无新存档键。
+
+### 1. 用户反馈与根因实测链
+
+- **用户反馈**：截图中央窗外一片均匀灰，昼夜、区域、天气都看不出区别，整体飞行观感单调。
+- **场景现状（`scenes/main.tscn:11-20`）**：`Environment_main` 为 `background_mode=1(BG_COLOR)`、`sky=null`、`fog_sky_affect=1.0`（引擎默认）、`fog_light_color` 取默认去饱和蓝灰 `(0.518,0.553,0.608)`；`background_color` 由 `day_night.gd` 每帧写入昼夜 / 区域 / 天气差异。两侧黑色梯形是 `cockpit_instruments.gd` 的 2D `draw_colored_polygon` 座舱框，**不是**全屏遮挡，也不是未上色的 3D 面（`CockpitInterior` 正视中央无遮挡几何）。
+- **三轮引擎实测**：第一轮 T1 用步行出生点相机取样，5 点全落在机场石壁几何上、A~E 像素不变 ⇒ **判据作废**；T1b 新建 `(0,220,0)` 高空无遮挡 `ProbeSkyCam` 并断言 `get_viewport().get_camera_3d()` 才是它，九组全过。用户截图中央灰 `(108,116,128)` 与「夜晚 BG_COLOR + fog 全开」天空像素 `(0.4235,0.4549,0.4980)` 吻合到 **1/255** ⇒ **雾把天空整个接管**，写进 `background_color` 的全部差异被抹平。A/B/C/G/H 证明 `background_color` / `fog_sky_affect` / `BG_SKY` 的实际屏幕效果，D/E/F 证明真天空必须绑定 `fog_sky_affect=0.0`。主世界从未挂过 Sky / ProceduralSkyMaterial / 太阳盘 / 云几何。
+- **气象现状**：晴 / 阴 / 雨三档只改 `ambient_light_energy` 与 `light_energy` 两路标量（`background_color` / `ambient_light_color` / `light_color` 三档逐位相同）；`WEATHER_SLOT=150.0` × 6 槽 = **900 s 周期里雨只占 16.7%**，开局 7.5 分钟无雨；`set_weather()` 生产零调用。可见层只有挂在相机上方 14 m 的 240 粒雨幕（第一人称出画）与仅夜晚淡入的月亮 / 星星。
+- **路线裁决**：选「`BG_SKY` + `ProceduralSkyMaterial`」（`scripts/racing/race_scene.gd` 已证明同项目 Mobile 渲染器可行，且免费提供球壳渐变与方向光驱动的太阳盘），否决 A′ 手工渐变 / 太阳 quad 与 A 的 2D 程序化贴片。
+
+### 2. 实现
+
+| 位置 | 改动 |
+|---|---|
+| `setup_environment()` | 若 `env.sky == null` 则纯代码建 `Sky` + `ProceduralSkyMaterial`，四色照抄 `race_scene.gd` 已验证值；`NoiseTexture2D`（`FastNoiseLite` TYPE_SIMPLEX_SMOOTH / seed 1337 / freq 0.015 / 5 octaves / 512×256 / seamless）+ `Gradient` 阈值化云团（运行时探 `get_property_list()` 并动态 `set("color_ramp", ...)`，4.6.3 该属性存在）；设 `background_mode = Environment.BG_SKY`、`fog_sky_affect = 0.0` |
+| **口径锁定** | `ambient_light_source` 保持 2(COLOR)、`tonemap_mode` 保持 0(LINEAR)；`fog_enabled` / `fog_mode` / `fog_density` / `fog_aerial_perspective` **全部不动** —— 避免 D-090 距离雾与区域 `_sky_tint` 回退 |
+| `_apply_lighting()` | **保留全部原有写回**（`background_color` 等，`tests/life_probe.gd:207` 断言依赖），只在白天 / 夜晚两个分支末尾各加一行 `_apply_sky(...)` |
+| 新增常量 / 表 | `SKY_DAY_*` / `SKY_DUSK_*` / `SKY_NIGHT_*` 共 12 个四色常量；`WEATHER_SKY_MUL`（晴 1.0 / 阴 0.78 / 雨 0.55）；`WEATHER_CLOUD_MODULATE`（晴 `0.55,0.62,0.75` / 阴 `0.58,0.62,0.70` / 雨 `0.38,0.42,0.50`）；`CLOUD_DAY_SCALE=1.0` / `CLOUD_NIGHT_SCALE=0.35` |
+| `_apply_sky(sun, weather, night_fade)` | 白天 `DUSK → DAY` 随 `sun`，夜晚 `DUSK → NIGHT` 随 `night_fade`；白天乘 `_sky_tint`、夜晚不乘（与原 `background_color` tint 策略一致）；四色乘 `WEATHER_SKY_MUL[weather]`；`sky_cover_modulate` = 天气表 × 昼夜系数，用显式 RGB 构造避免 alpha 语义歧义 |
+| `_update_rain()` | 雨幕从「相机上方 14 m」改到「相机前方 9 m + 上方 6 m」（`-cam.global_transform.basis.z * RAIN_AHEAD`）；`RAIN_BOX` 14 → 18 |
+
+### 3. 明确不做 + 约束
+
+| 项 | 口径 |
+|---|---|
+| 改 `scenes/main.tscn` | **不做**：天空全部运行时由 `setup_environment()` 构造，场景文件零改动 |
+| 动 D-090 距离雾参数 / 区域 `_sky_tint` 回退 | **不做**：`fog_*` 与 `_apply_lighting()` 原写回全部锁回 |
+| 学 `race_scene.gd` 的 `AMBIENT_SOURCE_SKY` / `TONE_MAPPER_FILMIC` | **不做**：只借四色，避免重定主世界照明口径 |
+| 新增 `class_name` / 写 `user://` / 碰 `velocity` | **不做**（项目铁律 / D-067） |
+| 外部资产 / 新粒子 / volumetric fog | **不做**（D-020 零外部资产；中低端 Android Mobile 渲染器可承受，云纹纯代码） |
+| 真机目检 | 仍待办（与 D-088~D-092 一致口径，回归全绿不关闭真机目检） |
+| README 是否逐条同步视觉 ADR | 沿用 D-090 先例**不同步**（D-090 距离雾亦未进 README） |
+
+### 4. 风险与回归影响（关键工程结论）
+
+- **两步必须绑定**：只切 `BG_SKY` 而不归零 `fog_sky_affect` 会把渐变压平并产生水平灰带；只归零 `fog_sky_affect` 而不切真天空会变成过饱和深蓝。
+- **切 `BG_SKY` 后 `background_color` 不再显示**：昼夜天色必须由 sky 四色驱动，否则夜晚仍是亮蓝天（`P_night` 六点与正午逐位一致）。这也是 `_apply_lighting()` 原写回保留、另起 `_apply_sky()` 的原因。
+- **`sky_cover_modulate` 若只随天气不随昼夜**，云纹会在夜间形成亮度地板（初版 `night_clear lum=0.5805` 灰蓝亮天）⇒ 必须叠昼夜系数。
+- **引擎实测硬事实（4.6.3）**：`BG_COLOR=1` / `BG_SKY=2` / `FOG_MODE_EXPONENTIAL=0` / `FOG_MODE_DEPTH=1` / `AMBIENT_SOURCE_COLOR=2` / `TONE_MAPPER_LINEAR=0`；`ProceduralSkyMaterial` **有** `sky_cover` / `sky_cover_modulate` / `sun_angle_max` / `sun_curve` / `sky_energy_multiplier`，**没有** `sun_energy_multiplier` / `sun_disk_scale` / `sun_disk_color`；`Environment` **没有** `reflection_source` 属性（直接访问触发 SCRIPT ERROR，须用 `.get()`）；`NoiseTexture2D.color_ramp` 存在且 alpha 参与混合（`C1_vs_C5_diff_pixels=308479`）；太阳盘由方向光方向决定（D-090 正午 85° 近天顶，水平视角看不到属正常）；夜空月亮 / 星星 quad 在 `BG_SKY` 下不会被天空球盖住。
+- **`fog_mode=1` 标注订正**：D-090 §2 与 `features/feature_flight.md` 旧表标为 EXP 有误，实为 **DEPTH**。DEPTH 下 `fog_density` **仍参与计算**（是 `fog_depth_end` 处的最大雾量，`0.004` 只是极弱），`fog_depth_end` 默认 100.0 而非 0；「DEPTH 下 `fog_density` 是惰性值」的静态推论已被引擎实测证伪，不作为结论。`fog_aerial_perspective=0.35` 在 `BG_COLOR` 下无效，切 `BG_SKY` 后保留原值不动、在窗口回归中观察。
+- 不新增 `class_name`；`git diff --check` rc=0、全 Tab、无警告；四探针 + 座舱取证全程**串行**、零 DIFF。
+
+### 5. 验证基线（D-010 零 DIFF 门）
+
+- **D-092 已确认基线：74 探针 / 2916 PASS / 0 FAIL**（无头 58/2549 + 窗口 16/367）。
+- **D-093 full 档整轮：75 探针 / 2941 PASS / 0 FAIL**（无头 **58 / 2562**，窗口 **17 / 379**）。对账 `+1` 探针 / `+25` PASS = 新登记 `sky_weather_shot` 12 PASS + `weather_probe` 9 → 22 的 +13。分段脚本 `tmp/d093_full_run.sh`（gitignore）8 段串行约 20 min，每段前 `mv tmp/user_backup` 到归档目录绕 `[safe-delete]`。
+- 门禁：8 段全部 `RESTORED_OK` 零 DIFF、零 SCRIPT ERROR / Parse Error、最终 `diff -r` rc=0、`profiles/` 原位、无残留 Godot 进程 / 移出目录。仅 `route_wiring_probe` 一个 `rc=139` 属 `FAIL=0` 且 `*_OK` 打印后的 Vulkan 清理段良性退出。
+- 靶向自验（全 0 FAIL）：`weather_probe` **22/0**（新增空 Environment 守卫、BG_SKY / `fog_sky_affect` / 云纹 / 三档 / 正午午夜 / 距离雾保留断言）、`sky_weather_shot` **12/0**（构造式 A/B 断言，含防过曝闸 `0.55~0.75` 与夜晚闸 `<0.25`）、`life_probe` **451/0**、`cockpit3d_shot` **4/0**；`DIFF_RC=0` / `RESTORED_OK=1`。
+- `flight_shot` 仍为 **0 PASS** 纯取证探针（坑 #15/#20 危险信号未关闭）；`sailing_journal_shot` 的 R7 `PASS>0` 哨兵单独一笔提交，不混入本批。
+
+### 6. 精修标定、取证与待观察项
+
+**精修标定**（`tmp/sky_tune_probe`，六组正午候选 + 四组夜晚候选，按硬阈值选）：正午 **C2**（`Gradient` 阈值化 + modulate `0.55,0.62,0.75`，`lum=0.7439`、`distinct=2595`、蓝天间隙保留）、夜晚 **N1**（昼夜系数 `0.35`，`lum=0.1317`、星星反向对照差异 273）。最终四组天空带亮度：**正午晴 0.7439 / 阴 0.6192 / 雨 0.4400 / 夜晚 0.1127**（精修前 0.8423 过曝、0.5805 灰蓝亮天）。
+
+**取证**：`tmp/cockpit_noon_clear.png`（蓝天 + 白云团块 + 蓝天间隙）、`tmp/cockpit_noon_rain.png`（乌云 + 清晰白色雨滴线条）、`tmp/sky_weather_night_clear.png`（近黑夜空 + 星星）；黑色梯形 2D 座舱框、跑道、底部仪表带未动。雨幕区量化 `full_upper diff_pixels=384349/460800 (83.4%)`，但高差异主要来自天气整体压暗，**不纯归因雨滴**；雨滴亮线证据是 `rain_brighter_pixels` 与目检。六点像素与 PNG 清单在 `tmp/sky_weather_run_report.txt`。
+
+**待观察项（如实写，不判失败）**：
+1. 引擎退出期 RID / ObjectDB leaks —— 既有同型，**非本轮引入**。
+2. `night_clear distinct_rgba32=574` 色数偏低。
+3. 阶段 A 夜晚标定基底 `(0.72,0.80,0.92)` 与落码基底 C2 `(0.55,0.62,0.75)` 不一致 ⇒ 落码午夜 lum `0.1127` 比标定 N1 `0.1317` 更暗（方向更安全，留作后续复核）。
+4. **中低端 Android 真机帧率 / 发热未测**：`ProceduralSkyMaterial` + 云纹 + 雨粒子 + 3D 座舱叠加后的实际表现待观察。

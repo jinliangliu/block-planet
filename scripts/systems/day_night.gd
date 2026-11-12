@@ -51,10 +51,50 @@ const WEATHER_CYCLE := [
 	Weather.CLEAR, Weather.CLEAR, Weather.CLOUDY, Weather.RAIN, Weather.CLOUDY, Weather.CLEAR,
 ]
 
-# 雨幕粒子（纯视觉，无物理）：跟随相机上方一团下落的雨滴。
+# ── 天空（D-093）：BG_SKY + ProceduralSkyMaterial 四色驱动昼夜 ──────────
+# 白天照抄 race_scene.gd:76-79 已验证值。
+const SKY_DAY_TOP := Color(0.30, 0.55, 0.92)
+const SKY_DAY_HORIZON := Color(0.80, 0.88, 0.96)
+const GROUND_DAY_BOTTOM := Color(0.26, 0.32, 0.24)
+const GROUND_DAY_HORIZON := Color(0.72, 0.78, 0.66)
+# 黄昏（sun=0）：与 DUSK_AMBIENT_COLOR / DUSK_BACKGROUND_COLOR 同语义衔接。
+const SKY_DUSK_TOP := Color(0.09, 0.11, 0.22)
+const SKY_DUSK_HORIZON := Color(0.40, 0.28, 0.30)
+const GROUND_DUSK_BOTTOM := Color(0.06, 0.07, 0.10)
+const GROUND_DUSK_HORIZON := Color(0.22, 0.19, 0.21)
+# 夜晚：与 NIGHT_BACKGROUND_COLOR(0.012,0.018,0.05) 同量级，保证月亮星星有对比。
+const SKY_NIGHT_TOP := Color(0.012, 0.018, 0.05)
+const SKY_NIGHT_HORIZON := Color(0.035, 0.045, 0.10)
+const GROUND_NIGHT_BOTTOM := Color(0.008, 0.010, 0.022)
+const GROUND_NIGHT_HORIZON := Color(0.020, 0.025, 0.055)
+# 天气对天幕的压暗乘算（与 WEATHER_AMBIENT_MUL 呼应但独立，三档必须可辨识）。
+const WEATHER_SKY_MUL := {
+	Weather.CLEAR: 1.0, Weather.CLOUDY: 0.78, Weather.RAIN: 0.55,
+}
+# 云色：实测默认 (1,1,1,1) 会把天空洗白（R 均值 +82），按天气用暗调制压住。
+# 阶段 B 精修（阶段 A 引擎标定）：正午 CLEAR 由 C2 选定 Color(0.55,0.62,0.75,1)，
+# 天空带亮度 0.7439 落在 0.55~0.75 防过曝区、(640,80) b=0.9216 > r+0.15、
+# distinct_rgba32=2595 比无云 C4(724) 多 1871，云纹团块 + 蓝天间隙成立。
+# 晴(0.75) > 阴(0.70) > 雨(0.50) 的 .v 序保持。
+const WEATHER_CLOUD_MODULATE := {
+	Weather.CLEAR: Color(0.55, 0.62, 0.75, 1.0),
+	Weather.CLOUDY: Color(0.58, 0.62, 0.70),
+	Weather.RAIN: Color(0.38, 0.42, 0.50),
+}
+# 云层昼夜系数（阶段 A 引擎实测）：正午 scale=1.0 对应 C2 标定；午夜 N1 标定
+# scale=0.35 时 sky_band_lum=0.1317<0.25、星星反向对照 fx_diff_pixels=273>100。
+# 白天从夜间亮度随 sun 线性升到全亮；夜间整段锁定 0.35，避免入夜亮云亮度地板。
+# 黄昏/夜深两端点阶段 A 未分别标定，同取 0.35 以免引入未实测数值（故夜间
+# lerp(黄昏,夜深,night_fade) 化简为常数 CLOUD_NIGHT_SCALE）。
+const CLOUD_DAY_SCALE := 1.0
+const CLOUD_NIGHT_SCALE := 0.35
+# 雨幕：原 RAIN_HEIGHT=14 让雨全落在相机上方出画（用户「气象没渲染」成因之一）。
+const RAIN_AHEAD := 9.0
+
+# 雨幕粒子（纯视觉，无物理）：跟随相机前方一团下落的雨滴。
 const RAIN_AMOUNT := 240
-const RAIN_BOX := Vector3(14.0, 0.5, 14.0)
-const RAIN_HEIGHT := 14.0
+const RAIN_BOX := Vector3(18.0, 0.5, 18.0)
+const RAIN_HEIGHT := 6.0
 
 # 夜空特效：月亮与星星挂在 _sky_root（每帧贴到相机位置 = 无穷远天幕）。
 const SKY_FX_DISTANCE := 115.0
@@ -67,6 +107,7 @@ signal day_changed(day: int)
 
 var _light: DirectionalLight3D
 var _env: Environment
+var _sky_mat: ProceduralSkyMaterial = null
 var _time := 0.0
 var _last_emitted_second := -1
 ## 累计经过的真实秒数，用于换算游戏天数（1 天 = FULL_CYCLE）。
@@ -95,6 +136,105 @@ func setup(light: DirectionalLight3D) -> void:
 
 func setup_environment(env: Environment) -> void:
 	_env = env
+	if _env == null:
+		return
+	if _env.sky == null:
+		var sky := Sky.new()
+		var mat := ProceduralSkyMaterial.new()
+		mat.sky_top_color = SKY_DAY_TOP
+		mat.sky_horizon_color = SKY_DAY_HORIZON
+		mat.ground_bottom_color = GROUND_DAY_BOTTOM
+		mat.ground_horizon_color = GROUND_DAY_HORIZON
+		mat.sky_cover = _make_cloud_texture()
+		mat.sky_cover_modulate = WEATHER_CLOUD_MODULATE[Weather.CLEAR]
+		sky.sky_material = mat
+		_sky_mat = mat
+		_env.sky = sky
+	else:
+		_sky_mat = _env.sky.sky_material as ProceduralSkyMaterial
+		if _sky_mat != null and _sky_mat.sky_cover == null:
+			_sky_mat.sky_cover = _make_cloud_texture()
+	_env.background_mode = Environment.BG_SKY
+	_env.fog_sky_affect = 0.0
+	_apply_lighting()
+	# 首帧兜底（方案 B）：_apply_lighting() 首行有 _light==null 守卫会提前 return，
+	# 天空色可能停留在初始 DAY 四色；这里按当前时刻直接刷一次，保证 BG_SKY 首帧即正确。
+	var weather := get_weather()
+	var sun := 0.0
+	var night_fade := 0.0
+	if is_day():
+		sun = sin(PI * (_time / DAY_LENGTH))
+	else:
+		var t := (_time - DAY_LENGTH) / NIGHT_LENGTH
+		night_fade = minf(1.0, t / 0.4)
+	_apply_sky(sun, weather, night_fade)
+
+
+## 纯代码云纹：零外部资产（D-020），Mobile 渲染器下可见斑驳。
+func _make_cloud_texture() -> NoiseTexture2D:
+	var noise := FastNoiseLite.new()
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.seed = 1337
+	noise.frequency = 0.015
+	noise.fractal_octaves = 5
+	var tex := NoiseTexture2D.new()
+	tex.width = 512
+	tex.height = 256
+	tex.seamless = true
+	tex.noise = noise
+	# 阈值化 color_ramp（阶段 A 实测 4.6.3 支持：get_property_list 命中、set 可读回
+	# Gradient、points=4）：噪声低值透明露出蓝天、高值白云团、0.42~0.62 软过渡，
+	# 解决 frequency=0.015 全屏均匀薄雾无团块的问题。保留 Gradient 默认两点
+	# (0,黑)/(1,白)，只 add_point 插软边。用 get/set 动态写且带属性存在守卫，
+	# 避免属性名不确定导致 Parse Error（T1 首轮 reflection_source 教训）。
+	var has_ramp := false
+	for p in tex.get_property_list():
+		if String(p.get("name", "")) == "color_ramp":
+			has_ramp = true
+			break
+	if has_ramp:
+		var ramp := Gradient.new()
+		ramp.add_point(0.42, Color(0.0, 0.0, 0.0, 0.0))
+		ramp.add_point(0.62, Color(1.0, 1.0, 1.0, 1.0))
+		tex.set("color_ramp", ramp)
+	return tex
+
+
+## 天空四色：白天 DUSK→DAY 随 sun，夜晚 DUSK→NIGHT 随 night_fade；
+## 区域色调只乘白天（与 background_color 的 tint 策略一致）。
+func _apply_sky(sun: float, weather: int, night_fade: float) -> void:
+	if _sky_mat == null:
+		return
+	var mul: float = WEATHER_SKY_MUL[weather]
+	var top: Color
+	var horizon: Color
+	var ground_bottom: Color
+	var ground_horizon: Color
+	if is_day():
+		top = SKY_DUSK_TOP.lerp(SKY_DAY_TOP, sun)
+		horizon = SKY_DUSK_HORIZON.lerp(SKY_DAY_HORIZON, sun)
+		ground_bottom = GROUND_DUSK_BOTTOM.lerp(GROUND_DAY_BOTTOM, sun)
+		ground_horizon = GROUND_DUSK_HORIZON.lerp(GROUND_DAY_HORIZON, sun)
+	else:
+		top = SKY_DUSK_TOP.lerp(SKY_NIGHT_TOP, night_fade)
+		horizon = SKY_DUSK_HORIZON.lerp(SKY_NIGHT_HORIZON, night_fade)
+		ground_bottom = GROUND_DUSK_BOTTOM.lerp(GROUND_NIGHT_BOTTOM, night_fade)
+		ground_horizon = GROUND_DUSK_HORIZON.lerp(GROUND_NIGHT_HORIZON, night_fade)
+	var tint: Color = _sky_tint if is_day() else Color(1.0, 1.0, 1.0)
+	_sky_mat.sky_top_color = top * tint * mul
+	_sky_mat.sky_horizon_color = horizon * tint * mul
+	_sky_mat.ground_bottom_color = ground_bottom * tint * mul
+	_sky_mat.ground_horizon_color = ground_horizon * tint * mul
+	# 云调制 = 天气表 × 昼夜系数（阶段 B 根因修复）：旧版只查天气表、不分昼夜，
+	# 夜晚仍以晴天亮色铺满全屏形成亮度地板。显式构造 Color，alpha 不参与缩放。
+	var cloud: Color = WEATHER_CLOUD_MODULATE[weather]
+	var cloud_scale: float
+	if is_day():
+		cloud_scale = lerpf(CLOUD_NIGHT_SCALE, CLOUD_DAY_SCALE, sun)
+	else:
+		cloud_scale = lerpf(CLOUD_NIGHT_SCALE, CLOUD_NIGHT_SCALE, night_fade)
+	_sky_mat.sky_cover_modulate = Color(
+		cloud.r * cloud_scale, cloud.g * cloud_scale, cloud.b * cloud_scale, cloud.a)
 
 
 ## 设置区域天空色调（乘算），立即刷新一帧配色。
@@ -217,6 +357,7 @@ func _apply_lighting() -> void:
 			_env.ambient_light_energy = lerpf(0.35, DAY_AMBIENT_ENERGY, sun) * ambient_mul
 			_env.ambient_light_color = DAY_AMBIENT_COLOR.lerp(DUSK_AMBIENT_COLOR, 1.0 - sun) * _sky_tint
 			_env.background_color = DAY_BACKGROUND_COLOR.lerp(DUSK_BACKGROUND_COLOR, 1.0 - sun) * _sky_tint
+			_apply_sky(sun, weather, 0.0)
 	else:
 		var t := (_time - DAY_LENGTH) / NIGHT_LENGTH
 		_light.rotation_degrees.x = -85.0
@@ -229,6 +370,7 @@ func _apply_lighting() -> void:
 			_env.ambient_light_energy = lerpf(0.30, NIGHT_AMBIENT_ENERGY, fade) * ambient_mul
 			_env.ambient_light_color = DUSK_AMBIENT_COLOR.lerp(NIGHT_AMBIENT_COLOR, fade)
 			_env.background_color = DUSK_BACKGROUND_COLOR.lerp(NIGHT_BACKGROUND_COLOR, fade)
+			_apply_sky(0.0, weather, fade)
 
 
 ## 雨幕：纯视觉粒子团，跟随相机上方；仅雨天开启。
@@ -264,7 +406,8 @@ func _update_rain() -> void:
 		return
 	var cam := get_viewport().get_camera_3d()
 	if cam != null:
-		_rain.global_position = cam.global_position + Vector3(0.0, RAIN_HEIGHT, 0.0)
+		var ahead: Vector3 = -cam.global_transform.basis.z * RAIN_AHEAD
+		_rain.global_position = cam.global_position + ahead + Vector3(0.0, RAIN_HEIGHT, 0.0)
 
 
 ## ── 夜空特效：卡通月亮 + 三层闪烁星星 ─────────────────────────

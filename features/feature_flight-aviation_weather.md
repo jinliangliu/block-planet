@@ -19,6 +19,7 @@
 | 「HUD 上绘制十字指引线做 ILS 盲降」 | **D-054 飞行指引十字已实现**（`flight_director.gd`，模式 `OFF/ROLL/TAKEOFF/APPROACH(≤400m)/CRUISE`，含 11 px/度导引律与三档配色） | 不重画十字。扩展它：在 `APPROACH` 模式叠加 RVR 判据——低能见度时把「指令十字」接管为盲降引导 |
 
 另注：`day_night.Weather` 只有 3 档且**只影响环境光与雨粒子**，不涉及飞行物理。本任务的核心是把气象**接到气动上**。
+**〔D-093 补注：三档天气的外观层（Sky 四色 / 程序化云纹 / 雨幕位置）已由 D-093 补齐；本任务书「只影响环境光与雨粒子 / 只有三档天气外观」为当时快照，物理层耦合的结论不变〕**
 
 另注 2：本任务书 §1 的尺度前提已按 D-063 订正（1 格 = 1 m）。初版曾写过一版 0.5 m 旧尺度，**那一版的数值（含 `icing_alt_band [90,150]`、风切变「约 90 格」）全部作废**，以 §1 现行值为准。
 
@@ -66,10 +67,11 @@
 - 质量增加：可选，小幅（燃油占比很小，不做也能玩）。
 - 防冰（anti-ice）：`ice_level` 以 0.02/s 消退；开启防冰本身有耗电/燃油代价，避免「无脑开着」。
 - **进入结冰条件的判据**：云层高度带 + 气温低于冰点 + 有降水。三者缺一不可，否则大晴天结冰会显得莫名其妙。注意 `day_night.gd` **没有云层高度概念**（只有三档天气外观），云带参数要随 `weather_profile.icing_alt_band` 新建。
+**〔D-093 补注：三档天气的外观层（Sky 四色 / 程序化云纹 / 雨幕位置）已由 D-093 补齐；本任务书「只影响环境光与雨粒子 / 只有三档天气外观」为当时快照，物理层耦合的结论不变〕**
 
 ### 2.4 能见度与 RVR
 
-- **白屏/雾**：`Environment.fog_density` 随能见度上升。路径走 `day_night.setup_environment(env)`（`day_night.gd:96`）——**注意该函数目前是空钩子**（只存 `_env` 引用，全库 `fog_` 零命中），`Environment` 资源挂在 `scenes/main.tscn:11` 的 `WorldEnvironment` 上且从未设置任何雾参数。本任务要在钩子里**新建**雾配置（`fog_enabled` / `fog_density` / `fog_light_color` 每帧回读 `_env.background_color`，与 D-065 拍摄口径同源）。**绝不开 `volumetric_fog_enabled`**——Mobile 渲染器直接拒绝（已实测）。雾密度参考值 **0.004~0.005**（256 m 低模环边界约 100 px 过渡带；判雾看地平线外缘，不看近处景物）。
+- **白屏/雾**：本任务要做的仍是**物理层耦合**——让 `Environment.fog_density` 随能见度 / RVR 动态变化（当前为静态值）。路径走 `day_night.setup_environment(env)`。**现状已非初稿假设的空钩子**（旧文写「只存 `_env` 引用、全库 `fog_` 零命中、`scenes/main.tscn:11` 从未设置任何雾参数」，双重过时，订正如下）：D-090 已在 `scenes/main.tscn:17-20` 落 `fog_enabled=true` / `fog_mode=1`(DEPTH) / `fog_density=0.004` / `fog_aerial_perspective=0.35`；D-093 已把 `setup_environment()` 填成运行时构造 Sky（`BG_SKY` + `ProceduralSkyMaterial` + 云纹 + `fog_sky_affect=0.0`）。源码行号已漂移、不再写死。本任务在既有雾参数之上**追加按能见度调制**（`fog_density` / `fog_light_color` 每帧回读 `_env.background_color`，与 D-065 拍摄口径同源），不是从零新建雾配置。**绝不开 `volumetric_fog_enabled`**——Mobile 渲染器直接拒绝（已实测）。雾密度参考值 **0.004~0.005**（256 m 低模环边界约 100 px 过渡带；判雾看地平线外缘，不看近处景物）。
 - **盲降**：RVR < 决断高度时，扩展 D-054 指引十字——命令十字接管为盲降引导（**不新增 UI**）。
 - 偏离过大触地 → 现有 `CRASH_IMPACT_DV = 7.0`（`aircraft.gd:41`）判解体。**不另写「偏离则坠毁」脚本判定**。
 
@@ -111,7 +113,7 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 > 1. **保留 override 机制**——`cockpit3d_shot` 等多处取证探针依赖 `set_weather(CLEAR)` 钉住天气（防 150 s 槽边界换档让整屏像素漂移），删了会打穿窗口档。
 > 2. `set_weather()` 内的 `clampi(w, Weather.CLEAR, Weather.RAIN)` 上限**写死了 RAIN**：枚举扩到 8 档后不改这行，FOG/SNOW/THUNDERSTORM 会被静默夹成 RAIN（D-066 在 `landmarks_of` 踩过同类 `clampi` 伪装 bug）。
 > 3. 扩展后 `WEATHER_NAMES` / `WEATHER_AMBIENT_MUL` / `WEATHER_SUN_MUL` 三张字典要为每个新档补条目（字典缺键会直接崩）。
-> 4. 现有 `tests/weather_probe.gd`（10 条）覆盖三档枚举与 override，扩展后需同步补断言，不要打穿。
+> 4. 现有 `tests/weather_probe.gd`（22 PASS，D-093 后）覆盖三档枚举与 override，扩展后需同步补断言，不要打穿。
 
 ---
 
@@ -146,14 +148,14 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 - [x] 风接入 `aircraft_flight.gd`：地面风 + 风梯度，只改速度不改升力；叠加时机在积分前。**（D-067 已实施：`State.velocity` 保持地速度语义，新增 `State.wind`，`air_velocity() = velocity − wind` 为气动唯一速度入口——动压/攻角/侧滑/升力/阻力/失速判定全部改读空速；位置积分仍用 `velocity`。风模型 `scripts/flight/wind_model.gd`，区域数据在 `RegionAtlas.weather_profile`。）**
 - [x] 风切变：只改风矢量（含 downdraft 分量），靠现有失速/impact 判解体。**（D-067 已实施：8 s 瞬态剧本 = 风向急转 ±60~120° + 强度 ×2.5 + 下沉 ≤6 m/s；AGL < 45 m 低空门控 + 60 s 冷却 + 登机 20 s 静默；种子可复现。**不改 `velocity`** 是红线——`wind_flight_probe` C3 钉死。）**
 - [ ] 积冰：先把 `CL_MAX` / `CD0_BASE` 从 const 参数化（3+2 个调用点），再接 `ice_level`；结冰判据 = 云带 ∩ 低温 ∩ 降水（云带高度参数新建）。
-- [ ] 雾/能见度 → `day_night.setup_environment()` 钩子内新建雾配置（当前为空钩子，全库无 `fog_` 设置；禁 `volumetric_fog`，密度 0.004~0.005）；低 RVR 接管 D-054 指引十字为盲降。
+- [ ] 雾/能见度 → 在既有雾参数之上做物理层耦合（D-090 已在 `scenes/main.tscn:17-20` 落 `fog_enabled=true` / `fog_mode=1`(DEPTH) / `fog_density=0.004` / `fog_aerial_perspective=0.35`，D-093 已把 `setup_environment()` 填成构造 Sky + `fog_sky_affect=0.0`，**不再是空钩子 / 全库无 `fog_` 设置**）；按能见度调制 `fog_density`（禁 `volumetric_fog`，密度 0.004~0.005）；低 RVR 接管 D-054 指引十字为盲降。
 - [ ] 密度高度：把气温/气压喂进现有密度模型（`air_density()` `:234`），不另写公式。
 - [ ] 雷暴禁区 + 颠簸扰动（只扰速度）。
 - [ ] 决策面板（强飞/返航/备降/迫降），返航备降走 `set_navigation` + 指引十字。
 - [ ] METAR 简报 UI：报文数值取自实际气象状态。
 - [ ] 科普卡片：每次特情后展示对应知识点（复用现有成就/教学弹层模式）。
 - [x] **探针（第一批：风两层）**：新增 `wind_flight_probe`，40 条覆盖风梯度/侧风偏流/空速地速分流/切变掉高度与推油门改出/区域数据与接线/设置开关，`SaveGuard.snapshot()/restore()` 全路径（D-010）。**（后续批次：积冰改气动/低 RVR 接管十字/决策面板四态并入同一探针或扩展，命名以代码为准。）**
-- [ ] **回归保护**：不得打穿现有 `weather_probe`（9 条，三档枚举+覆盖；源码 10 个 `_check` 减去函数定义行）、`night_shot`（昼夜取证）与所有钉 `set_weather(CLEAR)` 的窗口截图探针。
+- [ ] **回归保护**：不得打穿现有 `weather_probe`（22 PASS，D-093 后）、`night_shot`（昼夜取证）与所有钉 `set_weather(CLEAR)` 的窗口截图探针。
 
 ## 7. 验收标准
 
@@ -163,4 +165,4 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 - [ ] 恶劣天气弹决策面板，选「返航」后指引十字指向机场且能飞回去。
 - [ ] 低能见度下靠指引十字完成盲降。
 - [ ] 全量回归 0 FAIL 0 SCRIPT ERROR，`user://` 零 DIFF（D-010）。
-- [ ] 既有 `weather_probe`（9 条）/ `night_shot` / 所有钉 `set_weather(CLEAR)` 的窗口截图探针不打穿；气象扩展后 `weather_probe` 断言数只增不减。
+- [ ] 既有 `weather_probe`（22 PASS，D-093 后）/ `night_shot` / 所有钉 `set_weather(CLEAR)` 的窗口截图探针不打穿；气象扩展后 `weather_probe` 断言数只增不减。

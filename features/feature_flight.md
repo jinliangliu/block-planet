@@ -352,9 +352,9 @@ static func ui_scale(vp) -> float:
 ```
 
 **为什么要自适应**（这是 D-052 的核心修复，也是"尺寸不合理"的真实根因）：
-项目用 `stretch=canvas_items + aspect=expand`，逻辑视口**宽恒 1280、高度随宽高比在 590~720 之间漂移**（19.5:9 手机实测 1280×590）。固定像素下仪表占屏高会从 21% 漂到 26%。改为"基准视口 + 等比缩放 s"后，任何宽高比都锁在同一比例（实测离散度 **0.0000**）。
+项目用 `stretch=canvas_items + aspect=expand`，**逻辑视口高恒 720、宽按窗口宽高比扩展**（16:9 → 1280×720；20:9 → 逻辑 1600×720），物理 PNG 像素仍等于窗口尺寸（口径见 `docs/decisions.md:3996-4001`）。固定像素下仪表占屏比会随宽高比变化；改为"基准视口 + 等比缩放 s"后，任何宽高比都锁在同一比例（实测离散度 **0.0000**）。
 
-⚠️ 一个已纠正的误判：`--resolution 1920x1080` 实测传给脚本的仍是 1280×720，`canvas_items` 下逻辑视口恒定。**真实漂移来自 `aspect=expand` 的高度，不是分辨率**。
+⚠️ 一个已纠正的误判：`--resolution 1920x1080` 实测传给脚本的仍是 1280×720；`canvas_items` 下逻辑视口**并非恒定**，真实变化来自 `aspect=expand` 的**宽度扩展**，不是高度、也不是分辨率（旧稿曾写反成「宽恒 1280 / 高度 590~720 漂移」）。
 
 布局基准（s=1，全部自屏幕底边起算）：
 
@@ -1060,7 +1060,7 @@ IDLE ──(stalled ∨ stall_warning 上升沿，且 AGL>2 m)──▶ ① 松�
 | A2 失速文案 | `flight_instruments.gd` `alerts()` | 「推杆低头」→「按【↓】低头」（stalled / stall_warning 两档一致） | 与 `StallCoach` 提示不一致 + 对键盘儿童不直观 |
 | A4 FD 巡航淡出 | `flight_director.gd` | `CRUISE_FADE_DIST=800.0`，巡航段距目标 >800 m 仅降 `col.a`（下限 0.3） | **D-054 留项 #2 已关闭**（见 §16.5 已做标记） |
 | C1 太阳高度曲线 | `day_night.gd` `_apply_lighting()` | `lerpf(-10.0,-85.0,sun)` 修正正午偏暗 | 坑 #12 太阳曲线疑似反向 |
-| C2 距离雾 | `main.tscn` `Environment_main` | `fog_enabled=true`、EXP、`density=0.004`、`aerial_perspective=0.35` | 无雾环境下 256 m 低模环边界突兀 |
+| C2 距离雾 | `main.tscn` `Environment_main` | `fog_enabled=true`、`fog_mode=1`(DEPTH)、`density=0.004`、`aerial_perspective=0.35` | 无雾环境下 256 m 低模环边界突兀 |
 
 ### 17.2 明确不做 / 另开票
 
@@ -1069,3 +1069,14 @@ IDLE ──(stalled ∨ stall_warning 上升沿，且 AGL>2 m)──▶ ① 松�
 ### 17.3 验证口径
 
 飞行相关无头探针 15 项零 FAIL、零 SCRIPT ERROR、`RESTORED_OK`、最终 `diff -r` rc=0；窗口截图 PNG 交由用户在真机目检（与 D-088/D-089「回归全绿不关闭真机目检」一致）。
+
+---
+
+## 18. D-093 主世界程序化天空与天气可见化（2026-11-12）
+
+承接用户「主世界天空一片均匀灰、看不出昼夜和天气」的截图反馈，D-093 把主世界从 `BG_COLOR` 切到纯代码程序化天空。
+**原状**：`scenes/main.tscn` 的 `Environment_main` 是 `BG_COLOR` + `sky=null` + `fog_sky_affect=1.0`（引擎默认），雾把写进 `background_color` 的昼夜 / 区域 / 天气差异全部抹平——用户截图中央灰 RGB `(108,116,128)` 与「夜晚 BG_COLOR + fog 全开」天空像素吻合到 **1/255**；主世界从未挂过 Sky / 太阳盘 / 云几何。
+**现状**：只改 1 个生产文件 `scripts/systems/day_night.gd`——`setup_environment()` 运行时构造 `Sky` + `ProceduralSkyMaterial` + `NoiseTexture2D` 云纹（`FastNoiseLite` + `Gradient` 阈值化，零外部资产），切 `BG_SKY` 并把 `fog_sky_affect` 归零（两步必须绑定，缺一即压平渐变或过饱和）；`_apply_sky()` 让昼夜 / 晴阴雨 / 区域 tint 驱动天空四色与 `sky_cover_modulate`；`_update_rain()` 把雨幕从相机上方 14 m 改到前方 9 m + 上方 6 m。
+**口径**：`ambient_light_source=2` / `tonemap_mode=0` / `fog_enabled` / `fog_mode` / `fog_density` / `fog_aerial_perspective` **全部锁回不动**；`scenes/main.tscn` 零改动；`background_color` 原写回保留（兼容 `tests/life_probe.gd:207` 断言）。
+**如实写**：DEPTH 模式下 `fog_density=0.004` **仍参与计算**（为 `fog_depth_end` 处的最大雾量，仅极弱）；草稿「DEPTH 下惰性值」的推断已被引擎实测证伪，不写成结论。
+验证基线详见 `docs/decisions.md` **D-093 §1~§6**（根因实测链 / 实现 / 约束 / 风险 / D-010 零 DIFF 门 / 精修标定）与对应 ADR。
