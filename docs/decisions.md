@@ -3824,6 +3824,7 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
   只在场景切换时经 `GameState.carried_inventory` 内存携带，`Progress` 里也没有
   inventory。绿宝石重启即失，若当主奖励会出现「按钮已领取 ✓、宝石却没了」。
   这是 **D-076 未覆盖的既有边界，本批不修，另开票**（见 §5）。
+  **〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**
 
 - **独立模态、不改 `quest_panel.gd`**，依据用现役理由：
   ① 信息模型不同——任务面板是**目标态进度条**，收集册是**记录态 20 格** +
@@ -3951,6 +3952,7 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
 - **`inventory` 不落盘**（D-076 未覆盖的既有边界）：绿宝石只是本局内存态，可回看的
   持久回报是 `stat_of("bundle_*")` 徽章；要让奖励真正持久需**另开票**。
   **归工作流 ③ / 任务 #44**：背包落盘技术可行且低代价；区块 / 地形改动落盘应回避。
+  **〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**
 - **14 项窗口截图已由 D-088 补齐并全量跑绿**（70 探针 / 2778 PASS / 0 FAIL）；
   **仅剩真机目检**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、装饰密度，以及
   `chunk_mesh_baseline` full 档重录。
@@ -4123,6 +4125,8 @@ D-074 Gap A 是**双门槛** `SUCCESS_HOLD = 3.5 s` + `SAFE_AGL = 40 m`，旧探
 | D-087 §5「full 档」条 | 「**full 档 12 项窗口截图与真机目检仍待重验**……钓鱼收集册 4×5 格与 44 px 热区需 16:9 / 20:9 目检」 | **14 项窗口截图已由 D-088 补齐并全量跑绿**（70 探针 / 2778 PASS / 0 FAIL）；**仅剩真机目检**：触屏 44 px 热区、字形回退、多指、倒计时遮挡、装饰密度，以及 `chunk_mesh_baseline` full 档重录 |
 | D-087 §5「`inventory` 不落盘」条 | 「要让奖励真正持久需**另开票**」 | 追加 **归工作流 ③ / 任务 #44**：背包落盘技术可行且低代价；区块 / 地形改动落盘应回避 |
 
+**〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**
+
 > **历史快照**：上表订正列里的「full 档 12 项 / 14 项 / 70 探针 / 2778 PASS」为 D-088 当时基线，数字一个不改；当前 full 档窗口数已由 **14 → 16**（D-089 新增 `sailing_journal_shot`、并把 `quest_shot` 登记为带断言窗口探针）。表中「44 px 热区真机目检」**仍需保留**——代码侧已由 D-089 统一改 44 px，真机目检未做；当前基线见 **D-089 §7 / `features/feature_fishing.md`**。
 
 `tmp/run_regression.sh` 参数化入库那条**保持待办**（见 §6），未改。
@@ -4149,12 +4153,14 @@ D-074 Gap A 是**双门槛** `SUCCESS_HOLD = 3.5 s` + `SAFE_AGL = 40 m`，旧探
 **结论**：本 ADR 收口同批两件事，主体分**两节**：**第一节**（§1-§5）「航海长期目标 +
 专属面板 + 按槽持久化」，**第二节**（§6）「D-077 三条待办收口」（并附回归登记与
 ③ `inventory` 边界）；§7 单列验收基线。儿童向、**单机离线**，**无 QTE、无付费、无联网**。
+**〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**
 full 档由 D-088 的 56 无头 + 14 窗口登记为 **57 无头 + 16 窗口 = 73 探针**（探针数量为
 已登记确定值）；本批最终 PASS / FAIL 实测数字一律不在正文写，见 **§7 验收基线**。
 
 **范围**：本批不动 `achievements()` 28 枚既有成就、不动 `progress_manager.gd`、不新增
 第 9 份 `user://` 存档文件；区块 / 地形改动落盘回避。`inventory` 不落盘归**工作流 ③ /
 任务 #44**，**不进本批 ②**。
+**〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**
 
 ### 1. 航海长期目标：裁决与数据模型
 
@@ -4241,6 +4247,8 @@ D-010 的既有形态是「不调写接口 ≠ 零写盘」（见 **D-088 §2 �
 
 ### 6. 第二节：D-077 三条待办收口（含回归登记与 ③ inventory 边界）
 
+**〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**
+
 **回归登记**：`tmp/run_regression.sh`（`.gitignore:11 tmp/` 忽略，**不入库**）由
 56 无头 + 14 窗口改为 **57 无头 + 16 窗口 = 73**；新增 `sailing_journal_probe`、
 `quest_shot`、`sailing_journal_shot`。`quest_shot` 原为 **0 PASS 纯手动取证探针**且不在
@@ -4249,6 +4257,7 @@ full 档，登记后 **44 px / 三页签 / 入口断言**才自动跑。**入库
 
 **③ `inventory` 不落盘**：归**工作流 ③ / 任务 #44**，**不进本批 ②**；区块 / 地形改动
 落盘应回避。
+**〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**
 
 **D-077 三条待办收口**（原文见 D-077「待办（不阻塞本轮）」三条，保留不删）：
 
@@ -4499,3 +4508,53 @@ chunk 全 `loaded=true`、`origin=(0,0)`；落地时 `(7,-3)/(7,-2)` `loaded=fal
 仍 35.8」证伪；`get_block` 未加载返 `AIR` 曾被静态表误判成「生产 bug 需另开票」，
 被 `RELOAD` 全 9 证伪——正确判据是「**重新确保加载后读回**」，而非「落地时 `get_block`
 是否 AIR」。两轮诊断「不 ensure 红 / ensure 绿」本身即构成构造式反向对照。
+
+## D-092 `inventory` 按存档槽落盘（工作流 ③ / 任务 #44 结案，2026-11-12）
+
+**结论**：承接 D-087 §1 / §5、D-088 §5、D-089 §6 反复登记的「工作流 ③ / 任务 #44」欠账，把 `inventory` 从「只在场景切换时经 `GameState.carried_inventory` 内存携带、重启即失」改为**按存档槽落盘**：背包内容随槽路径持久化、换槽时重载内存态，与 D-086 已固化的按槽口径一致。绿宝石（D-087 的即时惊喜奖励）由此可跨重启保留，**D-087「`inventory` 不落盘」这一既有边界就此结案**。**D-092 只抽掉「不落盘」地基，已上线的 D-087 奖励形状本批未调整**——绿宝石仍是即时惊喜，主奖励仍是称号 / 徽章 / 收集册永久点亮（见 §3）。**不新增 `class_name`、不碰 `velocity`（D-067）、区块 / 地形改动落盘仍回避**（`main.gd:5-6` 架构前提），不新增顶层存档键、不改 `Progress`。
+
+**范围**：改 5 个生产 / 测试文件——`scripts/main.gd`、`scripts/systems/inventory.gd`、`scripts/systems/fishing_system.gd`、`tests/save_guard.gd`、`tests/profile_slot_probe.gd`，同步 **7 个内联快照探针**的备份 / 还原清单，新增 `tests/inventory_persist_probe.gd/.tscn`。无新机制、无新 Autoload、无新存档语义层。
+
+### 1. 抉择依据（欠账 #44 的前提已成熟）
+
+- **D-087 §1 的前提写得很明确**（`docs/decisions.md:3819-3826`）：实测 `inventory` 不落盘，所以「绿宝石重启即失，若当主奖励会出现『按钮已领取 ✓、宝石却没了』」，主奖励才定为**称号 + 徽章 + 收集册永久点亮**，绿宝石只作即时惊喜、Toast 不承诺永久拥有。**本批只抽掉「不落盘」这块地基，不改已上线的奖励形状**（见 §3）。
+- **奖励形状本批未调整（已裁决）**：D-092 只抽掉「不落盘」地基，已上线的 D-087 奖励形状本批未调整——绿宝石仍是即时惊喜，主奖励仍是称号 / 徽章 / 收集册永久点亮；「是否同步把绿宝石升为主奖励」已裁决为不做，不再是开放项（见 §3）。
+- **三处反复把落盘归 #44**：`:3951-3953`「背包落盘技术可行且低代价；区块 / 地形改动落盘应回避」、`:4124` 订正表追加「归工作流 ③ / 任务 #44」、`:4156-4157` / `:4250-4251`「不进本批 ②」。本批只收口这条已开票欠账，不扩大范围。
+- **路径沿用 D-086**：按 `Profile.slot_file()` 派生（**必须 `path_join`**，坑 #31/32），换槽走既有 `slot_changed` 重载，不另造存档层。
+
+### 2. 改动表
+
+| 文件 | 改动 |
+|---|---|
+| `scripts/main.gd` | 新增脏位 `_inv_dirty`、防抖基准 `_inv_last_save_msec`、**缓存槽路径** `_inv_loaded_path`；`_ready()` 无携带背包时 `load_or_new()` + `hydrate_from()` 原地覆盖（刻意不换对象引用，保住 `hud.gd` / `inventory_panel.gd` 的 `changed` 连接）；`_on_slot_changed()` 先以**缓存路径** flush 旧槽（换槽回调时 `Profile.current` 已指向新槽，绝不能用实时 `slot_file()`）→ 刷新路径 → 载入新槽 → 清脏；`_on_inventory_changed()` 只标脏；`_flush_inventory()` 写回缓存路径、成功才清脏；`_physics_process()` 1500 ms 防抖放在任何早退之前；`_on_region_entered()` 换图前补写；`_exit_tree()` 仅标脏时补写 |
+| `scripts/systems/inventory.gd` | 静态 `io_ok` 拒写闸 / `SAVE_PATH` / `_refresh_path()`（按 `Profile.slot_file()` 派生）；`to_dict()` / `from_dict()` / `hydrate_from()` 原地覆盖（不替换对象引用）；`_valid_payload()` 严校验 36 槽 × 3 字段（`item` / `count` / `durability`）+ 6 位 `hotbar_map` + `fill_limit` 类型；`save()` 走 tmp + rename 原子写，`load_or_new()` 缺文件 / 坏 JSON / 顶层非字典 / 字段类型错一律退回 36 槽 AIR 默认且**读路径绝不写盘**（D-010 铁律 3） |
+| `scripts/systems/fishing_system.gd` | **无逻辑改动**：仅订正 `BUNDLE_TITLES` 上方 2 行注释——「`inventory` 不落盘 / 绿宝石是这一局的惊喜」改为「已按档案槽持久化（D-092）/ 绿宝石随槽保留、跨会话不丢」，使注释与 D-087 登记的既有边界一致 |
+| `tests/save_guard.gd` | `EXTRA_FILES` 纳入 `user://inventory.json`；`restore()` 统一置 `Inventory.io_ok = false`（同 `FishingSystem` / `BoatSystem.journal_ok` 的拒写闸），挡住关停期二次写盘 |
+| `tests/profile_slot_probe.gd` | 按槽状态口径 8 → 9 份；`LEGACY_PATHS` 增 `user://inventory.json`；`_collect_paths()` 增 `Inventory._refresh_path()` / `Inventory.SAVE_PATH`；新增 D23~D27 换槽隔离与往返断言（含工具耐久 13、hotbar 重映射） |
+| `tests/inventory_persist_probe.gd/.tscn`（新增） | 专测：写入 → 重启式重载 → 读回一致、换槽互不覆盖、空 / 损坏档安全退回 |
+| 7 个内联快照探针 | 各 +6 行：备份 / 还原清单纳入 `user://inventory.json`（`_saved_inventory` 快照 + 还原时写回）并置 `Inventory.io_ok = false` 拒写闸，避免 D-010 假 DIFF |
+
+> 7 个内联快照探针（实测 `git diff --stat` 各 +6 行）：`tests/flight_e2e_shot.gd`、`tests/flight_panel_shot.gd`、`tests/flight_probe.gd`、`tests/flight_stream_probe.gd`、`tests/flight_view_probe.gd`、`tests/life_probe.gd`、`tests/rebuild_drain_probe.gd`。
+
+### 3. 明确不做 + 另开票清单
+
+| 项 | 原因（如实写） | 归处 |
+|---|---|---|
+| 把绿宝石升级为收集册主奖励 / 改 D-087 奖励形状 | **已裁决**：本批只补「落盘」地基，已上线的 D-087 奖励形状本批未调整；绿宝石仍是即时惊喜，主奖励仍是称号 / 徽章 / 收集册永久点亮 | 不做（非开放项） |
+| 区块 / 地形改动落盘 | `main.gd:5-6` 架构前提，D-087 §5 / D-089 §6 已反复回避 | 不做 |
+| 改 `Progress` / 新增顶层存档键 / 新增 `class_name` | 沿用 D-086 既有按槽通道即可 | 不做 |
+
+### 4. 风险与回归影响
+
+- **D-010 是主要风险面**：新增一份按槽 `user://` 文件后，所有内联快照探针与 `SaveGuard` 的备份 / 还原清单必须同步，否则每段回归都会假 DIFF。本批以「7 个内联快照探针 + `save_guard.gd` + 新增 `inventory_persist_probe` 自带 `snapshot()/restore()`」三层闭合。
+- **与 D-089 同型的「引擎关停期二次写盘」需警惕**：换槽 / `_exit_tree()` 的写回必须条件化（`if _inv_dirty:`），还原后置拒写闸 `Inventory.io_ok = false`，避免还原后又被内存态覆盖回假 DIFF。
+- 不新增 `class_name`；`git diff --check` rc=0、全 Tab、无警告。
+
+### 5. 验证基线（D-010 零 DIFF 门）
+
+- **full 档整轮：74 探针 / 2916 PASS / 0 FAIL**（无头 **58 / 2549**，窗口 **16 / 367**）。与 D-091 的 `73 / 2878 / 0` 对账：`+1` 探针（`inventory_persist_probe`）、`+38` PASS——来源为 `inventory_persist_probe` 31 PASS + `profile_slot_probe` D23~D27 + `sailing_journal_shot` R7 哨兵。
+- 门禁：分段串行各段 `RESTORED_OK` 零 DIFF、最终 `diff -r` rc=0、零 SCRIPT ERROR / Parse Error、无残留 Godot 进程 / 移出目录。
+- `inventory_persist_probe` 单跑 0 FAIL；`life_probe` / `cockpit3d_shot` 等既有断言一律不放宽。
+- 窗口截图 PNG 真机目检仍待办（与 D-088~D-091 一致的「回归全绿不关闭真机目检」口径）。
+
+> **D-087 交叉注记（本批已逐条追加「已结案（D-092）」）**：`docs/decisions.md:3819-3826` / `:3951-3953` / `:4124` / `:4151` / `:4156-4157` / `:4242` / `:4250-4251`；另 `features/feature_fishing.md:337`、`features/feature_sailing_journal.md:384-385` 同口径注记。统一措辞：「`inventory` 已按存档槽落盘，本条『不落盘 / 另开票 / 归 #44』口径就此关闭；D-087 奖励形状本批未调整，详见 §3」。

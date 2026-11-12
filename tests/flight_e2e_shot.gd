@@ -15,6 +15,8 @@ var _saved_settings := ""
 ## U-9：飞行一次性教学提示进度（user://flight_teaching.json）。本探针会真实
 ## 起飞到 15 m 以上，座舱视角 + 教练区空闲时会触发提示并新建该文件。
 var _saved_teaching := ""
+## D-092：背包按槽持久化文件，退出期 main._exit_tree() 可能补写，纳入内联快照。
+var _saved_inventory := ""
 var _saved_counters: Dictionary = {}
 var _saved_states: Dictionary = {}
 var _saved_quiz := 0
@@ -39,6 +41,7 @@ func _run() -> void:
 	_saved_progress = _read_user_text("user://progress.json")
 	_saved_settings = _read_user_text("user://settings.json")
 	_saved_teaching = _read_user_text("user://flight_teaching.json")
+	_saved_inventory = _read_user_text("user://inventory.json")
 	_saved_counters = Progress.counters.duplicate()
 	_saved_states = Progress.states.duplicate()
 	_saved_quiz = Progress._quiz_correct_since_reward
@@ -269,6 +272,9 @@ func _restore_user_saves() -> void:
 	_write_user_text("user://progress.json", _saved_progress)
 	_write_user_text("user://settings.json", _saved_settings)
 	_write_user_text("user://flight_teaching.json", _saved_teaching)
+	_write_user_text("user://inventory.json", _saved_inventory)
+	# D-092：拒写闸——挡住 quit 后 main._exit_tree() 关停期二次写盘覆盖刚还原的文件。
+	Inventory.io_ok = false
 	Progress.counters = _saved_counters.duplicate()
 	Progress.states = _saved_states.duplicate()
 	Progress._quiz_correct_since_reward = _saved_quiz

@@ -18,6 +18,8 @@ var _failed := 0
 ## 与 Progress 内存态——Progress._exit_tree 会 _save() 覆盖文件还原。
 var _saved_progress := ""
 var _saved_settings := ""
+## D-092：背包按槽持久化文件，退出期 main._exit_tree() 可能补写，纳入内联快照。
+var _saved_inventory := ""
 var _saved_counters: Dictionary = {}
 var _saved_states: Dictionary = {}
 
@@ -29,6 +31,7 @@ func _ready() -> void:
 func _run() -> void:
 	_saved_progress = _read_user_text("user://progress.json")
 	_saved_settings = _read_user_text("user://settings.json")
+	_saved_inventory = _read_user_text("user://inventory.json")
 	_saved_counters = Progress.counters.duplicate()
 	_saved_states = Progress.states.duplicate()
 
@@ -235,6 +238,9 @@ func _write_user_text(path: String, text: String) -> void:
 func _finish() -> void:
 	_write_user_text("user://progress.json", _saved_progress)
 	_write_user_text("user://settings.json", _saved_settings)
+	_write_user_text("user://inventory.json", _saved_inventory)
+	# D-092：拒写闸——挡住 quit 后 main._exit_tree() 关停期二次写盘覆盖刚还原的文件。
+	Inventory.io_ok = false
 	Progress.counters = _saved_counters
 	Progress.states = _saved_states
 	print("RESULT flight_stream_probe: %d FAIL" % _failed)

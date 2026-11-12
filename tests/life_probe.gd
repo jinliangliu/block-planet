@@ -20,6 +20,8 @@ var _saved_progress := ""
 var _saved_counters: Dictionary = {}
 var _saved_states: Dictionary = {}
 var _saved_quiz_streak := 0
+## D-092：背包按槽持久化文件，退出期 main._exit_tree() 可能补写，纳入内联快照。
+var _saved_inventory := ""
 ## 和平模式段（Q-8，D-078）的存档隔离（D-010 铁律 3）：world.json 的存在性与
 ## 文本快照。该开关只在玩家主动点面板时才写档，探针从不点面板 ⇒ 正常路径下
 ## 这个文件从头到尾都不该出现；一旦将来代码在「读」路径上写了档，这里的还原
@@ -44,6 +46,7 @@ func _ready() -> void:
 func _run() -> void:
 	# 存档隔离（D-010 铁律 3）：在任何 Progress.notify 之前快照，quit 前还原。
 	_saved_progress = _read_user_text("user://progress.json")
+	_saved_inventory = _read_user_text("user://inventory.json")
 	# 档案槽（D-077 起）单独隔离：本机若已建过槽，Progress 的落盘目标是
 	# user://profiles/<id>/progress.json —— 只还原 legacy 那一个文件既保不住
 	# 玩家真实存档，也保不住下面「进度已持久化」这条断言的判据。
@@ -2769,6 +2772,9 @@ func _run() -> void:
 	# _exit_tree 会 _save()，只还文件会被内存态覆盖（flight_probe 同款教训）。
 	# 阶段 L/S 的问答测试态由此不落盘（见阶段 S 开头的说明）。
 	_write_user_text("user://progress.json", _saved_progress)
+	_write_user_text("user://inventory.json", _saved_inventory)
+	# D-092：拒写闸——挡住 quit 后 main._exit_tree() 关停期二次写盘覆盖刚还原的文件。
+	Inventory.io_ok = false
 	SaveGuard.restore_profiles()
 	Progress.counters = _saved_counters.duplicate()
 	Progress.states = _saved_states.duplicate()

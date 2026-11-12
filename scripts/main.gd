@@ -49,6 +49,12 @@ var _poi_active := false
 ## 与飞机送回这两点。无机场/降落场的区域 _craft_park 为零，飞机就地摆正。
 var _flight_spawn := Vector3.ZERO
 var _craft_park := Vector3.ZERO
+## D-092 背包按槽持久化：脏位 / 上次落盘时刻 / 数据来自的槽路径缓存。
+## 缓存路径不随实时 slot_file() 漂移——slot_changed 回调时 Profile.current
+## 已指向新槽，只有缓存能把旧槽内存态写回旧槽文件（绝不能用实时路径）。
+var _inv_dirty := false
+var _inv_last_save_msec := 0
+var _inv_loaded_path := ""
 
 
 func _ready() -> void:
@@ -57,6 +63,11 @@ func _ready() -> void:
 	# 否则从 A 槽切到 B 槽后仍带着 A 槽买过的零件（还会被 save() 写进 B 槽）。
 	if Profile != null:
 		Profile.slot_changed.connect(_on_slot_changed)
+	# D-092：缓存当前槽的背包路径与防抖基准。放在 connect 之后、任何可能
+	# emit 的调用之前，保证换槽回调开始时缓存路径已有效。
+	Inventory._refresh_path()
+	_inv_loaded_path = Inventory.SAVE_PATH
+	_inv_last_save_msec = Time.get_ticks_msec()
 
 	# 区域参数必须先于世界生成落地：World._ready 用默认区域初始化了噪声，
 	# 这里按 GameState 的当前区域覆盖种子、地形起伏与地表材质。
@@ -70,6 +81,13 @@ func _ready() -> void:
 	if GameState.carried_inventory != null:
 		_player.inventory = GameState.carried_inventory
 		GameState.carried_inventory = null
+	else:
+		# D-092：无携带背包（首次进图 / 换槽后重进）→ 从当前槽读档原地覆盖。
+		# 刻意不替换 _player.inventory 对象引用：hud.gd / inventory_panel.gd
+		# 都连了 changed，换引用会断连。此刻 _on_inventory_changed 尚未连接，
+		# hydrate_from 的 changed.emit() 天然不标脏。
+		var disk: Inventory = Inventory.load_or_new()
+		_player.inventory.hydrate_from(disk.to_dict())
 
 	# 探索模式开局送一架飞机：该模式的主题就是「自由观察世界」，
 	# 飞行是第一玩法而非要先凑齐铁锭的附属品。每局只送一次
@@ -137,6 +155,10 @@ func _ready() -> void:
 	_craft_park = craft_park
 	_player.setup_world(_world)
 	_hud.setup(_player)
+	# D-092：changed 只标脏，落盘交给防抖 / 换槽 / 换图 / 退出四入口。
+	# 必须在 _hud.setup() 之后——开局 hydrate_from 的 changed.emit() 早于此，
+	# 天然不标脏（首帧不会凭空写一份 inventory.json）。
+	_player.inventory.changed.connect(_on_inventory_changed)
 	_hud.set_day_night(_day_night)
 	_hud.set_map_name(String(profile["title"]))
 	# 出生加载屏（D-064）：窗口环境下遮住世界，等高模环填满再放行——环 4 的
@@ -228,6 +250,46 @@ func _on_slot_changed(_id: String) -> void:
 	_unlocks = PartUnlocks.load_or_new(Profile.slot_file("unlocks.json"))
 	if _build_screen != null:
 		_build_screen.set_unlocks(_unlocks)
+	# ── D-092 背包按槽重载 ──
+	# slot_changed 在 Progress._load() 之前 emit，一次换槽可能 emit 1~3 次：
+	# ① 只 flush 旧槽（缓存路径 _inv_loaded_path），绝不用实时 slot_file()——
+	#    Profile.current 此刻已指向新槽，实时路径会把 A 槽内存态写进 B 槽文件。
+	#    脏位已清则 no-op，保证多次 emit 幂等。
+	_flush_inventory()
+	# ② 原地覆盖为新槽内容（不替换对象引用，changed 连接保持有效）。
+	Inventory._refresh_path()
+	var fresh: Inventory = Inventory.load_or_new()
+	_player.inventory.hydrate_from(fresh.to_dict())
+	# ③ hydrate_from 的 changed.emit() 会标脏，但换槽加载不得触发写盘：
+	#    禁止在回调里对新槽 save（时序 + 多次 emit 会重复写 / 污染）。
+	_inv_dirty = false
+	_inv_last_save_msec = Time.get_ticks_msec()
+	# ④ 缓存路径刷新到新槽。
+	_inv_loaded_path = Inventory.SAVE_PATH
+
+
+## D-092：背包变化只标脏，落盘交给 1500 ms 防抖 / 换槽 / 换图 / 退出四入口。
+func _on_inventory_changed() -> void:
+	_inv_dirty = true
+
+
+## D-092：把当前背包写回**缓存路径** _inv_loaded_path，成功才清脏并重置防抖基准。
+## 用缓存而非实时 slot_file()：换槽回调期间 Profile.current 已变，实时路径会
+## 把旧槽数据写进新槽。io_ok=false（SaveGuard / 内联探针还原后置位）时 save()
+## 直接返回 false，退出期不会把逐字节还原的文件覆盖回内存态（D-010）。
+func _flush_inventory() -> void:
+	if not _inv_dirty:
+		return
+	if not _player.inventory.save(_inv_loaded_path):
+		return
+	_inv_dirty = false
+	_inv_last_save_msec = Time.get_ticks_msec()
+
+
+## D-092：退出期仅当标脏时补写一次；拒写闸挡住探针还原后的二次写盘。
+func _exit_tree() -> void:
+	if _inv_dirty:
+		_flush_inventory()
 
 
 ## 飞行任务遥测：玩家在机上时，每物理帧把真实飞行状态喂给 HUD 任务面板
@@ -235,6 +297,10 @@ func _on_slot_changed(_id: String) -> void:
 ## vertical_speed/wrecked/block_under）。不在机上则无需喂帧——面板只在
 ## RUNNING 时透传。
 func _physics_process(delta: float) -> void:
+	# D-092：背包落盘 1500 ms 防抖。放在任何早退之前——craft 为 null（徒步）
+	# 时也要能落盘，玩家改背包是常态，不能被下面的飞行遥测 return 跳过。
+	if _inv_dirty and Time.get_ticks_msec() - _inv_last_save_msec >= 1500:
+		_flush_inventory()
 	# 航海玩法（D-042）：模态面板（地图选择器 / 钓具界面 / 教学浮层）打开时
 	# 锁舵——船收油随波减速停住，不会在玩家看界面时自己跑掉；关闭即恢复。
 	BoatSystem.input_suspended = _hud.is_any_panel_open() or _hud._any_overlay_open()
@@ -644,6 +710,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## 选图确认：记录区域并重载场景，由新实例按该区域重新生成世界。
 func _on_region_entered(region_id: int) -> void:
+	# D-092：换图前把当前背包补写回缓存槽路径（carried_inventory 只跨场景
+	# 携带内存态，先落盘才不会因重载丢档）。
+	_flush_inventory()
 	GameState.carried_inventory = _player.inventory
 	GameState.set_region(region_id)
 	get_tree().reload_current_scene()

@@ -12,7 +12,7 @@ extends Node
 ##
 ## 末尾清理 user://，避免在本进程留下 profiles/ 干扰回归基线的 user:// 还原校验。
 ##
-## D-086：本探针追加「8 份玩家状态按槽派生 + 换槽内存态重载」的验收入口。
+## D-086：本探针追加「9 份玩家状态按槽派生 + 换槽内存态重载」的验收入口。
 ## 日常回归脚本把真实 profiles/ 整体移出，探针跑在**无槽态**，动态路径恰好
 ## 逐字节等于旧根路径——所以分槽逻辑只能靠本探针自己建槽覆盖，别被全绿误导。
 
@@ -21,8 +21,8 @@ var _fail := 0
 ## D-010：OK / FAIL / 脚本错误 / 看门狗超时四条退出路径都必须走到 SaveGuard.restore()。
 var _restored := false
 
-## 8 份玩家状态的旧根路径（const → var 后的「反向对照」基线）：无槽时
-## Profile.slot_file() 必须逐字节产出这 8 个字符串。顺序与 _collect_paths() 一致。
+## 9 份玩家状态的旧根路径（const → var 后的「反向对照」基线）：无槽时
+## Profile.slot_file() 必须逐字节产出这 9 个字符串。顺序与 _collect_paths() 一致。
 const LEGACY_PATHS: Array[String] = [
 	"user://fishing_journal.json",
 	"user://boats.json",
@@ -32,6 +32,8 @@ const LEGACY_PATHS: Array[String] = [
 	"user://race_teaching.json",
 	"user://blueprint.json",
 	"user://unlocks.json",
+	# D-092：第 9 份玩家状态，按槽派生到 user://profiles/<id>/inventory.json。
+	"user://inventory.json",
 ]
 
 
@@ -66,7 +68,7 @@ func _exit_tree() -> void:
 
 
 ## 递归删掉一个目录（含任意文件名）。D-086 起槽目录里不止 progress.json，
-## 还有 8 份按槽派生的玩家状态，DirAccess.remove_absolute 只能删空目录。
+## 还有 9 份按槽派生的玩家状态，DirAccess.remove_absolute 只能删空目录。
 func _remove_dir_tree(path: String) -> void:
 	var dir := DirAccess.open(path)
 	if dir == null:
@@ -88,7 +90,7 @@ func _remove_dir_tree(path: String) -> void:
 ## 清掉 user:// 下与档案系统相关的全部文件痕迹，并复位 Profile 内存态，
 ## 让每次测试段从干净状态开始。利用 Profile.list_slots() 逐个槽删文件→删空目录。
 func _reset_fs() -> void:
-	# D-086：槽目录里现在有 8 份状态文件，不再逐个删 progress.json + 删空目录。
+	# D-086：槽目录里现在有 9 份状态文件，不再逐个删 progress.json + 删空目录。
 	_remove_dir_tree("user://profiles")
 	# 注意：不在此删 legacy progress.json（由 _restore_snapshot 负责还原/清理）。
 	Profile.reload()
@@ -177,7 +179,7 @@ func _run() -> void:
 	# 反向：有槽时 migrate_legacy 不应重复执行
 	_check(not Profile.migrate_legacy(), "C7 已有槽时 migrate_legacy 返回 false（不重复）")
 
-	# ── D-086：8 份玩家状态的按槽路径 + 换槽内存态隔离 ──
+	# ── D-086：9 份玩家状态的按槽路径 + 换槽内存态隔离 ──
 	_reset_fs()
 	_check_legacy_paths()
 	var id_sa := Profile.create_slot("隔离A")
@@ -186,8 +188,8 @@ func _run() -> void:
 	# 才会 emit slot_changed，三个 Autoload 才会重载内存态。
 	Progress.set_slot(id_sa)
 	var paths_a := _collect_paths()
-	_check(_all_in_slot(paths_a, id_sa), "D1 槽A：8 份路径全部落在 user://profiles/<A>/")
-	_check(_all_differ(paths_a, LEGACY_PATHS), "D2 槽A：8 份路径均不同于旧根路径")
+	_check(_all_in_slot(paths_a, id_sa), "D1 槽A：9 份路径全部落在 user://profiles/<A>/")
+	_check(_all_differ(paths_a, LEGACY_PATHS), "D2 槽A：9 份路径均不同于旧根路径")
 	_write_slot_state("clownfish", "race_start", "fishing_boat")
 	var a_fish := FishingSystem.discovered_count()
 	var a_wins := int(RaceSystem.entry_of("desert_ring")["wins"])
@@ -203,8 +205,8 @@ func _run() -> void:
 
 	Progress.set_slot(id_sb)
 	var paths_b := _collect_paths()
-	_check(_all_in_slot(paths_b, id_sb), "D7 槽B：8 份路径全部落在 user://profiles/<B>/")
-	_check(_all_differ(paths_b, paths_a), "D8 槽B：8 份路径与槽A 全不相同")
+	_check(_all_in_slot(paths_b, id_sb), "D7 槽B：9 份路径全部落在 user://profiles/<B>/")
+	_check(_all_differ(paths_b, paths_a), "D8 槽B：9 份路径与槽A 全不相同")
 	_check(FishingSystem.discovered_count() == 0, "D9 切B：钓鱼图鉴归零")
 	_check(int(RaceSystem.entry_of("desert_ring")["wins"]) == 0, "D10 切B：竞速记录归零")
 	_check(not BoatSystem.owns("fishing_boat"), "D11 切B：A 的小渔船未串入")
@@ -241,16 +243,44 @@ func _run() -> void:
 		"D20 换槽后 record_of() 返回新对象（旧缓存引用已失效）")
 	fresh["catch_count"] = 1
 
+	# ── D-092：第 9 份玩家状态 inventory.json 的换槽隔离 ──
+	# 本探针不实例化 main.tscn，Inventory 没有自己的 slot_changed 监听者，
+	# 故每次切槽后显式 _refresh_path() 模拟 main 回调里的路径派生。
+	Progress.set_slot(id_sa)
+	Inventory._refresh_path()
+	var inv_a: Inventory = Inventory.new(Inventory.SLOT_COUNT, Inventory.COMMON_COUNT)
+	inv_a.slots[0] = {"item": BlockTypes.Block.STONE, "count": 7, "durability": -1}
+	inv_a.slots[1] = {"item": ItemTypes.STONE_PICKAXE, "count": 1, "durability": 13}
+	inv_a.assign_hotbar(0, 5)
+	_check(inv_a.save(), "D23 槽A：背包写入 inventory.json 成功")
+	Progress.set_slot(id_sb)
+	Inventory._refresh_path()
+	var inv_b: Inventory = Inventory.load_or_new()
+	_check(inv_b.get_item(0) == BlockTypes.Block.AIR
+		and inv_b.get_item(1) == BlockTypes.Block.AIR,
+		"D24 切B：inventory.json 全空（A 槽物品未串入）")
+	_check(inv_b.hotbar_slot(0) == 0,
+		"D25 切B：hotbar_map 回到默认（A 的重映射未串入）")
+	Progress.set_slot(id_sa)
+	Inventory._refresh_path()
+	var inv_back: Inventory = Inventory.load_or_new()
+	_check(int(inv_back.slots[0]["item"]) == BlockTypes.Block.STONE
+		and int(inv_back.slots[0]["count"]) == 7
+		and int(inv_back.slots[1]["durability"]) == 13,
+		"D26 切回A：逐槽全等（含工具磨旧耐久 13）")
+	_check(inv_back.hotbar_slot(0) == 5,
+		"D27 切回A：hotbar_map 重映射恢复")
+
 	# 还原 user:// 到运行前状态，避免污染共享回归基线。
 	_restore_snapshot()
 	# D-010：OK / FAIL 两条路径都要过 SaveGuard.restore()；递归兜底清掉槽目录里
-	# 8 份状态文件与临时文件，Progress 内存态一并还原。
+	# 9 份状态文件与临时文件，Progress 内存态一并还原。
 	SaveGuard.restore()
 	_restored = true
 
 
-## D-086：把 8 份路径变量统一重算一次并快照。三个 Autoload 靠 slot_changed
-## 自动重算；其余 5 个无 _ready() 的静态类在各自 IO 入口重算。这里显式各调一次，
+## D-086：把 9 份路径变量统一重算一次并快照。三个 Autoload 靠 slot_changed
+## 自动重算；其余 6 个无 _ready() 的静态类在各自 IO 入口重算。这里显式各调一次，
 ## 保证断言读到的是「当前槽」这一刻的值，不受前面调用顺序影响。
 func _collect_paths() -> Array[String]:
 	FishingSystem._refresh_path()
@@ -261,6 +291,7 @@ func _collect_paths() -> Array[String]:
 	RaceTeachingUI._refresh_path()
 	BuildScreen._refresh_path()
 	PartUnlocks._refresh_path()
+	Inventory._refresh_path()
 	var out: Array[String] = [
 		FishingSystem.JOURNAL_PATH,
 		BoatSystem.JOURNAL_PATH,
@@ -270,6 +301,7 @@ func _collect_paths() -> Array[String]:
 		RaceTeachingUI.SAVE_PATH,
 		BuildScreen.BLUEPRINT_PATH,
 		PartUnlocks.SAVE_PATH,
+		Inventory.SAVE_PATH,
 	]
 	return out
 

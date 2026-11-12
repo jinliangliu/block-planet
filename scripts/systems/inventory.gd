@@ -404,3 +404,155 @@ func _sort_key_less(a: Dictionary, b: Dictionary) -> bool:
 	if cat_a != cat_b:
 		return cat_a < cat_b
 	return int(a["item"]) < int(b["item"])
+
+
+## ── 持久化（D-092：user://inventory.json 按存档槽派生）──────────────
+## 只序列化背包自身四字段（version / slots / hotbar_map / fill_limit），不含
+## 任何区块 / 地形 / 世界数据。save() 走 tmp + rename 原子写；load_or_new()
+## 对缺文件 / 坏 JSON / 顶层非字典 / 槽数异常 / 字段类型错一律退回 36 槽 AIR
+## 默认，且读路径**绝不写盘**（D-010 铁律 3）。
+## 换槽时 main 用 hydrate_from() 原地覆盖，不替换 _player.inventory 对象引用
+## ——hud.gd:218/220 与 inventory_panel.gd:82 都连了 changed，替换引用会断连。
+
+## 生产侧拒写闸（同 FishingSystem.journal_ok / BoatSystem.journal_ok）：
+## SaveGuard.restore() 与 7 个内联快照探针的还原函数在 quit 前置 false，挡住
+## main._exit_tree() 关停期二次写盘把逐字节还原的文件覆盖回内存态（D-010 假 DIFF）。
+static var io_ok: bool = true
+
+## 按槽派生路径。save() / load_or_new() 都读它 → static var（同 PartUnlocks）。
+## 默认值是旧根路径；_refresh_path() 在有槽时覆盖为 Profile.slot_file(...)。
+static var SAVE_PATH: String = "user://inventory.json"
+
+
+static func _refresh_path() -> void:
+	if Profile != null:
+		SAVE_PATH = Profile.slot_file("inventory.json")
+
+
+## 数字类型判定：Godot 的 JSON.parse_string 把 JSON 数字一律解析为 float，
+## 故 int 与 float 都认（同 BoatSystem._int_or_zero:323-326）。
+static func _is_number(v: Variant) -> bool:
+	return typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT
+
+
+## payload 结构校验：槽数 / 快捷栏位数 / 每格三字段类型 / fill_limit 类型。
+## 任一不符即整份退回默认，绝不半吊子覆盖（字段类型错也算损坏档）。
+static func _valid_payload(d: Dictionary) -> bool:
+	var slots_value: Variant = d.get("slots", null)
+	if typeof(slots_value) != TYPE_ARRAY:
+		return false
+	var raw_slots: Array = slots_value
+	if raw_slots.size() != SLOT_COUNT:
+		return false
+	for s_value: Variant in raw_slots:
+		if typeof(s_value) != TYPE_DICTIONARY:
+			return false
+		var s: Dictionary = s_value
+		if not (s.has("item") and s.has("count") and s.has("durability")):
+			return false
+		if not (_is_number(s["item"]) and _is_number(s["count"])
+				and _is_number(s["durability"])):
+			return false
+	var map_value: Variant = d.get("hotbar_map", null)
+	if typeof(map_value) != TYPE_ARRAY:
+		return false
+	var raw_map: Array = map_value
+	if raw_map.size() != HOTBAR_SIZE:
+		return false
+	for idx_value: Variant in raw_map:
+		if not _is_number(idx_value):
+			return false
+	return _is_number(d.get("fill_limit", null))
+
+
+## 序列化：逐格 duplicate，避免外部持有引用被后续改写污染。
+func to_dict() -> Dictionary:
+	var out_slots: Array = []
+	for s: Dictionary in slots:
+		out_slots.append(s.duplicate())
+	var out_map: Array = []
+	for idx: int in hotbar_map:
+		out_map.append(idx)
+	return {
+		"version": 1,
+		"slots": out_slots,
+		"hotbar_map": out_map,
+		"fill_limit": fill_limit,
+	}
+
+
+## 从字典构造新实例（校验失败则退回 36 槽 AIR 默认）。
+static func from_dict(d: Dictionary) -> Inventory:
+	var inv: Inventory = Inventory.new(SLOT_COUNT, COMMON_COUNT)
+	inv.hydrate_from(d)
+	return inv
+
+
+## 原地覆盖 slots / hotbar_map / fill_limit + changed.emit()。**不替换对象引用**。
+## 校验失败退回默认 36 槽 AIR（fill_limit=COMMON_COUNT，与玩家背包一致）。
+func hydrate_from(d: Dictionary) -> void:
+	if _valid_payload(d):
+		var new_slots: Array[Dictionary] = []
+		for s_value: Variant in (d["slots"] as Array):
+			var s: Dictionary = s_value
+			new_slots.append({
+				"item": int(s["item"]),
+				"count": int(s["count"]),
+				"durability": int(s["durability"]),
+			})
+		slots = new_slots
+		var new_map: Array[int] = []
+		for idx_value: Variant in (d["hotbar_map"] as Array):
+			new_map.append(int(idx_value))
+		hotbar_map = new_map
+		fill_limit = int(d["fill_limit"])
+	else:
+		slots = []
+		for i in range(SLOT_COUNT):
+			slots.append({"item": BlockTypes.Block.AIR, "count": 0, "durability": -1})
+		hotbar_map = []
+		for i in range(HOTBAR_SIZE):
+			hotbar_map.append(i)
+		fill_limit = COMMON_COUNT
+	changed.emit()
+
+
+## 写入 JSON（tmp + rename 原子写）；io_ok=false / 打不开临时文件返回 false。
+## 显式传 path 的探针调用不触发 _refresh_path()；默认空串才按槽派生。
+func save(path: String = "") -> bool:
+	if not io_ok:
+		return false
+	var target: String = path
+	if target.is_empty():
+		_refresh_path()
+		target = SAVE_PATH
+	var text: String = JSON.stringify(to_dict())
+	var tmp: String = target + ".tmp"
+	var file: FileAccess = FileAccess.open(tmp, FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_string(text)
+	file.close()
+	DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp),
+		ProjectSettings.globalize_path(target))
+	return true
+
+
+## 读档：缺文件 / 坏 JSON / 顶层非字典一律退回默认实例，且**绝不写盘**。
+## from_dict() 内部再校验槽数 / 字段类型，异常同样退回默认。
+static func load_or_new(path: String = "") -> Inventory:
+	var target: String = path
+	if target.is_empty():
+		_refresh_path()
+		target = SAVE_PATH
+	if not FileAccess.file_exists(target):
+		return Inventory.new(SLOT_COUNT, COMMON_COUNT)
+	var file: FileAccess = FileAccess.open(target, FileAccess.READ)
+	if file == null:
+		return Inventory.new(SLOT_COUNT, COMMON_COUNT)
+	var text: String = file.get_as_text()
+	file.close()
+	var parsed: Variant = JSON.parse_string(text)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return Inventory.new(SLOT_COUNT, COMMON_COUNT)
+	return from_dict(parsed)

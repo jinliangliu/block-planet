@@ -867,8 +867,8 @@ const BUNDLE_TITLES := {
 	"all": "四大洋",
 }
 ## 集齐奖励的即时惊喜量级（与现有任务链 1~6 绿宝石同量级，D-087 默认假设）。
-## 注意 inventory 不落盘（main.gd 仅跨场景内存携带 GameState.carried_inventory），
-## 绿宝石是「这一局」的惊喜；真正随存档槽持久、可回看的是 stat_of 徽章状态。
+## 注意 inventory 已按档案槽持久化（D-092：user://inventory.json 走 Profile.slot_file()），
+## 绿宝石随存档槽保留、跨会话不丢；真正可回看的里程碑是 stat_of 徽章状态。
 const BUNDLE_REWARD_SINGLE := 3
 const BUNDLE_REWARD_ALL := 8
 

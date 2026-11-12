@@ -45,6 +45,9 @@ const EXTRA_FILES := [
 	# snapshot_profiles() 覆盖整树，但日常回归跑无槽态会落 legacy 根文件；
 	# 不登记则退出期凭空留文件 → 下次 diff -r 假 DIFF（同 D-088 §2 的四步）。
 	"user://boats.json",
+	# D-092：main._exit_tree() 在 _inv_dirty 为真时补写 inventory.json，无槽态
+	# 落 legacy 根文件；不登记则退出期凭空留文件 → 下次 diff -r 假 DIFF（同 D-089）。
+	"user://inventory.json",
 ]
 
 static var _progress := ""
@@ -88,6 +91,12 @@ static func restore() -> void:
 	# 走本助手的探针退出期一律不写盘；boats.json 已登记在 EXTRA_FILES 内。
 	FishingSystem.journal_ok = false
 	BoatSystem.journal_ok = false
+	# D-092：Inventory.save() 由 main._exit_tree() 在关停期触发（仅 _inv_dirty 时），
+	# 会把刚逐字节还原的 inventory.json 覆盖回内存态。io_ok=false 是生产侧
+	# 拒写闸（同上面两个 journal_ok），在此统一置位；inventory.json 已登记在
+	# EXTRA_FILES 内。7 个保留内联快照范式的旧探针不走本函数，它们各自在还原
+	# 函数里单独置位（等价闸，缺一即整段回归假 DIFF）。
+	Inventory.io_ok = false
 
 
 ## 档案槽目录（user://profiles/）快照 / 还原。单独暴露一对，是给那些保留
