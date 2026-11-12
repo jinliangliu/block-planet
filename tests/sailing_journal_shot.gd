@@ -188,6 +188,10 @@ func _run() -> void:
 	await _scroll_top()
 	_check_common("20:9")
 	await _capture("sailing_journal_20x9.png", "② 20:9 默认态", _panel_ctrl)
+	# 哨兵（坑 #15 / D-088 flight_shot 教训）：PASS=0 是危险信号。放在所有断言
+	# 之后，若前面一条 PASS 都没产出，这一条记 FAIL ⇒ _finish() 里 quit() 沿用
+	# _failed==0 判据即为 rc=1，且 _OK 的 _passed>0 打印门控也不会放行。
+	_check(_passed > 0, "R7 哨兵：本探针至少产出 1 条 PASS（0 PASS 视为假绿）")
 
 
 # ────────────────────────── 断言组 ──────────────────────────
