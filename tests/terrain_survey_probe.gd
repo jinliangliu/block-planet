@@ -15,6 +15,7 @@ const RING_IN := 950     # 环带内半径：> world.VALLEY_RAMP(600, D-073)，�
 const RING_OUT := 1500
 const RING_DIRS := 64
 const RING_STEP := 10
+const PROBE_WORLD := preload("res://tests/probe_world.gd")
 
 var _failed := 0
 var _passed := 0
@@ -237,6 +238,9 @@ func _run() -> void:
 			% zone_cells)
 
 	# ── ⑤ 机场选址仍成功（山顶只有一格可站，凑不出四格空气） ──
+	# ① 读前确保加载：本段扫描 (84..144, 32..156) 远区，玩家未必在附近，
+	# 未加载区块 get_block 一律返 AIR 会让列被跳过、ok_cols 偶发跌破阈值。
+	PROBE_WORLD.ensure_region(world, Vector3i(84, 0, 32), Vector3i(144, 0, 156))
 	var ok_cols := 0
 	for x in range(84, 144, 2):
 		for z in range(32, 156, 2):
