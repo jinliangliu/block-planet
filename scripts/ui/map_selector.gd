@@ -998,7 +998,11 @@ func _open_card_detail(index: int) -> void:
 	_detail_text.text = String(card["text"])
 	_detail_art.queue_redraw()
 	# 卡片 gui_input / 上一张 / 下一张 三个入口都汇到这里，统一记一笔阅读量。
-	Progress.notify("cards_read")
+	# 去重：同一区域的同一张卡只记一次（跨重开持久化），cls_cards3 因此变成「读满 3 张不同卡片」。
+	var read_key: String = "cards_read_%d_%d" % [_selected, index]
+	if int(Progress.counters.get(read_key, 0)) == 0:
+		Progress.counters[read_key] = 1
+		Progress.notify("cards_read")
 	_card_detail.visible = true
 	_card_detail.z_index = 10
 

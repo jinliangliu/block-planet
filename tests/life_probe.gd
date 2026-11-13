@@ -1080,12 +1080,28 @@ func _run() -> void:
 	hud._map_selector._close_card_detail()
 	_check(not hud._map_selector._card_detail.visible, "详情浮层可关闭")
 
-	# ── 知识卡片阅读计数（D-089 阶段 1）：一律用「调用前后差值」，不钉存档绝对值 ──
-	# 埋点统一放在 _open_card_detail()，覆盖卡片点击 / 上一张 / 下一张三个入口。
+	# ── 知识卡片阅读计数（D-089 阶段 1 + 去重）：用「调用前后差值」，不钉存档绝对值 ──
+	# 埋点统一在 _open_card_detail()：同一张卡只记一次（cls_cards3 现为「读满 3 张不同卡片」）。
+	# 去重标记是维度键 cards_read_<region>_<index>，跨重开持久化；本段断言相对存档基线，
+	# 不假设基数为 0（回归备份可能已含历史阅读记录）。
+	var cards_region: int = hud._map_selector._selected
 	var cards_baseline: int = int(Progress.counters.get("cards_read", 0))
+	var rk := func(idx: int) -> String: return "cards_read_%d_%d" % [cards_region, idx]
+	_check(int(Progress.counters.get(rk.call(1), 0)) == 1 or cards_baseline >= 1,
+		"详情浮层测试已记过 card 1（cards_read 至少 1）")
+
+	# 入口 1：卡片点击 card 0 —— 未读→+1，已读→去重不变。
+	var card0_unread: bool = int(Progress.counters.get(rk.call(0), 0)) == 0
+	var card2_unread: bool = false
+	var prev_pressed: bool = false
 	hud._map_selector._open_card_detail(0)
-	var cards_after_open: int = int(Progress.counters.get("cards_read", 0))
-	_check(cards_after_open - cards_baseline == 1, "点开知识卡片：cards_read +1")
+	_check(int(Progress.counters.get("cards_read", 0)) - cards_baseline == (1 if card0_unread else 0),
+		"点开 card 0（%s）：cards_read 计数符合去重" % ("未读+1" if card0_unread else "已读不变"))
+	# 去重复测：再点同一张 → 始终不重复计数。
+	var after_first: int = int(Progress.counters.get("cards_read", 0))
+	hud._map_selector._open_card_detail(0)
+	_check(int(Progress.counters.get("cards_read", 0)) == after_first,
+		"重复点同一张 card 0：去重不重复计数")
 
 	var cards_prev_button: Button = null
 	var cards_next_button: Button = null
@@ -1101,19 +1117,26 @@ func _run() -> void:
 	_check(cards_prev_button != null and cards_next_button != null,
 		"详情浮层含上一张 / 下一张翻页按钮")
 	if cards_prev_button != null:
+		# 当前 _detail_index=0，prev 包到 card 2。
+		card2_unread = int(Progress.counters.get(rk.call(2), 0)) == 0
+		prev_pressed = true
 		var before_prev: int = int(Progress.counters.get("cards_read", 0))
 		cards_prev_button.pressed.emit()
-		_check(int(Progress.counters.get("cards_read", 0)) - before_prev == 1,
-			"上一张翻页：cards_read +1")
+		_check(int(Progress.counters.get("cards_read", 0)) - before_prev == (1 if card2_unread else 0),
+			"上一张翻到 card 2（%s）：cards_read 计数符合去重" % ("未读+1" if card2_unread else "已读不变"))
 	if cards_next_button != null:
+		# 当前 _detail_index=2，next 包到 card 0（本段已点过）→ 去重 +0。
 		var before_next: int = int(Progress.counters.get("cards_read", 0))
 		cards_next_button.pressed.emit()
-		_check(int(Progress.counters.get("cards_read", 0)) - before_next == 1,
-			"下一张翻页：cards_read +1")
+		_check(int(Progress.counters.get("cards_read", 0)) - before_next == 0,
+			"下一张翻回已读 card 0：去重不重复计数")
 	hud._map_selector._close_card_detail()
 
+	# 本段新增的「不同卡片」数 = 本段首次点开的未读卡数（与存档基线无关，恒等于预期）。
 	var cards_total: int = int(Progress.counters.get("cards_read", 0))
-	_check(cards_total - cards_baseline == 3, "卡片 / prev / next 三入口合计 cards_read +3")
+	var expected_new: int = (1 if card0_unread else 0) + (1 if (prev_pressed and card2_unread) else 0)
+	_check(cards_total - cards_baseline == expected_new,
+		"卡片 / prev 两入口合计：本段新增 %d 张不同卡片（去重后）" % expected_new)
 	_check(QuestData.lessons().size() == 8, "探索课堂共 8 课（含卡片小探险家）")
 	var cards_lesson: Dictionary = {}
 	for lesson_entry: Dictionary in QuestData.lessons():
