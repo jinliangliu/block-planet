@@ -2878,6 +2878,9 @@ daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照
    `git stash` 后在干净 HEAD 上复跑同样 FAIL，随后全量回归里又 PASS。属机会性断言
    （`main_scene.get_children()` 里数 `ArrowProjectile` + 一帧后读蓄力），需按坑 #15 的
    构造式喂帧重写，本轮不扩大范围。
+   **〔已由 D-095 收口（2026-11-13）：D-094 full 档 g2 再次复现该 FAIL，根因是 `await process_frame`
+   把 `ArrowProjectile._physics_process()` 的射线命中销毁放进计数窗口；改同步取证 + `pre_clean`
+   反向对照守卫，`life_probe` 456/0、full 档 75/2946/0。本条待办关闭〕**
 2. **音色未做主观调音**：音高/时长是按「能区分」而非「好听」定的，需真机试听再调。
    音量 0.7 缺省 + 单音 0.3~0.62 相对值，可能对儿童偏轻或偏响。
 3. **钓鱼侧其余 P0 未做**（见 D-080 预留）：咬钩窗口温和化（木 1.6→3.0 s / 铁 3.8 s）、
@@ -2978,6 +2981,7 @@ HUD 经 `last_catch()` 只读取出——**信号契约零改动**。
   破个人最佳 +1 / 未知鱼种兜底 1 条 / `last_catch` 带重量与最佳标记。
 - `[user://] RESTORED_OK` 零 DIFF，`fishing_journal.json` 未产生。
 - `life_probe` 440/0（其中「松手射出一支箭且蓄力归零」仍是 D-079 记录的既有 flaky）。
+  **〔已由 D-095 收口：该 flaky 不再「仍是」，改同步取证 + 反向对照后 `life_probe` 456/0；见 D-095 §1-§2〕**
 
 ### 8. 待办（本轮刻意不做）
 
@@ -3766,6 +3770,8 @@ D-084 §5 待办 3「未实机调参」**保持待办**（见 §8）。
   14 → 16，当前基线见 D-089 §7；44 px 真机目检仍待办〕**
 - 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、`life_probe` flaky、
   AI 手刹与 `mountain_road` 实机观感、装饰密度实机掉帧、触屏按钮 / 多指 / 倒计时遮挡目检。
+  **〔历史快照订正：太阳曲线由 D-090 修复；`life_probe` flaky 分两处收口——蟹贴水底 D-094 ③、
+  弓箭 P-7 D-095；其余真机目检项仍待办〕**
 
 ---
 
@@ -4140,6 +4146,7 @@ D-074 Gap A 是**双门槛** `SUCCESS_HOLD = 3.5 s` + `SAFE_AGL = 40 m`，旧探
 - **`tmp/run_regression.sh` 参数化后移入 `tools/` 入库**（D-086 §6 已开票）。
 - 既有另开票：`DayNightCycle._apply_lighting()` 太阳高度曲线疑似反向、
   `life_probe` flaky、AI 手刹与 `mountain_road` 实机观感。
+  **〔历史快照订正：太阳曲线由 D-090 修复；`life_probe` flaky 由 D-094 ③（蟹）+ D-095（弓箭）收口〕**
 - **D-089 交叉引用（本批之后仍待办）**：上面「真机目检」（触屏 44 px 热区、字形回退、
   多指、倒计时遮挡）与 `chunk_mesh_baseline` full 档重录，在 D-089 后**依然待办**——
   D-089 只完成代码侧 44 px 热区统一与 `quest_shot` 入口断言，**真机目检未做**。
@@ -4692,13 +4699,13 @@ chunk 全 `loaded=true`、`origin=(0,0)`；落地时 `(7,-3)/(7,-2)` `loaded=fal
   - 轮询直到「首次稳定 `is_on_floor`」再落断言，容忍下落 / 游荡中的时序抖动；反向对照守卫 `floated_away` 默认未飘离，仅当检测到明显上浮（y 超 `SEA_LEVEL+1`）才置假——**断言强度不放松**（仍要求真正贴底、`is_on_floor` 为真、未浮出水面），只是不再因时序抖动假 FAIL。
   - 三条断言均带高度 / 垂直速度过程量，失败可直接区分「没下沉」vs「浮起来了」。
 
-### 4. 明确不做 + 歧义遗留
+### 4. 明确不做 + ④ 歧义裁决（后者已由 D-095 收口）
 
 | 项 | 口径 |
 |---|---|
 | 改 `Progress` schema / 新增顶层键 / 新增 `class_name` / 写 `user://` | **不做**（D-010 铁律；本批零 schema 变更） |
 | 其余 6 个读区块探针接线 ① helper | **不做**（恒加载区，全量回归绿佐证安全，最小改动原则） |
-| ④「`life_probe` 射箭 flaky」是否另需处理 | **歧义遗留（待用户确认）**：用户长期记忆 #4 原话为「`life_probe` 射箭 flaky」，但本批在复盘 `life_probe` 时定位并修复的 flaky 是**蟹贴水底**（③ 已结）。弓箭 P-7 段（约 `life_probe.gd:1704-1749`）在本轮未复现 flaky、未改动；若用户所指确为弓箭段需另开一题诊断。 |
+| ④「`life_probe` 射箭 flaky」是否另需处理 | **〔已由 D-095 收口，本行原判作废〕** 原写「歧义遗留（待用户确认）」「弓箭 P-7 段约 `life_probe.gd:1704-1749` 本轮未复现、未改动」：D-094 **full 档** g2 在回归负载下复现 `FAIL: 松手射出一支箭且蓄力归零`（`tmp/d094_g2.txt:8-9`），坐实用户原话确指弓箭段，且与 ③ 的蟹贴水底是两个独立 flaky。真实 P-7 行号为 `tests/life_probe.gd:1740-1786`（修后取证片段 `:1775-1800`），旧行号为静态推断之误。修复与 full 档基线见 **D-095**。 |
 
 ### 5. 风险与回归影响
 
@@ -4706,11 +4713,55 @@ chunk 全 `loaded=true`、`origin=(0,0)`；落地时 `(7,-3)/(7,-2)` `loaded=fal
 - **② 改动触生产 `map_selector`**：仅增 int 标量维度键与 `notify` 门控，`Progress.counters` 无白名单，老档兼容；`cls_cards3` 语义由「次数」收敛为「不同卡片」，更符合设计意图。
 - 不新增 `class_name`；`git diff --check` rc=0、全 Tab、无警告。
 - 窗口探针不受影响：② 仅改无头 `life_probe` 断言与生产 `map_selector`（断言在无头跑），① 仅接无头 `terrain_survey`；窗口 17 探针无需重跑（遵循 D-091 纪律，改动不触窗口路径可酌情，本次仅跑无头 58）。
+  **〔D-095 补充：后续仍补跑了 full 档 75 探针（含窗口 17），用于最终验收；并在 g2 暴露出默认 58 无头档未触发的弓箭 P-7 flaky。结论是「本次可跳过」不等于「最终基线可跳过」〕**
 
 ### 6. 验证基线（D-010 零 DIFF 门）
 
 - **全量 58 无头探针：`FAIL=0`**，与 D-093 基线一致；`life_probe` 因去重断言由 451 升到 **455**（`+4`：card0 / 重复卡 / prev 到 card2 / 两入口合计四笔相对基线断言替换原 3 笔 `==1` 绝对断言），`terrain_survey_probe` 24/0 且 ⑤ 远区先 ensure。
+  **〔D-095 补充：此后补跑的 D-094 full 档 75 探针在 g2 复现了 D-079 §8 的弓箭 P-7 flaky（`FAIL=1`），即「默认 58 无头档全绿」不足以覆盖该机会性断言；收口与最终基线见 D-095 §5〕**
 - 门禁：分段串行 `RESTORED_OK` 零 DIFF、零 SCRIPT ERROR / Parse Error、最终 `diff -r` rc=0、`profiles/` 原位、无残留 Godot 进程 / 移出目录。
 - 单跑自验：`life_probe` **455/0**（蟹段构造式 + 卡片段去重相对基线全 PASS）、`terrain_survey_probe` **24/0**（⑤ 远区先 `ensure_region`）。
 - `rc=139` 良性退出（Vulkan 退出期清理）同 D-093 判定，非回归。
 - **真机目检仍待办**：② 改动仅触计数埋点（无 UI 几何变化），① ③ 纯探针侧；窗口 / 真机目检清单维持 D-088~D-093 口径，回归全绿不关闭真机目检。
+
+---
+
+## D-095 `life_probe` 弓箭 P-7 flaky 收口 + full 档最终验收（2026-11-13）
+
+**结论**：D-094 full 档 75 探针整轮在 g2 段复现了 D-079 §8 登记、D-080 复述的既有机会性断言 flaky——`FAIL: 松手射出一支箭且蓄力归零`（`tmp/d094_g2.txt:8-9`，`life_probe rc=1 PASS=454 FAIL=1`）。这同时澄清长期记忆 #4 的 ④ 歧义：用户原话「`life_probe` 射箭 flaky」确指**弓箭 P-7 段**，与 D-094 ③ 收口的**蟹贴水底**是两个独立 flaky；D-094 §4「本轮未复现、未改动、约 `life_probe.gd:1704-1749`」的静态推断被 full 档实测推翻（已就地订正）。本批以「同步取证 + 反向对照」重写计数窗口：**零生产改动 / 零新 `class_name` / 零新存档键 / 零 `user://` 写入 / 零 schema 变更**；D-095 full 档 **75 探针 / 2946 PASS / 0 FAIL**（无头 58/2567 + 窗口 17/379），8 段全部 `RESTORED_OK` 零 DIFF。
+
+### 1. 根因（源码实测，非静态推断）
+
+- **生产链路同步且确定**：`player.gd:1604 _release_bow()` 在 `:1616` 执行 `get_parent().add_child(arrow)`；`Player` 是 `main.tscn` 根节点的直接子节点，`WorldAnchor.register()`（`world_anchor.gd:23`）只向上找 group / 加 group、**不改父节点** ⇒ `player._end_use()` 返回当帧，箭必定挂在 `main_scene.get_children()` 下，**无需等帧**。
+- **竞争来自探针侧**：`arrow_projectile.gd:57 _physics_process()` 每物理帧用 `intersect_ray`（`:72`）扫过本帧位移，命中地形 / 生物即 `queue_free()`（`:85`、`:96`），`LIFETIME 3.0` 到期亦 `queue_free()`（`:59-60`）。旧写法在 `_end_use()` 与「数 `ArrowProjectile`」之间夹 `await get_tree().process_frame`，把物理帧放进计数窗口 ⇒ 帧序抖动时箭已被销毁，计数为 0，`arrows_shot == 1` 偶发 FAIL。
+- **历史实测对照**：D-079 §8 曾在干净 HEAD（`git stash` 后）复跑同样 FAIL、随后全量回归又 PASS；本轮 D-094 默认 58 无头档全绿、D-094 **full 档** g2 复现、D-095 三次单跑全绿。生产链路无 `randf` / 无 `Timer` / 无 `World.get_block` 参与，排除玩法层随机性与区块流载因素 ⇒ 属坑 #15「机会性断言」，**不是生产 bug**。
+
+### 2. 修复（`tests/life_probe.gd` 单文件，+15/−1）
+
+- **删掉计数窗口前的 `await`**：`_end_use()` 后直接在 `main_scene.get_children()` 中同步数箭并 `queue_free()` 取证；依据是 §1 的同步 `add_child`，不是「放宽等待 / 多等几帧」。
+- **新增 `pre_clean` 反向对照守卫**（坑 #15 要求构造式喂帧 + 反向对照）：松手前遍历 `main_scene.get_children()`，若存在残留 `ArrowProjectile` 则 `pre_clean = false` 并真实 FAIL。默认真、命中才置假 ⇒ 污染时**真实误报**，不是跳过型判据；堵住「数到 1 支其实来自残留节点」的假绿路径（例如同段掠夺者 `mob.gd:_shoot_arrow()` 产生的箭）。
+- **断言强度不放松**：保留原「松手射出一支箭且蓄力归零」（`arrows_shot == 1 and not player.is_charging_bow()`）与「射击消耗一支箭」两条 `_check` 的文案与判据，新增守卫是第 3 条 ⇒ `life_probe` 由 455 升 **456**。
+- **帧推进后移**：`await get_tree().process_frame` 移到全部断言之后，让刚 `queue_free()` 的箭在下帧正常移除，维持 P-8 垂钓段时序，同时不把物理帧竞争带回计数窗口。
+- **行号订正**：真实 P-7 段 `tests/life_probe.gd:1740-1786`，修后取证片段 `:1775-1800`；D-094 §4 / 当日日志旧稿「`:1704-1749`、本轮未复现、未改动」就此作废。
+
+### 3. ④ 歧义裁决（长期记忆 #4）
+
+| 项 | 口径 |
+|---|---|
+| 用户原话「`life_probe` 射箭 flaky」 | **确指弓箭 P-7 段**，由 D-094 full 档 g2 的 `FAIL: 松手射出一支箭且蓄力归零` 复现坐实；不再「待用户确认」 |
+| D-094 ③ 修的「蟹贴水底」 | **独立 flaky**，二者不可互相顶替；③ 结论保持有效 |
+| D-094 §4「本轮未复现、未改动」 | **由 D-095 订正**：默认 58 无头档未触发，full 档回归负载下触发；静态推断必须过引擎反向对照（沿用 D-091 教训） |
+
+### 4. 范围与风险
+
+- 改动面**仅** `tests/life_probe.gd`；未动 `player.gd` / `arrow_projectile.gd` / `world_anchor.gd` / 任何生产场景、`save_guard.gd` / `EXTRA_FILES`、任何 `class_name`、`Progress` schema。
+- 不新增 `class_name`；全 Tab、无 `\` 续行；`git diff --check` rc=0；GDScript 零警告。
+- 探针侧唯一新耦合是「同步取证依赖 `_release_bow()` 的同步 `add_child`」——已由源码与 `main.tscn` 父子关系双重确认；若将来把箭生成改成异步 / 对象池，本守卫会以 FAIL 显式暴露，不会静默假绿。
+
+### 5. 验证基线（D-010 零 DIFF 门）
+
+- **构造式自验**：`tmp/d095_verify.sh` → `life_probe` 连跑 3 次均 `rc=0 PASS=456 FAIL=0`（基线 455 + 新增守卫 1），每次 `RESTORED_OK` 零 DIFF、零 SCRIPT ERROR；g2 段 10 探针 `FAIL=0`。
+- **full 档最终验收**：`tmp/d095_full_run.sh` 8 段串行（g1~g6 无头 10/10/10/10/10/8 = 58，w1/w2 窗口 8/9 = 17），合计 **75 探针 / 2946 PASS / 0 FAIL**（无头 **2567** + 窗口 **379**）。对账链：D-093 `75/2941/0` → D-094 `+4`（卡片段相对基线断言，`life_probe` 451→455）→ D-095 `+1`（`pre_clean` 守卫，455→456）= **2946**，逐值可解释；D-094 full 档因该 flaky 少 1 条 PASS 且带 1 FAIL，本轮归零。
+- 8 段全部 `[user://] RESTORED_OK`（存档逐字节一致）、`DIFF=0`、零 `SCRIPT ERROR` / Parse Error；`profiles/` 原位、无孤儿 `user_real_profiles`、无残留 Godot 进程。
+- `rc=139` 良性退出 **7 个**（`smoke_test` / `airport_probe` / `flight_probe` / `racing_probe` / `stuck_rescue_probe` / `cockpit_align_probe` / `terrain_warning_probe`），均为 Vulkan 退出期清理段、`FAIL=0` 且 `PASS>0`，按 D-093 判定不判回归失败。
+- **真机目检仍待办**：本批纯探针侧、无 UI 几何 / 渲染变化；窗口 / 真机目检清单维持 D-088~D-093 口径，回归全绿不关闭真机目检。
