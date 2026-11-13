@@ -1772,8 +1772,19 @@ func _run() -> void:
 		"蓄力进度可读取（%.2f）" % player.bow_charge_ratio(),
 	)
 	var arrows_before := player.inventory.count_item(ItemTypes.ARROW)
+	# 构造式取证（收口 D-079 §8 既有 flaky）：_release_bow() 同步
+	# get_parent().add_child(arrow)，松手返回当帧箭必然挂在 main_scene 下。
+	# 旧写法先 await 一帧再数，箭的 _physics_process 会在该帧先用射线扫过位移、
+	# 命中地形或生物即 queue_free()（arrow_projectile.gd:68-86），帧序抖动导致
+	# 有时数到 0 —— 这是「松手射出一支箭且蓄力归零」偶发 FAIL 的根因。
+	# 反向对照守卫（默认真、命中才置假）：射出前场上必须无残留箭，否则数到 1 支
+	# 可能来自残留节点而假绿；污染时本守卫会真实误报，不是跳过型判据。
+	var pre_clean := true
+	for child in main_scene.get_children():
+		if child is ArrowProjectile:
+			pre_clean = false
+	_check(pre_clean, "反向对照：松手前场上无残留箭（否则计数判据会假绿）")
 	player._end_use()
-	await get_tree().process_frame
 	var arrows_shot := 0
 	for child in main_scene.get_children():
 		if child is ArrowProjectile:
@@ -1784,6 +1795,9 @@ func _run() -> void:
 		player.inventory.count_item(ItemTypes.ARROW) == arrows_before - 1,
 		"射击消耗一支箭（%d → %d）" % [arrows_before, player.inventory.count_item(ItemTypes.ARROW)],
 	)
+	# 帧推进放到断言之后：让刚 queue_free 的箭在下帧正常移除，维持与后续 P-8 垂钓段的时序，
+	# 同时不把物理帧竞争带回计数窗口。
+	await get_tree().process_frame
 
 	# P-8 垂钓：抛竿 → 咬钩 → 收竿
 	var fish_spot := _find_kind_cell(
