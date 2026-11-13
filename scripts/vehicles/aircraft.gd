@@ -12,6 +12,7 @@ extends CharacterBody3D
 ##
 ## 驾驶输入（use_player_input = true 且 piloted 时）：
 ##   ↑ / ↓ → 拉杆 / 推杆    ← / → → 左右压杆（任何视角都能用）
+##                          D-096 起带起杆斜坡：按住约 250 ms 到满杆，松手瞬零
 ##   W / S → 油门增减    A / D → 方向舵（地面即前轮转向）
 ##   F → 发动机启停（熄火后油门锁 0，滑翔仍可操纵）
 ##   空格 → 地面机轮刹车 / 空中拉升（上升）
@@ -56,6 +57,11 @@ const STEER_RATE := 0.8
 const THROTTLE_RATE := 0.55
 ## 空中加速（Shift）油门变化速率（每秒）：比 W 推油快一倍以上，「按一下就走」。
 const BOOST_RATE := 1.4
+## 键盘 ←/→ 起杆斜坡（D-096）：杆量是角速度目标（坑 #21），键盘离散 0/±1
+## 一帧写满等于「单击即持续满杆」，短按也会积累出大坡度、丢准心。按住时按
+## 此速率线性起杆（4.0/s ⇒ 250 ms 到满杆），松手瞬间归零——这是 D-070
+## 「无隐性杆源」要求的回程语义，不是被拆掉的 `_stick` 慢回中。
+const KB_ROLL_RAMP := 4.0
 ## 骑乘者受伤（解体时抛出）。
 const CRASH_DAMAGE := 6
 
@@ -127,6 +133,10 @@ var _touch_roll := 0.0
 var _touch_yaw := 0.0
 var _touch_throttle := 0.0
 var _touch_brake := false
+## 键盘 ←/→ 滚转的起杆斜坡状态（D-096）：只由键盘分支推进，写入 controls.roll。
+## 松手瞬零、反向压杆先归零再爬；下机 / 触屏 / 模态冻结 / 探针直写时一并清零，
+## 保证「切回键盘」不会从残留杆位起步（D-070 回零闸的精神）。
+var _kbd_roll_shaped := 0.0
 ## 是否有人驾驶（决定输入来源与座位跟随）。
 var piloted := false
 ## 发动机状态（F 键启停）：熄火时油门锁 0、无推力，螺旋桨停转；
@@ -610,6 +620,7 @@ func set_piloted(value: bool, who: Player = null) -> void:
 		_refuel_full()
 		_state.flaps = 0
 		_flaps_moved = false
+		_kbd_roll_shaped = 0.0
 		return
 	controls.throttle = 0.0
 	controls.pitch = 0.0
@@ -623,6 +634,7 @@ func set_piloted(value: bool, who: Player = null) -> void:
 	_touch_yaw = 0.0
 	_touch_throttle = 0.0
 	_touch_brake = false
+	_kbd_roll_shaped = 0.0
 
 
 func _physics_process(delta: float) -> void:
@@ -888,14 +900,19 @@ func _prepare_input(delta: float) -> void:
 		controls.yaw = 0.0
 		controls.brake = false
 		controls.throttle = maxf(0.0, controls.throttle - THROTTLE_RATE * delta)
+		_kbd_roll_shaped = 0.0
 		return
 	if not use_player_input:
-		# 脚本/探针驱动：一个字段都不碰，全部由外部写入。
+		# 脚本/探针驱动：controls 一个字段都不碰，全部由外部写入。只清内部
+		# 起杆状态，保证切回键盘时从零起步（D-096）。
+		_kbd_roll_shaped = 0.0
 		return
 	# 模态界面打开中（任务/设置等面板冻结玩家，Player.input_locked）：不接受
 	# 新输入，保持当前杆位与油门继续飞行——否则玩家在面板里按 W/S/A/D/空格
-	# 仍在遥控飞机（P2-2）。
+	# 仍在遥控飞机（P2-2）。内部起杆状态一并冻结清零，避免面板关闭后从
+	# 残留杆位继续爬（D-096）；controls 本身保持不动，语义不变。
 	if rider != null and rider.input_locked:
+		_kbd_roll_shaped = 0.0
 		return
 
 	if _touch_active:
@@ -905,20 +922,33 @@ func _prepare_input(delta: float) -> void:
 		controls.yaw = _touch_yaw
 		controls.throttle = _touch_throttle if engine_running else 0.0
 		controls.brake = _touch_brake
+		_kbd_roll_shaped = 0.0
 		return
 
 	# 杆量只来自键盘（D-070：鼠标已彻底不接飞机——座舱内只环顾视角）。
-	# 自动改平进行中同样不特殊回中：改平增益叠在玩家杆量之上，玩家按住
-	# 方向键就是「即刻接管」（D-034 旧鼠标杆的接管语义由键盘继承）。
+	# 自动改平进行中不特殊回中：改平增益叠在玩家杆量之上，玩家一压方向键就
+	# 开始接管（D-034 旧鼠标杆的接管语义由键盘继承）。D-096 起「即刻」改为
+	# 「渐进」：仅 ←/→ 滚转按 KB_ROLL_RAMP 起杆（约 250 ms 到满杆），避免
+	# 单击即持续满杆、机头大幅偏转丢准心；让位判据不变（玩家杆量一出现就
+	# 压过改平增益），只是接管不再是一帧满杆。
 	var kbd_pitch := Input.get_axis("aircraft_pitch_down", "aircraft_pitch_up")
 	var kbd_roll := Input.get_axis("aircraft_roll_left", "aircraft_roll_right")
+	# D-096 起杆斜坡：只作用于 kbd_roll。俯仰（含 climb/descend 合成项）、
+	# A/D 方向舵、油门、刹车一律原样直写，斜坡不外溢。松手或反向压杆时
+	# 瞬零（回程无残余，正是 D-070「无隐性杆源」闸要的语义），再向目标
+	# 按 KB_ROLL_RAMP * delta 爬升；长按到满杆后保持满杆，不衰减。
+	if is_zero_approx(kbd_roll) or kbd_roll * _kbd_roll_shaped < 0.0:
+		_kbd_roll_shaped = 0.0
+	if not is_zero_approx(kbd_roll):
+		_kbd_roll_shaped = move_toward(
+			_kbd_roll_shaped, kbd_roll, KB_ROLL_RAMP * delta)
 	# 空格 / Ctrl 在飞行上下文里重新定义（儿童友好的「上升 / 下降」）：
 	# 地面时空格仍是机轮刹车；离地后空格=拉升、Ctrl=推杆下降。
 	var on_floor := is_on_floor()
 	var climb_cmd := 1.0 if Input.is_action_pressed("jump") and not on_floor else 0.0
 	var descend_cmd := 1.0 if Input.is_action_pressed("fly_down") and not on_floor else 0.0
 	controls.pitch = clampf(kbd_pitch + climb_cmd - descend_cmd, -1.0, 1.0)
-	controls.roll = clampf(kbd_roll, -1.0, 1.0)
+	controls.roll = clampf(_kbd_roll_shaped, -1.0, 1.0)
 	controls.yaw = Input.get_axis("move_left", "move_right")
 	controls.brake = Input.is_action_pressed("jump") and on_floor
 	var throttle_axis := Input.get_axis("move_back", "move_forward")

@@ -361,10 +361,34 @@ func _run() -> void:
 	Input.action_release("aircraft_pitch_up")
 	await get_tree().physics_frame
 	_check(kb.controls.pitch < 0.05, "松杆后俯仰回中（%.2f）" % kb.controls.pitch)
+	# ── D-096：键盘 → 起杆斜坡（构造式喂帧 + 反向对照，坑 #15）──
+	# 旧断言「按下 1 帧 > 0.5」钉的是「一碰满杆」旧规格。规格变更后不放宽
+	# 强度：仍要求短按受限、长按可达满杆、反向瞬零、松手零残余，只是把
+	# 取证窗口从「单帧」改成按时间尺度显式喂帧。
+	# 上面 ↑ 的俯仰单帧 > 0.5 断言刻意原样保留：它是「斜坡只作用滚转、
+	# 未外溢到 pitch / climb_cmd / descend_cmd」的天然反向对照。
 	Input.action_press("aircraft_roll_right")
 	await get_tree().physics_frame
-	_check(kb.controls.roll > 0.5, "键盘 → 产生右滚杆量（%.2f）" % kb.controls.roll)
+	var roll_first: float = kb.controls.roll
+	_check(roll_first > 0.0 and roll_first < 0.15,
+		"D-096 起杆斜坡：→ 首帧为小杆量而非满杆（%.3f）" % roll_first)
+	await _frames(5)
+	_check(kb.controls.roll < 0.5,
+		"D-096 短按：→ 100 ms 单击仍不到半杆（%.3f）" % kb.controls.roll)
+	await _frames(12)
+	_check(kb.controls.roll > 0.95,
+		"D-096 长按：→ 300 ms 后达到满杆（%.3f）" % kb.controls.roll)
+	# 反向对照：满右杆直接切满左杆，必须瞬零后向负向重新起杆；若实现漏了
+	# 反向归零，这里会读到接近 +0.93 的残留正杆量，判据立即失败。
 	Input.action_release("aircraft_roll_right")
+	Input.action_press("aircraft_roll_left")
+	await get_tree().physics_frame
+	_check(kb.controls.roll < 0.0 and kb.controls.roll > -0.15,
+		"D-096 反向压杆先瞬零再负向起杆（%.3f）" % kb.controls.roll)
+	Input.action_release("aircraft_roll_left")
+	await get_tree().physics_frame
+	_check(absf(kb.controls.roll) < 0.01,
+		"D-096 松手瞬零：滚转杆量无回程残余（%.3f）" % kb.controls.roll)
 	Input.action_press("move_right")
 	await get_tree().physics_frame
 	_check(kb.controls.yaw > 0.5, "键盘 D 产生右偏航杆量（%.2f）" % kb.controls.yaw)

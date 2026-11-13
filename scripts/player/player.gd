@@ -232,7 +232,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			flight_camera.recenter()
 			return
 		# 双击左键 = 自动改平（D-034）：约 2 秒内增强增益把坡度摆回水平；
-		# 期间重新按方向键即刻接管（D-070 起鼠标不再接飞机）。
+		# 期间重新按方向键即开始接管（D-070 起鼠标不再接飞机）。D-096 起
+		# 「即刻」收敛为「渐进」：←/→ 滚转按 4.0/s 起杆，约 250 ms 到满杆；
+		# 让位判据不变，玩家杆量一出现就压过改平增益。
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			# Esc 解锁后首次点击先恢复捕获（D-034）：不当改平输入，也避免
 			# 与下面的双击判定抢同一个点击。
