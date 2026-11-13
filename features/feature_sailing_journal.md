@@ -345,7 +345,7 @@ D-010 三层收尾。
 | 收口 | 现状 |
 |---|---|
 | 触屏「任务」按钮 + 面板 44 px 热区 | 新按钮显式设 `custom_minimum_size = Vector2(44, 44)`；`UiKit.make_close()` **刻意不改**（7 个面板共用），热区由调用方按需设 |
-| `cards_read` 埋点 + `cls_cards3` | `map_selector.gd:1001` 每次打开详情 `Progress.notify("cards_read")`；`quest_data.gd:283-285` 任务目标 `{type: count, key: cards_read, count: 3}`。**按打开详情次数计、未去重**，去重另开票 |
+| `cards_read` 埋点 + `cls_cards3` | `map_selector.gd:1001` `_open_card_detail()` 三入口汇聚，按维度键 `cards_read_<region>_<index>` **去重**（同区同卡只记一次、跨重开持久化）；`quest_data.gd:283-285` 任务目标 `{type: count, key: cards_read, count: 3}` 即「读满 3 张不同卡片」（去重由 D-094 收口，旧「按打开次数计、未去重」口径关闭） |
 | 环保课诚实订正 | **只改文案 / 注释**，不改 `protected_blocked` 判据（`player.gd:1108` / `quest_data.gd:446`）；图鉴 `protected_viewed` 另开票 |
 
 三条均随 ADR D-089 收口，不在本说明书展开实现细节。
@@ -379,8 +379,7 @@ D-010 三层收尾。
    `race_result_ui.gd:166` 等同样使用 emoji，本批刻意不改、不扩大字体方案，
    归真机目检统一裁决（见 ADR D-089「未做 / 另开票（真机目检统一裁决）」）。
 2. **`chunk_mesh_baseline` full 档重录**：本批未触碰区块网格基线。
-3. **`cards_read` 去重**：当前按打开详情次数计（§10），任务 `cls_cards3`
-   可被反复开同一张卡刷满，去重另开票。
+3. **`cards_read` 去重**：**已结案（D-094）**——`map_selector.gd` 按维度键 `cards_read_<region>_<index>` 去重，同区同卡只记一次、跨重开持久化，任务 `cls_cards3` 现为「读满 3 张不同卡片」，无法靠反复开同一张卡刷满。本条「另开票」口径关闭。
 4. **`inventory` 不落盘，归 #44**：绿宝石只是本局内存态；本功能可回看的
    持久回报是 `sail` 里程与三档徽章，不发道具、不改背包。
    **〔已结案（D-092）：`inventory` 已按存档槽落盘，绿宝石可跨重启保留；本条「不落盘 / 另开票 / 归 #44」口径就此关闭。D-087 当时的奖励形状本批未调整，详见 D-092 §3〕**

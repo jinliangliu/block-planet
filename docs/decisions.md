@@ -2688,7 +2688,7 @@ daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照
 - 全工程**没有任何地方全量遍历 `Category` 枚举**（`grep` 确认，唯一一处是 `quest_panel.gd:166-167` 的显式白名单），故新增枚举值不会在别处多渲染一组。
 
 ### 待办（不阻塞本轮）
-1. **`cards_read` 埋点**：`game-design.md` 声称「读过卡片 → 答得出题」闭环成立，但读侧无观测点，该设计意图目前无法验证。需 1~2 行埋点 + 「地理知识」类课程。**〔已由 D-089 结案：`map_selector.gd:1001` 埋点 + 课堂 `cls_cards3`；按「打开详情次数」计数未去重，去重另开票〕**
+1. **`cards_read` 埋点**：`game-design.md` 声称「读过卡片 → 答得出题」闭环成立，但读侧无观测点，该设计意图目前无法验证。需 1~2 行埋点 + 「地理知识」类课程。**〔已由 D-089 结案：`map_selector.gd:1001` 埋点 + 课堂 `cls_cards3`；按「打开详情次数」计数未去重，去重另开票〕**；**去重已结案（D-094）：维度键 `cards_read_<region>_<index>`，`cls_cards3` 现为「读满 3 张不同卡片」，旧「翻开 3 次 / 未去重」口径关闭**
 2. **移动端无法打开任务面板**：J 键是唯一入口，触屏面板行（`hud.gd:603-640`）没有「任务」按钮——手机上现在就打不开任务面板，属**既有缺口非本次引入**。补一个 76×76 按钮即可，但会改动 HUD 布局（有截图探针基线），故单列。**〔已由 D-089 结案：`hud.gd:757-765` 新增 76×76 触屏「任务」按钮，`quest_panel.gd` 面板内热区统一 44 px；真机可点性仍待目检〕**
 3. 环保课勿复用 `protected_blocked`（语义是「试图伤害保护动物被拦截」，做成就等于鼓励孩子去打），建议改走「浏览保护动物图鉴条目」。既有成就 `a_protect_1` 存在同一问题，一并报备。**〔已由 D-089 结案：只做文案 / 注释诚实订正（层次 1）；「图鉴 `protected_viewed`」层次 2 会让已有存档进度作废，另开票〕**
 
@@ -4272,13 +4272,13 @@ full 档，登记后 **44 px / 三页签 / 入口断言**才自动跑。**入库
    `Progress.notify("cards_read")`（卡片 gui_input / 上一张 / 下一张 **三入口汇聚**）；
    新增课堂 `cls_cards3`（`prerequisite` **留空**、goal count **3**、reward
    **item 204 ×2**）；`progress_manager.gd` **零改动**。**如实写**：按「打开详情次数」
-   计数**未去重**，desc「不同地方」是**近似表述**，去重**另开票**。
+   计数**未去重**，desc「不同地方」是**近似表述**，去重**另开票**。**〔已结案（D-094）：去重已落地，维度键 `cards_read_<region>_<index>`，详见 D-094 §2；本段「未去重」口径就此关闭〕**
 3. **环保课**：只做**层次 1 文案 / 注释诚实订正**——`quest_data.gd` 的 `a_protect_1`
    desc 改「3 次遇到受保护的动物，都放下了手里的工具」，`player.gd:1106` 注释改为
    「记一笔『试图伤害保护动物被拦截』」；**不改** `protected_blocked` goal key、
    **不动埋点**、**不改成就判据**、**不动 `achievements()` 28 枚**。
    **层次 2「图鉴 `protected_viewed`」会让已有存档进度作废，另开票**。
-4. **`tests/life_probe.gd` 新增 11 条断言**：卡片三入口 `cards_read +3`、
+4. **`tests/life_probe.gd` 新增 11 条断言**：卡片三入口相对存档基线的去重断言（D-094 §2 由「钉绝对值 +1」改写为「相对基线」，原 `cards_read +3` 改为按未读卡数推导，断言框架保留）、
    `lessons().size()==8`、`cls_cards3` prerequisite 留空、`goal_progress()`、`claim()`、
    落盘往返、`a_protect_1` desc **不含「了解」防回退**；**删掉危险的换槽差分段**——
    它会建 3 个真实槽并触发首槽迁移 `user://progress.json`，而 `life_probe` 是**内联快照
@@ -4625,3 +4625,92 @@ chunk 全 `loaded=true`、`origin=(0,0)`；落地时 `(7,-3)/(7,-2)` `loaded=fal
 2. `night_clear distinct_rgba32=574` 色数偏低。
 3. 阶段 A 夜晚标定基底 `(0.72,0.80,0.92)` 与落码基底 C2 `(0.55,0.62,0.75)` 不一致 ⇒ 落码午夜 lum `0.1127` 比标定 N1 `0.1317` 更暗（方向更安全，留作后续复核）。
 4. **中低端 Android 真机帧率 / 发热未测**：`ProceduralSkyMaterial` + 云纹 + 雨粒子 + 3D 座舱叠加后的实际表现待观察。
+
+## D-094 工具层三项欠账收口（用户原「按 1,2,3 顺序」的第 3 项，2026-11-13）
+
+**结论**：收口长期记忆 #4 的「工具层欠账」三条——① 读前确保加载封装、② `cards_read` 去重、③ `life_probe` 蟹贴水底 flaky 修复。**零生产机制变更 / 零新 `class_name` / 零新存档键 / 零 `user://` 写入 / 零 schema 变更**；改动面仅为 1 个生产 UI 文件（`map_selector.gd`）、2 个探针文件（`life_probe.gd`、`terrain_survey_probe.gd`）、1 个新增探针 helper（`probe_world.gd`）。全量 58 无头探针复跑 **0 FAIL**；`life_probe` 单跑 **455 PASS / 0 FAIL**（D-093 基线 451，+4 来自去重相对基线断言）；`terrain_survey_probe` 单跑 **24 PASS / 0 FAIL** 且 ⑤ 远区扫描先 `ensure_region`；每段 `RESTORED_OK` 零 DIFF。
+
+**范围**：
+- ② 生产：`scripts/ui/map_selector.gd`（`_open_card_detail()` 维度键去重）
+- ② ③ 探针：`tests/life_probe.gd`（蟹段构造式重定位 + 卡片段相对基线去重断言）
+- ① helper：`tests/probe_world.gd`（新增，`RefCounted` 静态工具，无 `class_name`）
+- ① 接线：`tests/terrain_survey_probe.gd`（⑤ 远区扫描前 `ensure_region`）
+- 未动：`save_guard.gd`、`Progress` schema、`EXTRA_FILES`、任何 `user://` 写入、任何 `class_name`、任何生产场景文件。
+
+### 1. ① 读前确保加载封装
+
+- **根因**：`World.get_block()` 在区块未加载时一律返回 `AIR`。`terrain_survey_probe` ⑤ 扫描 `(84..144, 32..156)` 远区，玩家未必在附近，跨 `await` 读该区域时区块可能未流载，导致列被跳过、`ok_cols` 偶发跌破阈值造成假绿 / 偶发 FAIL。
+- **解法**：新增 `tests/probe_world.gd`（`extends RefCounted`，`const PROBE_WORLD := preload(...)`，范式同 `tests/probe_pad.gd`），收口三个静态方法：
+  - `ensure_region(world, min, max)` → `world.ensure_chunks_in_region(min, max)`（**同步加载**，调用后即可读真值；`world.gd:426` 内联 `_load_chunk`）。
+  - `read_block_loaded(world, cell)` → ensure 后 `get_block`。
+  - `is_loaded(world, cell)` → ensure 后返回 `true`，供 `==AIR` 类断言前调用。
+- **接线（最小改动原则）**：仅 `terrain_survey_probe` ⑤ 是真·未确保加载就读区块的探针，在扫描前加 `PROBE_WORLD.ensure_region(world, Vector3i(84,0,32), Vector3i(144,0,156))`。其余 6 个读区块探针（interaction / landing_field / mob / pyramid / stuck_rescue / world_coord）读自建设 / 玩家相邻区块（恒加载），全量回归绿佐证安全，**按 D-010 最小改动不接线**。
+- **自助注释**：helper 文件头写明「ensure 只保证调用当帧该 chunk 已加载；跨 `await` 循环读同一区域须玩家常驻或循环内重复 ensure（世界按玩家位置流式装卸区块）」。
+
+### 2. ② `cards_read` 去重
+
+- **用户裁决**：去重粒度为「不同卡片」（非「不同区域」），维度键 `cards_read_<region>_<index>`（int 标量）。
+- **生产改动**（`map_selector.gd:1001` `_open_card_detail()`）：三入口（卡片 gui_input / 上一张 / 下一张）汇聚处，原 `Progress.notify("cards_read")` 改为：
+  ```gdscript
+  var read_key: String = "cards_read_%d_%d" % [_selected, index]
+  if int(Progress.counters.get(read_key, 0)) == 0:
+      Progress.counters[read_key] = 1
+      Progress.notify("cards_read")
+  ```
+  - **零 schema 变更**：`Progress.counters` 无键名白名单，逐值 `int()` 强转；老档 `cards_read` 总数键与 `cards_read_<r>_<i>` 维度键共存、互不破坏；新键跨重开持久化（`Progress` 本就按槽落盘）。
+  - **语义收口**：`cls_cards3`（任务目标 `key: cards_read, count: 3`）因此变成「读满 3 张不同卡片」，`game-design.md` / `feature_sailing_journal.md` 旧稿「翻开 3 次」「按打开详情次数计、未去重」口径**就此关闭**。
+- **探针断言改写**（`life_probe.gd` 卡片段）：由「钉绝对值 +1」改为**相对存档基线**的鲁棒断言（回归备份可能已含历史阅读记录，不能假设基线为 0）：
+  - 入口 1（卡片点击 card 0）：未读 → `+1`，已读 → 去重不变（用 `card0_unread` 推导预期）。
+  - 去重复测：再点同一张 card 0 → 始终不重复计数。
+  - 入口 2（上一张翻到 card 2，当前 `_detail_index=0` prev 包到 card 2）：未读 → `+1`，已读 → 不变（用 `card2_unread` / `prev_pressed` 推导）。
+  - 入口 3（下一张翻回已读 card 0）：去重 `+0`。
+  - 收口：`cards_total - cards_baseline == expected_new`，`expected_new = (1 if card0_unread else 0) + (1 if (prev_pressed and card2_unread) else 0)`。
+  - **bug 修复伴随**：首跑 `card2_unread` 声明在 `if` 块内导致 `expected_new` 处 `Parse Error: Identifier not declared`；提升到函数作用域后在块内赋值，二跑 PASS=455。
+
+### 3. ③ `life_probe` 蟹贴水底 flaky 修复
+
+- **症状**：断言偶发 FAIL——蟹悬在水中不落地（`is_on_floor()` 长期 false）或 `velocity.y` 抖动。
+- **根因实测**：非物理缺陷。`mob.gd` `_crawl_on_bed`（`:687`）= `_apply_gravity` + `_process_passive`（水平随机游荡、无跳跃）；0.5 m 化后水阻力 / 浮力常数随米制 ×2，贴底收敛变慢。flakiness 来自「下落 / 游荡中的时序抖动」，落点已由 `_water_spawn_position(..., true)` 防虚空。
+- **解法（构造式 + 反向对照，强度不放松）**：
+  ```gdscript
+  _check(bed_pos.y > 0.0, "池塘底部找到实体格（蟹落点 y=%.2f）" % bed_pos.y)
+  var floated_away := false
+  var settled := false
+  for i in range(300):
+      await get_tree().physics_frame
+      if live_crab.global_position.y > float(World.SEA_LEVEL) + 1.0:
+          floated_away = true
+      if live_crab.is_on_floor():
+          settled = true
+          break
+  for i in range(10):
+      await get_tree().physics_frame
+  _check(not floated_away, "蟹未飘离水底（...）")
+  _check(settled and live_crab.is_on_floor(), "蟹贴在水底（...）")
+  _check(live_crab.global_position.y < float(World.SEA_LEVEL) + 1.0, "蟹未浮出水面（...）")
+  ```
+  - 轮询直到「首次稳定 `is_on_floor`」再落断言，容忍下落 / 游荡中的时序抖动；反向对照守卫 `floated_away` 默认未飘离，仅当检测到明显上浮（y 超 `SEA_LEVEL+1`）才置假——**断言强度不放松**（仍要求真正贴底、`is_on_floor` 为真、未浮出水面），只是不再因时序抖动假 FAIL。
+  - 三条断言均带高度 / 垂直速度过程量，失败可直接区分「没下沉」vs「浮起来了」。
+
+### 4. 明确不做 + 歧义遗留
+
+| 项 | 口径 |
+|---|---|
+| 改 `Progress` schema / 新增顶层键 / 新增 `class_name` / 写 `user://` | **不做**（D-010 铁律；本批零 schema 变更） |
+| 其余 6 个读区块探针接线 ① helper | **不做**（恒加载区，全量回归绿佐证安全，最小改动原则） |
+| ④「`life_probe` 射箭 flaky」是否另需处理 | **歧义遗留（待用户确认）**：用户长期记忆 #4 原话为「`life_probe` 射箭 flaky」，但本批在复盘 `life_probe` 时定位并修复的 flaky 是**蟹贴水底**（③ 已结）。弓箭 P-7 段（约 `life_probe.gd:1704-1749`）在本轮未复现 flaky、未改动；若用户所指确为弓箭段需另开一题诊断。 |
+
+### 5. 风险与回归影响
+
+- **D-010 是主要风险面**：本批纯探针侧 + 1 个 UI 计数改动，不碰 `user://`、不碰 `save_guard.gd` 备份 / 还原清单（`EXTRA_FILES` 无新增），故每段回归 `RESTORED_OK` 零 DIFF、最终 `diff -r` rc=0 不受影响。
+- **② 改动触生产 `map_selector`**：仅增 int 标量维度键与 `notify` 门控，`Progress.counters` 无白名单，老档兼容；`cls_cards3` 语义由「次数」收敛为「不同卡片」，更符合设计意图。
+- 不新增 `class_name`；`git diff --check` rc=0、全 Tab、无警告。
+- 窗口探针不受影响：② 仅改无头 `life_probe` 断言与生产 `map_selector`（断言在无头跑），① 仅接无头 `terrain_survey`；窗口 17 探针无需重跑（遵循 D-091 纪律，改动不触窗口路径可酌情，本次仅跑无头 58）。
+
+### 6. 验证基线（D-010 零 DIFF 门）
+
+- **全量 58 无头探针：`FAIL=0`**，与 D-093 基线一致；`life_probe` 因去重断言由 451 升到 **455**（`+4`：card0 / 重复卡 / prev 到 card2 / 两入口合计四笔相对基线断言替换原 3 笔 `==1` 绝对断言），`terrain_survey_probe` 24/0 且 ⑤ 远区先 ensure。
+- 门禁：分段串行 `RESTORED_OK` 零 DIFF、零 SCRIPT ERROR / Parse Error、最终 `diff -r` rc=0、`profiles/` 原位、无残留 Godot 进程 / 移出目录。
+- 单跑自验：`life_probe` **455/0**（蟹段构造式 + 卡片段去重相对基线全 PASS）、`terrain_survey_probe` **24/0**（⑤ 远区先 `ensure_region`）。
+- `rc=139` 良性退出（Vulkan 退出期清理）同 D-093 判定，非回归。
+- **真机目检仍待办**：② 改动仅触计数埋点（无 UI 几何变化），① ③ 纯探针侧；窗口 / 真机目检清单维持 D-088~D-093 口径，回归全绿不关闭真机目检。
