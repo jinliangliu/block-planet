@@ -809,19 +809,32 @@ func _run() -> void:
 	for i in range(4):
 		await get_tree().physics_frame
 	var bed_pos := _water_spawn_position(world, pond_cell, true)
+	_check(bed_pos.y > 0.0, "池塘底部找到实体格（蟹落点 y=%.2f）" % bed_pos.y)
 	var live_crab := _spawn_mob(main_scene, Mob.MobType.CRAB, player, day_night, bed_pos)
-	# 0.5m 化后水阻力/浮力常数随米制 ×2，贴底收敛变慢——多等一倍帧数再断言。
-	for i in range(150):
+	# 构造式验证：轮询直到「首次稳定贴底」再落断言，容忍下落/游荡中的时序抖动；
+	# 0.5m 化后水阻力/浮力常数随米制 ×2，贴底收敛变慢，故放宽等待但要求真正落稳。
+	# 反向对照守卫默认「未飘离水底」为真，仅当检测到明显上浮（y 超 SEA_LEVEL+1）才置假。
+	var floated_away := false
+	var settled := false
+	for i in range(300):
 		await get_tree().physics_frame
+		if live_crab.global_position.y > float(World.SEA_LEVEL) + 1.0:
+			floated_away = true
+		if live_crab.is_on_floor():
+			settled = true
+			break
+	for i in range(10):
+		await get_tree().physics_frame
+	_check(not floated_away,
+		"蟹未飘离水底（y=%.2f，落点 y=%.2f，垂直速度 %.2f）" % [
+			live_crab.global_position.y, bed_pos.y, live_crab.velocity.y])
 	# 断言值里带上高度与垂直速度：这条失败过（蟹悬在水中不落地），
 	# 光看 true/false 无从判断是「没下沉」还是「浮起来了」，把过程量打出来省一轮排查。
-	_check(
-		live_crab.is_on_floor(),
+	_check(settled and live_crab.is_on_floor(),
 		"蟹贴在水底（is_on_floor=%s，落点 y=%.2f → 现 y=%.2f，垂直速度 %.2f）" % [
 			live_crab.is_on_floor(), bed_pos.y,
 			live_crab.global_position.y, live_crab.velocity.y,
-		],
-	)
+		])
 	_check(live_crab.global_position.y < float(World.SEA_LEVEL) + 1.0,
 		"蟹未浮出水面（y=%.2f）" % live_crab.global_position.y)
 	live_crab.queue_free()
