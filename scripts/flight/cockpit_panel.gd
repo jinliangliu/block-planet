@@ -3,23 +3,32 @@ extends Node3D
 ## 第一人称座舱 3D 仪表盘（D-034 / L2 反转，feature_cockpit_3d §6）：
 ## 12 项仪表画进一个 SubViewport，再经 ViewportTexture 贴到座舱仪表板平面上。
 ##
-## L2 反转：第一人称下**不再隐藏**。正视时这块板的投影精确落在 2D 座舱仪表簇
-## 的 dash 板内、被那块不透明的像素板完全盖住（「重合」= 同一位置同一块板，
-## 玩家看不到第二套读数）；自由观察时 2D 簇由 flight_instrument_hud 自动隐藏
-## （_cockpit.visible = fp），这块板就是世界里的仪表台——L2 的兑现点。
-## 第一人称相机与面板同属机体坐标系 ⇒ 相对位姿恒定，投影与飞机姿态无关，
-## 所以「对齐」是一次性静态标定，不是逐帧跟踪。
+## **D-097（2026-11-13）改为「可见性互斥」**：第一人称正视时本板隐藏，自由
+## 观察 / 低头时显示、由它接管画面（L2 的兑现点不变）。原 L2 反转的做法是
+## 「正视常显、靠 2D dash 完全盖住」——D-097 把 2D dash 从 636 px 收窄到
+## 392 px 后，正视投影约 x∈[325.9,954.1] 会露出左右两块的**第二套仪表**
+## （7 盘 + 4 LCD，量程与 2D 簇冲突），遮盖耦合不再成立，故改为按视角显隐。
+## 判据走 flight_instrument_hud 的 fp（mode == FIRST_PERSON），**不用**
+## is_cockpit_view()：后者把 FREE_LOOK + 底层座舱也算内视，会让「低头看 3D
+## 仪表台」的教学失效。第一人称相机与面板同属机体坐标系 ⇒ 相对位姿恒定，
+## 投影与飞机姿态无关，「对齐」仍是一次性静态标定、不是逐帧跟踪。
 ##
-## 可见性只剩一道闸门：蓝图机契约（blueprint_built 无座舱罩，不建几何、隐藏）。
-## 旧的「内视即隐藏」层（D-050 的 _interior_view / set_interior_view）已删。
+## 可见性两道闸门的合成：`visible = _base_visible and not _cluster_up`。
+## _base_visible 是蓝图机契约（blueprint_built 无座舱罩，不建几何、隐藏）；
+## _cluster_up 由 set_2d_cluster_up() 每帧幂等下发。旧 D-050 的
+## _interior_view / set_interior_view 层已删，不要复用（那是 CockpitInterior
+## 的相反极性）。
 ##
 ## 无光照（unshaded）直出 albedo 贴图：座舱里不靠外部光，即便背光也清晰可读
 ## （相当于原「自发光」语义，且少一遍光照计算）。
 
 # ── 面板物理落位（唯一事实源：geo3d 的 CockpitInterior 直接引用这四个常量）──
 ## 0.98×0.215 m = 4.56:1，不是随手放大的：4.56:1 的板在 34° 斜视（眼位→面板
-## 28.07° + 座舱视线上仰 6.26°）下纵向被压约一成，投影约 3.9:1，正好对上 2D
-## dash 带（636×181.3 @1280×720，见 CockpitInstruments.metrics()）的可见区；
+## 28.07° + 座舱视线上仰 6.26°）下纵向被压约一成，投影约 3.9:1。D-097 前它
+## 正好对上 2D dash 带（636×181.3 @1280×720）的可见区；**D-097 后 2D dash 收窄
+## 为 392×181.3（见 CockpitInstruments.metrics()），PANEL_W/H 刻意一字不动**——
+## 「对齐」改由可见性互斥承担，几何仍是 cockpit_align_probe B1~B4 的静态标定
+## 基准，缩小它会让 CockpitInterior 的 DASH_POS / PLATE_SIZE 跟着变、7 盘更糊。
 ## 若沿用旧 0.32×0.20（1.6:1）等比放大，会在 dash 上下溢出。
 const PANEL_W := 0.98
 const PANEL_H := 0.215
@@ -54,12 +63,27 @@ var _lcds := {}
 var _subviewport: SubViewport = null
 var _dashboard_material: StandardMaterial3D = null
 ## 基础可见性（蓝图机契约 = false：无座舱罩几何，setup 早退不建任何节点）。
-## L2 反转后这是唯一闸门——「内视即隐藏」层已删，非蓝图机恒显。
+## D-097 后与 _cluster_up 合成：非蓝图机恒显，但第一人称正视时收起。
 var _base_visible := true
+## D-097：2D 像素仪表簇是否正盖在屏幕上（第一人称正视 = true）。
+## 由 flight_instrument_hud._apply_visibility() 每帧按 fp 下发，
+## set_2d_cluster_up() 带早退所以幂等。
+var _cluster_up := false
 ## 上次重绘时刻（ms）。初值 -1000 保证第一次 refresh 必定渲染一帧。
 var _last_render_ms := -1000
 ## 贴图是否已在首帧渲染后重绑过一次（白屏修复的保险 ③，见 _build_cluster）。
 var _tex_rebound := false
+
+
+## D-097：第一人称正视时 3D 仪表台收起，避免收窄后的 2D dash 露出第二套读数。
+## 只切 visible——不删节点、不跳过 _build_cluster()，探针仍要读 Dashboard 面片
+## 与材质；refresh_instruments() 已有 `if not visible: return` 早退，隐藏后
+## 30 Hz 离屏重绘自动停止。
+func set_2d_cluster_up(up: bool) -> void:
+	if up == _cluster_up:
+		return
+	_cluster_up = up
+	visible = _base_visible and not up
 
 
 func setup(craft: Node) -> void:
@@ -69,8 +93,8 @@ func setup(craft: Node) -> void:
 		visible = false
 		return
 	_build_cluster()
-	# L2 反转：非蓝图机在第一人称也显示——正视被 2D dash 盖住，自由观察即世界仪表台。
-	visible = _base_visible
+	# D-097：非蓝图机在第一人称正视隐藏、自由观察 / 低头显示（可见性互斥）。
+	visible = _base_visible and not _cluster_up
 
 
 func _build_cluster() -> void:

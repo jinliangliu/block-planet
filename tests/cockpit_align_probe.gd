@@ -1,15 +1,16 @@
 extends Node
-## 3D 仪表台「与 2D 簇重合」对齐探针（D-065，无头）。
+## 3D 仪表台对齐 / 可见性探针（D-065 立，**D-097 改可见性契约**，无头）。
 ##
-## 为什么这条必须是断言而不是目检：L2 的全部价值就是「正视时 3D 仪表台正落在
-## 2D dash 板里」。差 30 px 读起来就是「另一块板」，而窗口截图靠肉眼判不出 12 px
-## 级的偏差。这里把 uiux 用投影反解出来的四角目标值钉成闸，改任何一侧的常量
-## （PANEL_W/H/POS/TILT、FOV、眼位、2D dash 矩形）都会立刻红。
+## D-097 后本探针分两层：① **四角投影标定**（B1~B4）仍是静态反向对照——
+## 面板几何 PANEL_W/H/POS/TILT 一字未动，改任何一侧常量都会立刻红；
+## ② **可见性互斥**（C1/C2/D1~D3）——2D dash 收窄到 392 px 后，正视不再靠
+## 「3D 面板落在 dash 内被完全盖住」，改为按 fp 显隐（set_2d_cluster_up）。
+## A1（屏高 25.18%）保持 D-053 红线不动，A2 改钉收窄后的 444/392。
 ##
 ## 目标值来源（1280×720、FOV 82° KEEP_HEIGHT、视线 = 机头轴 +6.26°）：
 ##   TL(373.7, 572.1)  TR(906.3, 572.1)  BL(323.7, 726.8)  BR(956.3, 726.8)
-## 底边 726.8 已在画面外（720）——这是有意的：面板下沿要「切」在屏幕底，否则
-## 2D dash 板上沿与面板顶沿之间会露出一条世界。
+## 底边 726.8 已在画面外（720）——面板下沿「切」在屏幕底，避免自由观察时
+## 仪表台下缘悬空露世界；D-097 正视改为隐藏，这条只对自由观察生效。
 ##
 ## 前置：**发动机必须熄火**（默认就是熄火）。镜头抖动 SHAKE_AMP=0.05 在 0.85 m
 ## 处会带来 20~36 px 的投影位移，比 12 px 容差还大——开着发动机量对齐等于量噪声。
@@ -133,7 +134,7 @@ func _run() -> void:
 	get_tree().quit(0 if _fails == 0 else 1)
 
 
-## ── 2D 侧：dash 板矩形未被动过（D-053 尺寸纪律红线）──────────
+## ── 2D 侧：高度仍是 D-053 红线，宽度由 D-097 收窄──────────
 func _check_2d_dash() -> void:
 	var metrics := CockpitInstruments.metrics(VIEW)
 	var dash: Rect2 = metrics["dash"]
@@ -142,8 +143,10 @@ func _check_2d_dash() -> void:
 	var frac := dash.size.y / VIEW.y
 	_check(absf(frac - 0.2518) < 1e-3,
 		"A1 2D dash 板高恒为屏高 25.18%%（实测 %.4f；D-053 红线不得顶回去）" % frac)
-	_check(absf(dash.position.x - 322.0) < 1.0 and absf(dash.size.x - 636.0) < 1.0,
-		"A2 2D dash 板矩形未变形（x %.1f..%.1f）" % [dash.position.x, dash.end.x])
+	# **D-097 只收宽度、高度一字未动**，故 A1 原样保留作反向对照。
+	_check(absf(dash.position.x - 444.0) < 1.0 and absf(dash.size.x - 392.0) < 1.0,
+		"A2 2D dash 板矩形（D-097 收窄后 x %.1f..%.1f，宽 %.1f）"
+			% [dash.position.x, dash.end.x, dash.size.x])
 
 
 ## ── 贴图绑定（白屏闸）──────────────────────────────────────
@@ -202,22 +205,36 @@ func _check_corners() -> void:
 		var d := px.distance_to(tgt)
 		_check(d <= TOL, "B%d %s 投影 %s 距目标 %s 偏差 %.1f px ≤ %.0f"
 			% [i + 1, names[i], str(px.round()), str(tgt), d, TOL])
-	# 上两角必须落在 2D dash 板内（否则正视时 3D 面板会在 2D 板上沿露出）
+	# D-097：2D dash 收窄到 392 px 后，面板四角投影必然超出板宽；正视改由
+	# 「可见性互斥」承担，不再靠「被 2D 板完全盖住」。这两条闸从几何遮盖改
+	# 为显隐状态机；B1~B4 的四角投影标定仍保留作反向对照（面板几何没动）。
 	var tl: Vector2 = _cam.unproject_position(corners[0])
 	var tr: Vector2 = _cam.unproject_position(corners[1])
-	_check(dash.has_point(tl) and dash.has_point(tr),
-		"C1 面板上两角落在 2D dash 板内（TL/TR 都在板内 → 正视时被完全遮住）")
-	# 下两角允许出屏（有意下切），但不能超出板宽太多
 	var bl: Vector2 = _cam.unproject_position(corners[2])
 	var br: Vector2 = _cam.unproject_position(corners[3])
-	_check(bl.x >= dash.position.x - 2.0 and br.x <= dash.end.x + 2.0,
-		"C2 面板下两角落在 dash 板宽度以内（BL x=%.1f / BR x=%.1f，板 %.1f..%.1f）"
-			% [bl.x, br.x, dash.position.x, dash.end.x])
+	var has_gate := _panel.has_method("set_2d_cluster_up")
+	if has_gate:
+		_panel.set_2d_cluster_up(true)
+	_check(has_gate and not _panel.visible,
+		"C1 正视（2D 簇上屏）：3D 仪表台隐藏（TL %.0f / TR %.0f，板 %.0f..%.0f）"
+			% [tl.x, tr.x, dash.position.x, dash.end.x])
+	if has_gate:
+		_panel.set_2d_cluster_up(false)
+	_check(has_gate and _panel.visible,
+		"C2 自由观察（2D 簇让位）：3D 仪表台显示（BL %.0f / BR %.0f）"
+			% [bl.x, br.x])
+	# 复原成正视态，避免把 visible=true 带进紧随其后的 D1（中间没有帧给 tick）。
+	if has_gate:
+		_panel.set_2d_cluster_up(true)
 
 
-## ── 可见性反转（与 flight_panel_shot 的窗口断言同源，这里是无头闸）──
+## ── 可见性互斥（D-097；与 flight_panel_shot 的窗口断言同源，这里是无头闸）──
 func _check_modes() -> void:
-	_check(_panel.visible, "D1 第一人称：3D 仪表台**显示**（L2 反转，不再随内视隐藏）")
+	# D-097：先让 hud.tick() 跑两帧，验证 _apply_visibility() 的**运行时**下发
+	# 确实生效，而不只是 _check_corners() 里显式调 set_2d_cluster_up()。
+	await _wait(2)
+	_check(not _panel.visible,
+		"D1 第一人称正视：3D 仪表台**隐藏**（D-097 可见性互斥，避免第二套读数）")
 	_cam.toggle_first_third()
 	await _wait(2)
 	_check(_panel.visible, "D2 追尾：3D 仪表台仍显示（本来就被不透明机身遮住，与反转前一致）")

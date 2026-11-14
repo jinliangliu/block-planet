@@ -245,6 +245,8 @@ func _check_bounds() -> void:
 			"⑨ %s 满偏十字在屏内（y %.0f..%.0f）" % [_tag(vp), top, bot])
 		_check(lbl >= 0.0, "⑨ %s 标签不出上沿（y %.0f）" % [_tag(vp), lbl])
 		# 仪表板顶沿（D-053 后 dash 占屏高 25.2%，取 30% 留余量）。
+		# D-097 只收宽度（636→392 px）、高度一字未动，故本保守值仍成立；
+		# 这里刻意不改成动态取 metrics()，保持与 D-053 判据的同口径。
 		var dash_top: float = vp.y * 0.70
 		_check(bot <= dash_top,
 			"⑨ %s 十字底 %.0f 不压仪表板顶 %.0f" % [_tag(vp), bot, dash_top])

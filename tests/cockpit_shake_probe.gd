@@ -7,8 +7,8 @@ extends Node
 ## 的「AircraftFlight.State.new() + AircraftFlight._refresh_readings()」喂帧法。
 ##
 ## 幅度单位 m，与 aircraft_camera.gd 的乘子同源派生：单轴峰值 = SHAKE_AMP × 1.5 × envelope
-## （= 满幅 envelope=1.0 时的世界系位移；座舱内视还会再乘 COCKPIT_SHAKE_SCALE，那是
-## 相机渲染层的收尾，不在此探针的契约内——本探针守的是「包络不越界」这一上界）。
+## （= 满幅 envelope=1.0 时的世界系位移；座舱内视还会再乘 COCKPIT_SHAKE_SCALE，但该乘子
+## 现由 A7 直接钉住为 0.0（D-097）；本探针仍只守「包络不越界」这一上界，两者互补）。
 
 var _pass := 0
 var _fail := 0
@@ -48,6 +48,10 @@ func _run() -> void:
 	# 守护：幅度派生基准与相机一致（SHAKE_AMP 改了，上界 0.075 也要跟着改）。
 	_check(absf(AircraftCamera.SHAKE_AMP - 0.05) < 1e-6,
 		"A0 相机 SHAKE_AMP==0.05（上界 0.075 m = 0.05×1.5 的派生基准）")
+
+	# A7（D-097）：补上 D-075 探针排除在契约外的乘子——座舱内视位置抖动收敛为 0。
+	_check(absf(AircraftCamera.COCKPIT_SHAKE_SCALE) < 1e-6,
+		"A7 座舱内视位置抖动收敛为 0（D-097：红圈闪边根治）")
 
 	# ── 正向断言 ──
 	# ① 停放怠速 / 收油门：无功率、无抖振、无切变、不计地面 ⇒ 包络恒 0。

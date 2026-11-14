@@ -106,11 +106,11 @@ func _run() -> void:
 	# D-050：座舱内视——3D 外部机模隐藏：座舱眼位在机身盒内部，不隐藏的话
 	# 机翼横贯全屏（用户实测）。
 	_check(craft.is_interior_view(), "③ 座舱内视：3D 外部机模隐藏（D-050）")
-	# L2 反转（feature_cockpit_3d §6）：座舱 3D 仪表台**不再**随内视隐藏——它就
-	# 装在仪表台位置，正视时与不透明的 2D 簇完全重合（被 2D 遮住），环顾/低头时
-	# 2D 簇自动让位、由它接管画面。这里断言它「在」而不是「藏」，与反转前相反。
-	_check(main_scene._cockpit_panel != null and main_scene._cockpit_panel.visible,
-		"③ 座舱 3D 仪表台在座舱视角显示（L2 反转：与 2D 簇重合）")
+	# D-097（取代 L2 反转的「正视常显、靠 2D 簇盖住」）：2D dash 收窄到 392 px
+	# 后正视会露出第二套量程冲突的仪表，故改为可见性互斥——第一人称正视隐藏、
+	# 自由观察 / 低头显示（教学不受影响）。这里断言正视「藏」，与 L2 相反。
+	_check(main_scene._cockpit_panel != null and not main_scene._cockpit_panel.visible,
+		"③ 座舱 3D 仪表台在第一人称正视隐藏（D-097：可见性互斥）")
 	await _frames(60)
 	await _shot("flight_panel_cockpit.png")
 

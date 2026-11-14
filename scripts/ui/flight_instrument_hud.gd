@@ -231,6 +231,14 @@ func _apply_visibility(mode: int) -> void:
 	# 运转」和「失速了！推杆低头」叠成一团。
 	_warn.offset_top = 16.0 if fp else 240.0
 	_warn.offset_bottom = _warn.offset_top + 40.0
+	# D-097：第一人称正视时收起 3D 仪表台，避免收窄后的 2D dash 露出第二套读数。
+	# 判据用 fp（mode == FIRST_PERSON），**不用** is_cockpit_view()：后者把
+	# FREE_LOOK + 底层座舱也算内视，会让「低头看 3D 仪表台」的教学失效。
+	# _views 由 register_view() 装配（含 CockpitPanel 与 FlightMarkers）；鸭子型
+	# 调用，没有该方法的视图自动跳过；set_2d_cluster_up() 自带早退，逐帧幂等。
+	for v in _views:
+		if v != null and is_instance_valid(v) and v.has_method("set_2d_cluster_up"):
+			v.call("set_2d_cluster_up", fp)
 
 
 func _hide_all() -> void:

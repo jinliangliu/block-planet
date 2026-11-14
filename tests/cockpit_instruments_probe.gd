@@ -61,7 +61,9 @@ func _check_pitch_clamp() -> void:
 ## ② 航向取模连续性。
 func _check_tape_wrap() -> void:
     var cx := 640.0
-    var ppx := 5.0   # 与 TAPE_PPX 同步（D-051：600px 带 / 5px 每度）
+    var ppx := 5.0   # 独立测试夹具值：② 只验 tape_x() 取模连续性，不读生产常量。
+    # D-097 生产侧已改为 360px 带 / 3px 每度（视野仍 ±60°），本夹具值刻意不改，
+    # 否则会连带改动 ② 的步长期望值、把纯函数测试变成布局测试。
     var h := 359.5
     var x359 := CockpitInstruments.tape_x(359.0, h, cx, ppx)
     var x0 := CockpitInstruments.tape_x(0.0, h, cx, ppx)

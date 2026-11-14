@@ -25,8 +25,9 @@ const PROBE_PAD := preload("res://tests/probe_pad.gd")
 ## 不该红；总数才是预算闸。
 const BOX_BUDGET := 39
 const MATERIAL_BUDGET := 9
-## 相机-眼位容差（m）。D-075 后座舱内视抖动：单轴峰值 SHAKE_AMP×1.5×COCKPIT_SHAKE_SCALE
-## = 0.075×0.40 = 0.030 m，三轴合成最坏 √3×0.030 ≈ 0.052 m，故改记为 ≤0.05 m；
+## 相机-眼位容差（m）。D-097 起座舱内视位置抖动收敛为 0（COCKPIT_SHAKE_SCALE=0.0）：
+## 单轴峰值 SHAKE_AMP×1.5×COCKPIT_SHAKE_SCALE 由 D-075 的 0.030 m 降为 0，三轴
+## 合成抖动偏移亦为 0，探针容差对该分量只松不紧，仍 PASS。
 ## 容差仍取 0.15——比真实偏移大 3 倍、比修前的 12 m 小 240 倍，回归拦得住。
 ## 吸附判据容差（m）：取 2.0，因为无头环境 process(20~30 Hz) 与 physics(60 Hz) 错拍，
 ## 采样点必然落在两次相机更新之间，误差 ≈「若干物理步的位移」，实测 0.1~0.6 m 毛刺，

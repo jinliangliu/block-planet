@@ -1615,6 +1615,7 @@ FOV 75°，追尾/座舱下被机体与仪表一挡只剩一条缝。
 ### 决定
 
 1. **盘排竖向压缩 `GAUGE_K = 2/3`**：`margin_b` / `gsz` / `ssz` / `gap` / `bw` 全部乘 2/3，`row_h` 164→109.3（正好 = 用户框高 ×2/3）。**航向带（`TAPE_H` 56、`TAPE_W` 600）与 dash 宽度不动**——宽度由航向带决定，用户只要求"高度"，收窄会让带宽溢出底板。dash 占屏高 32.8% → 25.2%，主表占屏高 21.1% → 14.1%，跨宽高比离散度仍 0.0000。
+   > **D-097 就地订正（2026-11-13）**：「用户只要求高度、宽度不动」是**本条当时**的事实，不是永久红线。D-051 / D-053 两次「缩小」都只压高度，`TAPE_W = 600` 从 D-051 起从未改动 ⇒ `dash` 宽仍是 636 px（屏宽 49.7%）。dylan 第三次反馈「仪表盘太大了」后，D-097 才收窄宽度（`TAPE_W 600→360` / `TAPE_PPX 5→3` / `DASH_PAD 18→16` / `GAUGE_GAP 20→12`，得 `dash=(444, 538.67, 392, 181.33)`，屏宽 30.6%）。**屏高 25.18% 仍是本条钉死的红线（`cockpit_align_probe` A1），D-097 未动**；「收窄会让航向带溢出底板」的顾虑由同步收 `TAPE_PPX` 与 `GAUGE_GAP` 化解（静态复算：六件全部落在 dash 444..836 内，竖条↔侧盘最紧间隙 6.67 px）。详见文末 D-097。
 2. **表盘内部像素细节改「按盘径取尺」**：三处 `_draw()` 里的 `var s := _s` 改成 `var s := sz / GAUGE_SZ`（侧盘与竖条用 `SIDE_SZ`）。否则盘缩到 2/3 而 `s` 仍是 1，25px 数字 / 9px 压环 / 指针长全部原地不动，会糊出盘外。这同时让这些控件对分辨率**和**尺寸双重自适应，比原来只认 `ui_scale` 更正确。
 3. **读数窗收窄**：`win_w` 0.68→0.62、`win_h` 0.30→0.28。盘缩到 2/3 后，0.68 宽的矩形窗下两角会切出盘缘（放大截图可见四角「出圈」）。
 4. **补封板 `_blank_plate()`**：压缩后竖条与侧盘之间各空出 ~100×93 平铁皮，两点分散像「仪表没装完」。战雷老座舱这种位置就是「未装仪表的方孔盖板」——凹陷钢板 + 四颗角螺钉。**首版取 0.112 填充（比 `COL_DASH` 0.145 暗 23%），实拍像两块挖空的洞**，改为 0.133（只暗一档），凹陷感交给内黑缝 alpha 0.30 + 上沿受光 + 螺钉，不压深底色。
@@ -2046,10 +2047,12 @@ D-062（坐标地基）/ D-063（1 格 = 1 m）之后，本条把世界从「32 
 
 | 组件 | 可见性判据 | 含义 |
 |---|---|---|
-| `CockpitPanel`（3D 仪表台） | `visible = _base_visible`（**非蓝图即显**） | 第一人称即显示；正视时它的投影正好落在 2D dash 矩形内被完全遮住 = 「重合」 |
+| `CockpitPanel`（3D 仪表台） | `visible = _base_visible`（**非蓝图即显**）；**D-097 起为 `_base_visible and not _cluster_up`** | 第一人称即显示；正视时它的投影正好落在 2D dash 矩形内被完全遮住 = 「重合」（**D-097 起正视直接隐藏，不再依赖遮盖**） |
 | `CockpitInterior`（环绕框/杆手） | `visible = _base_visible and active`（`active` = 座舱内视） | 只在座舱视角显示，追尾/后视/地图隐藏 |
 
-两者极性相反，由 `aircraft_camera._set_exterior_hidden()` 的**同一个**子节点遍历循环驱动。**收益点是环顾与低头，不是正视**：正视时 3D 仪表台被不透明 2D 簇完全盖住；自由观察 / 低头时 2D 簇按既有规则（`flight_instrument_hud.gd:181` `_cockpit.visible = fp`）自动隐藏，3D 仪表台接管画面。
+两者极性相反，由 `aircraft_camera._set_exterior_hidden()` 的**同一个**子节点遍历循环驱动。**收益点是环顾与低头，不是正视**：正视时 3D 仪表台被不透明 2D 簇完全盖住；自由观察 / 低头时 2D 簇按既有规则（`flight_instrument_hud.gd:215` `_cockpit.visible = fp`）自动隐藏，3D 仪表台接管画面。
+
+> **D-097 就地订正（2026-11-13）**：「正视被 2D 簇完全盖住」这一前提**已失效**。2D `dash` 收窄到 392 px 后，3D 面板正视投影约 x∈[325.9, 954.1] @y=720 会露出左右两块（合计约 300 px）**第二套仪表**（7 盘 + 4 LCD，量程与 2D 簇冲突），这是缩小仪表盘的 P0 阻塞。D-097 改为**可见性互斥**：`CockpitPanel` 新增 `set_2d_cluster_up(up)`，由 `flight_instrument_hud._apply_visibility()` 每帧按 `fp` 下发，正视 `up=true` 隐藏、自由观察 / 低头 `up=false` 显示。**判据必须用 `fp`（`mode == FIRST_PERSON`），不能用 `is_cockpit_view()`** —— 后者把 `FREE_LOOK + _base_mode==FIRST_PERSON` 也算座舱内视，会让「低头看 3D 仪表台」的教学（`flight_teaching.gd`）失效。下发走 `flight_instrument_hud` 的 `_views` 鸭子型调用，**不复用** `_set_exterior_hidden()` 的 `set_interior_view` 遍历（那是 `CockpitInterior` 的相反极性）。面板 `refresh_instruments()` 已有 `if not visible: return` 早退，正视隐藏后 30 Hz 离屏重绘自动停止（正面副作用）。详见文末 D-097。
 
 ### L2 面板几何：从 2D dash 的像素矩形反解
 
@@ -2078,9 +2081,11 @@ BL(323.7,726.8)  BR(956.3,726.8)
 
 自由观察（底层为座舱）时 `_is_first_person()` 返回 false，卡片会从左上跳回顶部居中，正好压在 3D 仪表台上。判据与相机/内装显隐**统一用 `AircraftCamera.is_cockpit_view()`**，避免「2D 让位而卡片不让位」的错配。
 
-### 抖动口径（不动 SHAKE_AMP）
+### 抖动口径（不动 SHAKE_AMP；**D-097 部分推翻，见下方交叉订正**）
 
 `SHAKE_AMP 0.05` 在 0.85 m 处产生 ±20 px（巡航）/ ±36.6 px（满油门）位移。判定：**3D 内装随相机抖、2D 簇不抖**是正确观感（座舱是「世界」，HUD 是「玻璃上的读数」），玩家可用 `FlightSettings.camera_shake` 关掉；「抖动开 = 生命感 / 关 = 对齐最准」写进文案。承托板因此把板顶沿藏进 2D dash 带（549 > dash 上沿 538.67），满油门峰值只剩 ≤27 px 深色板沿呼吸（旧方案 48.3 px，亮银条会闪成 6–13 Hz 亮线，故受光条语义交给贴图 `texture y8..11`、3D 只留暗缝）。
+
+> **D-097 就地订正（2026-11-13，旧裁决已被用户实拍推翻）**：「3D 抖而 2D 不抖是正确观感」这条不能再当验收依据。dylan 飞行实拍三处红圈（左右粗黑 A 柱内缘、左下 2D 空白开口）在飞行中持续抖动并投诉；粗黑 A 柱是**3D 内装 L1 盒体**（不是 2D `draw_colored_polygon`，后者只画 12~20 px 细勾边），挂在机体上、原点=眼位、与机体刚性。`aircraft_camera._apply_shake()` 却在 `global_position = target.origin` 刚性吸附**之后**才叠加机体系位置噪声 ⇒ 相机抖、A 柱不抖；A 柱底端距眼位约 0.48 m（约 863 px/m），0.030 m 峰值被放大成三连拍实测 ±9~12 px 内缘跳动，4.7~13.2 Hz 落在硬边闪动敏感区。D-075 只修了**包络**（怠速地板归零），`COCKPIT_SHAKE_SCALE = 0.40` 的残余位置抖动仍在；且 `cockpit_shake_probe.gd` 文件头明确把该乘子排除在契约外 ⇒ **D-075 全绿与用户投诉长期共存**（探针盲点）。D-097 裁决：座舱内视位置抖动收敛为 **0**（`COCKPIT_SHAKE_SCALE → 0.0`），`SHAKE_AMP` / 六个频率常数 / `shake_envelope()` / `COCKPIT_SHAKE_AXIAL` / `camera_shake` 开关全不动，外部视角不变；「发动机存在感」由 D-075 已落地的杆手微颤承接，并由 `cockpit_shake_probe` 新增 A7 断言钉死该乘子。`docs/device-visual-checklist.md` F4 的「勿误判为 bug」同步订正。详见文末 D-097。
 
 ### 验证
 
@@ -2395,7 +2400,7 @@ full 档窗口段 3 项 FAIL（`flight_hud_shot` 1 + `takeoff_coach_shot` 2）�
   - 新增 `_cockpit_look_dir()`：座舱视线 = 机头 + `COCKPIT_LOOK_UP` 天地线抬升，再叠环顾偏移（偏航绕机体 UP、俯仰绕机体 RIGHT，符号与玩家徒步视角一致）。**第一人称与座舱底自由观察共用同一条式子**——偏移为零时逐位退回 D-050 原方向（`nose×10 + UP×1.1`），自由观察因此补上了原来缺失的抬升，与座舱视角完全重合。
   - `_process` 的自动回正**排除座舱内视**：鼠标就是驾驶员的视线，gaze 应当停在落下的地方；回正只归鼠标中键（`recenter()`）与下次登机（`reset_to_cockpit()` 清零）。`auto_recenter`（松手回正）设置语义收窄为「只管 V / 按住右键的自由观察覆盖层退出那一刻」。
 - `scripts/vehicles/aircraft.gd`：**整体拆除鼠标杆**——删 `add_mouse_motion()`、`_stick`、`MOUSE_STICK_SENSITIVITY`、`STICK_CENTER_RATE`；`_prepare_input` 的杆量只剩键盘一个来源（`controls.pitch/roll` 直接由 `Input.get_axis` 写入，不再有 `_stick` 叠加项与慢回中）。自动改平（双击左键）的「接管」语义由键盘继承：改平增益叠在玩家杆量之上，按住方向键就是即刻接管。
-  > **D-096 交叉订正（2026-11-13）**：上句两处措辞已由 D-096 收敛，历史原文保留不覆盖。① `controls.roll` 不再「直接由 `Input.get_axis` 写入」——键盘 ←/→ 现经 `KB_ROLL_RAMP = 4.0/s` 起杆斜坡整形后再写；`controls.pitch` 仍直写。② 「按住方向键就是**即刻**接管」改为「**渐进**接管」（约 250 ms 到满杆），让位判据与优先级不变。核心裁决不破：**杆量仍只有键盘一个来源**、**松手瞬零、回程无 `_stick` 慢回中残余**——本条新增的「松杆后杆量干净回零、无隐性杆源」闸（`flight_probe.gd:388-395`）语义正是「松手瞬零」，D-096 下继续 PASS。
+  > **D-096 交叉订正（2026-11-13）**：上句两处措辞已由 D-096 收敛，历史原文保留不覆盖。① `controls.roll` 不再「直接由 `Input.get_axis` 写入」——键盘 ←/→ 现经 `KB_ROLL_RAMP = 4.0/s` 起杆斜坡整形后再写；`controls.pitch` 仍直写。② 「按住方向键就是**即刻**接管」改为「**渐进**接管」（约 250 ms 到满杆），让位判据与优先级不变。核心裁决不破：**杆量仍只有键盘一个来源**、**松手瞬零、回程无 `_stick` 慢回中残余**——本条新增的「松杆后杆量干净回零、无隐性杆源」闸（D-070 落码时 `flight_probe.gd:388-395`；**D-096 改写 H 段后现为 `:412-419`**，见 D-096 §7 勘误表）语义正是「松手瞬零」，D-096 下继续 PASS。
 
 **影响面**：`flight_probe` 149 → **146**（删 H 段鼠标杆 2 条 + N 段 P2-11 单位圆 2 条，新增 1 条「松杆后杆量干净回零、无隐性杆源」闸）；`flight_view_probe` 47 → **55**（新增 ⑩ 段 8 条：视野跟随 / 杆量零写入 / 眼位刚性 / 偏航限幅 / 状态不自动回正 / 视野不自动回正 / recenter 归位 / 模式落位）；用户可见文案同步（说明书「驾驶飞机」页 tip 与新增一行、AIRCRAFT 道具描述去「鼠标操纵杆」、`input_actions.gd` / `takeoff_coach.gd` 头注释订正）。
 
@@ -2600,7 +2605,7 @@ daily 回归新增 `fd_yield_probe`（同 `route_nav_probe` 的 SaveGuard 快照
 
 ### 设计取舍
 - 抖动改为五路物理分量叠加的 `shake_envelope()`（油门×空速衰减 smoothstep、失速抖振、风切变瞬态、地面地速颠簸、过载 G），上界恒 ≤1.0；**去掉 0.25 怠速地板**——停放/收油门即归零（比初版方案更优）。
-- 机体系叠加：`_craft.global_transform.basis * Vector3(...)` 而非世界系；座舱内视乘 `COCKPIT_SHAKE_SCALE=0.40` + 沿视线 `COCKPIT_SHAKE_AXIAL=0.50`。
+- 机体系叠加：`_craft.global_transform.basis * Vector3(...)` 而非世界系；座舱内视乘 `COCKPIT_SHAKE_SCALE=0.40` + 沿视线 `COCKPIT_SHAKE_AXIAL=0.50`。**（D-097 订正：前者已收敛为 `0.0`，后者按「其余全不动」保留但归零后实际不再生效；本条其余结论不变。）**
 
 ### 新增 / 改动
 - `scripts/vehicles/aircraft.gd`：9 常量 + `shake_envelope() -> float`。
@@ -4789,15 +4794,15 @@ chunk 全 `loaded=true`、`origin=(0,0)`；落地时 `(7,-3)/(7,-2)` `loaded=fal
 
 ### 3. 契约核查（两路只读调研 + 代码逐条复核）
 
-- **「松手瞬零」不违反 D-070，正是它要求的语义**。`:2397` 拆的是旧鼠标杆 `_stick` 松手后按 `STICK_CENTER_RATE` **慢回中**留下的非零残余；`flight_probe.gd:388-395` 的「无隐性杆源」闸钉的是**回程**残余，与去程起杆斜坡方向相反。实测三轴 `r 0.000 / p 0.000 / y 0.000`，PASS。
+- **「松手瞬零」不违反 D-070，正是它要求的语义**。`:2397` 拆的是旧鼠标杆 `_stick` 松手后按 `STICK_CENTER_RATE` **慢回中**留下的非零残余；`flight_probe.gd:412-419` 的「无隐性杆源」闸钉的是**回程**残余，与去程起杆斜坡方向相反。实测三轴 `r 0.000 / p 0.000 / y 0.000`，PASS。
 - **必炸断言从 3 条收敛到 1 条**：`:360`（↑ pitch >0.5）与 `:370`（D → yaw >0.5）都在「只作用滚转」范围外（`yaw` 在 `aircraft.gd:922`），实测仍 PASS；只有 `:366`（→ roll >0.5）是 1 帧断言，4.0/s 下首帧 0.067 必 FAIL ⇒ 重写。
-- **`cockpit_instruments_shot` 的 22° 坡度窗口闸不受影响**：它走 `drive_remotely()`（`use_player_input=false`，`aircraft.gd:892-894` 早退）直写 `controls`，绕过键盘分支；此前把它列为影响面是误判，已订正。全库 `action_press("aircraft_roll_*")` 仅 `flight_probe.gd` 一处（Grep 实测）。
+- **`cockpit_instruments_shot` 的 22° 坡度窗口闸不受影响**：它走 `drive_remotely()`（`use_player_input=false`，`aircraft.gd:905-909` 早退）直写 `controls`，绕过键盘分支；此前把它列为影响面是误判，已订正。全库 `action_press("aircraft_roll_*")` 仅 `flight_probe.gd` 一处（Grep 实测）。
 - **新增语义张力（非断言，已登记）**：`aircraft.gd:910-912` / `:2397` / `player.gd:235` 的「按住方向键就是**即刻接管**」。斜坡让「即刻」字面失效（自动改平生效期夺回控制约 250 ms 渐进）。全库无探针钉「N 帧内必须满杆」；本批按**措辞变更**登记并就地交叉订正，未新增 `auto_level` 直通旁路（D-067：少一个机制少一处维护面）。让位判据与优先级不变：玩家杆量一出现即压过改平增益。
 - **两级平滑叠加（已知风险）**：气动层 `blend = RATE_RESPONSE(4.5) * delta` 已是一阶低通，输入侧再加 4.0/s 斜坡即串联两级；稳态精确跟随、只在起杆阶段整形，但整体响应会变钝。列为**真机手感验收项**，回归全绿不关闭。
 
 ### 4. 改动范围（2 个生产/探针文件 + 3 个文档）
 
-- `scripts/vehicles/aircraft.gd`：新增 `KB_ROLL_RAMP` 常量与 `_kbd_roll_shaped` 整形状态；`_prepare_input` 键盘分支把 `controls.roll` 由 `clampf(kbd_roll, …)` 改为 `clampf(_kbd_roll_shaped, …)`；**松手或反向压杆瞬零**，其余按 `KB_ROLL_RAMP * delta` 用 `move_toward` 爬升，长按到满杆后保持不衰减。四处早退（`not piloted` / `use_player_input=false` / 模态冻结 / 触屏）与 `set_piloted()` 登机、下机分支一并清零整形状态，保证切回键盘不会从残留杆位起步。**外溢为零**：`controls.pitch`（含 `climb_cmd`/`descend_cmd` 合成项）、`:922` yaw、`:923` brake、`:924-935` 油门、触屏 `_touch_*` 全部原样。
+- `scripts/vehicles/aircraft.gd`：新增 `KB_ROLL_RAMP` 常量与 `_kbd_roll_shaped` 整形状态；`_prepare_input` 键盘分支把 `controls.roll` 由 `clampf(kbd_roll, …)` 改为 `clampf(_kbd_roll_shaped, …)`；**松手或反向压杆瞬零**，其余按 `KB_ROLL_RAMP * delta` 用 `move_toward` 爬升，长按到满杆后保持不衰减。四处早退（`not piloted` / `use_player_input=false` / 模态冻结 / 触屏）与 `set_piloted()` 登机、下机分支一并清零整形状态，保证切回键盘不会从残留杆位起步。**外溢为零**：`controls.pitch`（含 `climb_cmd`/`descend_cmd` 合成项）、`:952` yaw、`:953` brake、`:954-962` 油门、触屏 `_touch_*` 全部原样。
 - `tests/flight_probe.gd` H 段：把旧 1 条单帧 `>0.5` 断言改为**构造式喂帧 + 反向对照**（坑 #15），5 条新断言：首帧小杆量 / 100 ms 短按不到半杆 / 300 ms 长按到满杆 / 满右杆直接切满左杆须先瞬零 / 松手零残余。**强度不放宽**，只把取证窗口从「单帧」改成规格对应的时间尺度；上面 `:360` 的 ↑ 俯仰单帧 `>0.5` 断言刻意原样保留，作为「斜坡未外溢到 pitch」的天然反向对照。
 - 文档：`features/feature_flight.md:233` 操控表、`docs/decisions.md:2398` D-070 就地交叉订正、`scripts/player/player.gd:235` 与 `aircraft.gd:14` 头注释的「即刻接管」措辞。**零 `class_name` / 零 schema / 零 `user://` / 零设置键**。
 
@@ -4817,3 +4822,119 @@ chunk 全 `loaded=true`、`origin=(0,0)`；落地时 `(7,-3)/(7,-2)` `loaded=fal
 - 8 段全部 `[user://] RESTORED_OK`、`DIFF=0`、零 `SCRIPT ERROR` / Parse Error；`profiles/` 原位、无孤儿 `user_real_profiles`、无残留 Godot 进程；`git diff --check` rc=0、GDScript 零警告。
 - `rc=139` 良性退出 **4 个**（`village_probe` / `interaction_probe` / `landing_quality_probe` / `stall_coach_probe`），均为 Vulkan 退出期清理段、`FAIL=0` 且 `PASS>0`，按 D-093 判定不判回归失败。`flight_shot` 仍 `PASS=0`（历史纯取证探针，坑 #15/#20 危险信号未关闭，非本轮引入）。
 - **剩余人工待办**：① 真机手感验收——短按是否不再丢准心、长按机动性是否可接受、两级平滑是否发黏（儿童向「不惩罚」口径）；② 自动改平生效期的渐进接管是否需改为直通旁路；③ 触屏摇杆仍为连续量直写，与键盘斜坡存在手感差异，需同机对照。回归全绿不关闭以上三项。
+
+### 7. 测试前静态复核（2026-11-13，零代码 / 零引擎 / 零探针）
+
+> **范围**：dylan 表示「等下我测试一下」。按 D-010「探针严禁并行」，本轮**不启动 Godot、不跑任何探针、不碰 `user://`**；只做纯静态复核与文档订正，保证试飞对象与跑过 full 档的 `HEAD=82a8b1b` **逐字节一致**。以下订正全部落在 `docs/` 与 gitignored 的 `.workbuddy/memory/`，**零 `.gd` / 零 `.tscn` / 零运行时行为改动**。
+
+**① 行号漂移勘误（项目铁律「文档行号一律以代码实测为准」）**。D-096 把 `flight_probe.gd` H 段由 1 条单帧断言改写为 5 条构造式喂帧断言，H 段之后所有行号整体后移 24 行；`aircraft.gd` 因新增常量、整形状态与注释，`_prepare_input` 亦整体下移。以下为对 `HEAD=82a8b1b` 逐行实测后的对照。**「仍在使用的机制指针」已就地改正文**（D-070 交叉订正的 `388-395` 加括注、§3 回程闸与早退行号、§4 三个直写轴行号）；**「仍有效的引用」**（§3 的 `flight_probe.gd:360` 俯仰单帧断言，位置未变）与**「D-096 改写前的历史引用」**（§3 的 `:366` 旧 roll 单帧断言 / `:370` 旧 yaw 位置 / `aircraft.gd:922` / `:910-912` / `player.gd:235`、§4 文档行）**只在下表存档、正文保留历史原文**——后者叙述的是 D-096 改写前的事实，覆盖反而会失真：
+
+| 文档旧引用 | 实际位置（`82a8b1b`） | 内容 |
+|---|---|---|
+| `docs/decisions.md:2398`（D-070 交叉订正）`flight_probe.gd:388-395` | `tests/flight_probe.gd:412-419` | D-070「松杆后杆量干净回零、无隐性杆源」三轴闸 |
+| `docs/decisions.md` §3 `flight_probe.gd:388-395` | 同上 | 同上（回程语义论据） |
+| §3 `aircraft.gd:892-894` 早退 | `scripts/vehicles/aircraft.gd:905-909` | `use_player_input=false` 早退（探针直写 controls 的旁路） |
+| §4 `:922` yaw / `:923` brake / `:924-935` 油门 | `aircraft.gd:952` / `:953` / `:954-962` | 「斜坡不外溢」的三个直写轴 |
+| §3 `:360` / `:370` | `flight_probe.gd:360` / `:394` | ↑ 俯仰单帧 >0.5（未变）；D → yaw >0.5（由 370 移到 394） |
+| §3 `:366`（旧 roll 单帧 >0.5） | `flight_probe.gd:373-391`（5 条新断言） | 旧断言位置已不存在，属改写前的历史引用 |
+| §3 `:910-912` / `player.gd:235` | `aircraft.gd:928-933` / `player.gd:234-237` | 「即刻 → 渐进接管」注释 |
+
+`_prepare_input` 现位于 `aircraft.gd:896`；`_physics_process` 在 `:640` 以**物理帧 delta** 调 `_prepare_input(delta)` ⇒ `KB_ROLL_RAMP * delta` 按秒计、与渲染帧率无关（物理帧率取引擎默认 60，`project.godot` 未显式设置 `physics_ticks_per_second`，见 `docs/device-visual-checklist.md:25`）。「250 ms 到满杆」口径成立。
+
+**② 新发现的调参下限：`KB_ROLL_RAMP ≥ 3.0/s`（此前从未登记；静态推断，本轮未过引擎反向对照）**。`aircraft_flight.gd:385-387` 的辅助稳定让位判据是 `stick_free := absf(controls.roll) < 0.05 and absf(controls.pitch) < 0.05 and absf(controls.yaw) < 0.05`，仅当三轴都在死区内才由 `roll_level` 配平接管。起杆首帧杆量 = `KB_ROLL_RAMP × delta`；60 Hz 下当前 `4.0/60 = 0.0667 > 0.05` ⇒ **首帧即脱离死区、辅助当帧让位**。**若把斜坡调慢到 < 3.0/s，首帧杆量落进死区，辅助稳定仍按松杆处理**；此时若飞机**已有坡度**，`target_roll += bank × roll_level × authority` 会把坡度往水平摆，与玩家刚开始的压杆方向对抗（从绝对水平起飞时 `bank≈0`、该项近零，首帧影响可忽略）。当前 4.0 仅有约 33% 余量；**3.0 是恰好等于死区的浮点临界值，不宜贴边**。试飞后若判断「太钝」而想调快（>4.0）无此风险，若想调慢则必须守住下限，或同步收窄让位死区（后者要重跑 `flight_probe` 146 条标定基线，成本更高）。注意该耦合**只在 `Assist.PARTIAL/FULL`（`roll_level` 非零）下可见**：`FlightSettings.gains()` 在 `OFF` 档返回的是 `{"roll_level": 0.0, "yaw_damp": 0.0}`（**字典非空，分支照样进，只是增益恒 0**），落进死区也无实际影响。**以上为静态推断，按 D-091 纪律，任何实际调参落码前必须先做引擎反向对照**；本轮不改任何数值，仅登记约束。
+
+**③ 「让位判据不变、玩家杆量一出现就压过改平增益」措辞不精确（登记，不在本轮改注释）**。实读 `aircraft_flight.gd:406-415`：自动改平（D-034，`level_time > 0.0`）**没有让位判据**，它无条件 `target_roll += bank2 * level_gain * authority`，其中 `level_gain = max(roll_level, 0.9) × 2.5`；玩家侧是 `target_roll := controls.roll × ROLL_RATE_MAX × authority`。两者是 **`target_roll` 上的量级叠加竞争**，不是布尔让位：满杆 `2.2 rad/s` 能压过中等坡度的改平项，但起杆前约 150 ms 杆量 <0.6，改平项反而占优 —— 这才是 §3「自动改平生效期夺回控制约 250 ms 渐进」的真实机制。真正有布尔让位闸的是 `:385` 的 `stick_free`（辅助稳定，见 ②）。`aircraft.gd:932-933`、`player.gd:237`、§3 末句沿用「让位判据 / 一出现就压过」属历史措辞，**语义结论不受影响**（各机制的优先级顺序没变），但字面不准；拟在试飞结论出来后连同手感调整一并订正，避免本轮为纯措辞改动 `.gd` 而破坏「试飞对象逐字节一致」。
+
+**④ 试飞对照清单**：见 `docs/device-visual-checklist.md` I 组（含每项判据与「不满意时该调哪一个常量」的对应关系，本轮只给方向、不改数值）。
+
+---
+
+## D-097 座舱布局收窄 + 抖动收敛 + 3D 仪表台可见性互斥（用户实拍反馈，2026-11-13）
+
+**结论**：dylan 飞行实拍三处红圈（左右粗黑 A 柱内缘、左下 2D 空白开口）反馈「飞行过程中红圈位置总是在抖动」，并提出「另外仪表盘太大了，优化一下座舱布局」。三条根因彼此独立，只改任何一条都不够：① 抖动不是 2D 仪表盘的问题，而是 **3D A 柱与相机的相对滑动**；② 仪表盘宽度自 D-051 起从未缩过，D-051 / D-053 两次「缩小」都只压高度；③ 2D dash 与 3D 仪表板是**遮盖耦合**，缩 2D 必露出第二套量程冲突的仪表。
+
+> **本轮边界**：dylan 此前表示「等下我测试一下」并发出飞行中截图。按 D-010「探针严禁并行」，落码阶段 **不启动 Godot、不跑任何探针、不碰 `user://`**，只做静态落码与文档订正；全量回归待 dylan 于 2026-11-14 确认退出游戏后串行执行完毕，**实测 75 探针 / 2951 PASS / 0 FAIL，见 §8**。
+
+### 1. 用户裁决（AskUserQuestion，2026-11-13）
+
+| 决策点 | dylan 裁决 |
+|---|---|
+| 抖动修法 | **座舱内关抖**：`COCKPIT_SHAKE_SCALE 0.40 → 0.0`（1 行 + 新增探针断言），外部视角完全不变 |
+| 仪表盘尺寸 | **宽 49.7% → 30.6%**（四常量联动），高度按 D-053 红线固定 25.18% 不动 |
+| 3D 仪表台 | **正视隐藏**（可见性互斥），自由观察 / 低头仍显示；不改 `PANEL_W/H` |
+
+三项均选推荐方案，未选「衰减到 0.10」「让 3D A 柱跟随相机抖」「宽约 40%」「只瘦视觉不收宽」「同步缩小 3D 面板」「保持常显接受露出」。
+
+### 2. 抖动根因：D-065 裁决与 D-075 修复都没触及真正的问题
+
+- 红圈里两条 80~100 px 粗黑斜梁是 **3D `CockpitInterior` L1 的 A 柱盒体**（挂在 Aircraft 直接子节点、原点=眼位、与机体刚性）；2D `cockpit_instruments.gd` 只画 12~20 px 细内缘勾边、顶檐与侧 console。此前 `docs/device-visual-checklist.md` F4 把它误记为 2D `draw_colored_polygon`，本轮已就地订正。
+- `aircraft_camera._apply_shake()` 是在 `global_position = target.origin`（D-065 R1 刚性吸附）**之后**才叠加机体系位置噪声 ⇒ 相机抖、A 柱不抖。A 柱底端距眼位约 0.48 m（近距透视约 863 px/m），`0.05 × 1.5 × envelope × 0.40 = 0.030 m` 峰值被放大成三连拍实测内缘 ±9~12 px 跳动；六个频率 4.7~13.2 Hz 正落在硬边闪动敏感区。
+- D-075 修的是**包络**（去掉 0.25 怠速地板、改五路物理分量），没回答「座舱内视该不该抖」；`COCKPIT_SHAKE_SCALE = 0.40` 是妥协产物，其自身注释甚至写着「真人把头靠在头枕上时看到的仪表台是不抖的」。
+- **探针盲点（本轮最重要的方法论发现）**：`cockpit_shake_probe.gd` 文件头明确写「座舱内视还会再乘 `COCKPIT_SHAKE_SCALE`，那是相机渲染层的收尾，**不在此探针的契约内**」。故 D-075 全绿与用户投诉可以长期共存 —— 这是坑 #15「机会性断言」之外的另一类假绿：**契约范围外的乘子**。
+- 裁决：置 `0.0`，彻底消除相对滑动。`SHAKE_AMP` / 六个频率常数 / `shake_envelope()` / `COCKPIT_SHAKE_AXIAL` / `camera_shake` 用户开关**全部不动**（AXIAL 归零后实际不再生效，按「其余全不动」保留），外部视角抖动完全不变。「发动机存在感」由 D-075 已落地的 `CockpitInterior` 杆手微颤（`TREMOR_AMP := 0.012 rad` / `BUMP_AMP := 0.03 rad`，按功率与地速缩放）承接。新增 A7 断言把该乘子钉进契约，关闭盲点。
+
+### 3. 仪表盘根因：历史两次「缩小」只压了高度
+
+- `CockpitInstruments.metrics()` 实测（1280×720）：`dash=(322, 538.67, 636, 181.33)` ⇒ 屏宽 **49.7%**、屏高 **25.18%**，用户「太大」不是错觉。
+- D-051 整体回缩、D-053 盘排高度压缩 1/3（`GAUGE_K = 2/3`）；D-053 明文写「**航向带与 dash 宽度不动**——用户只要求『高度』，收窄会让带宽溢出底板」，`TAPE_W := 600` 从 D-051 起从未改动。D-052 文件头还留着「改版不得借战雷化把它又顶回去」的警告（针对高度）。
+- `cockpit_align_probe` **A1 把屏高 25.18% 钉成 D-053 红线** ⇒ 本轮只收宽度、高度天然不动：`dash_h` 只由 `MARGIN_B + GAUGE_SZ`（乘 `GAUGE_K`）、`TAPE_H` 与两个 8 px 决定，**与 `TAPE_W` 无关**。A1 保持原样，正好当反向对照。
+- 四常量：`TAPE_W 600→360`、`TAPE_PPX 5→3`（保持 ±60° 视野：`360/3 = 120°`）、`DASH_PAD 18→16`、`GAUGE_GAP 20→12` ⇒ `dash=(444, 538.67, 392, 181.33)`，屏宽 **30.62%**、屏高 **25.19%**。
+- **静态复算**（不启动引擎，纯 `metrics()` 公式代入 `s=1`）：六件 x 区间 `tape 460..820` / `thr 460..481.33` / `spd 488..581.33` / `gauge 589.33..690.67` / `alt 698.67..792` / `fuel 798.67..820`，**全部落在 dash 444..836 内、左右各留 16 px 贴边余量**；最紧的水平间隙是 `thr→spd` 与 `alt→fuel` 各 **6.67 px** —— `GAUGE_GAP 20→12` 就是为把它从 1.33 px 提到 6.67 px。旧稿「紧密排布估算余量 13.3 px」是保守近似，按实际贴内沿布局更宽裕；目检 J7 仍盯这两处。
+- `TAPE_PPX` 在 `_HeadingTape` 里以 `tape_x(..., TAPE_PPX * s)` 读常量、无写死 `5.0` ⇒ 无需改绘制逻辑。儿童向字号 / 盘径 / `SCALE_MIN 0.70` / `SCALE_MAX 2.80` 全部不动。
+
+### 4. P0 隐藏耦合：只缩 2D 会露出第二套仪表
+
+- `cockpit_panel.gd` 的 D-065 L2 反转让 3D 仪表板第一人称**常显**，靠不透明 2D dash 完全盖住；`cockpit_align_probe` C1/C2 硬钉面板四角投影必须落在 dash 内。
+- 3D 面板正视投影约 x∈[325.9, 954.1] @y=720；收窄后 2D dash 只盖 444..836 ⇒ 露出 [325.9,444] 与 [836,954.1] 合计约 300 px 的**第二套仪表**（7 盘 + 4 LCD，量程与 2D 簇冲突）。
+- 裁决改为**可见性互斥**：`CockpitPanel.set_2d_cluster_up(up)` 只切 `visible`（不删节点、不跳过 `_build_cluster()`，探针仍要读 Dashboard 面片与材质）；由 `flight_instrument_hud._apply_visibility()` 每帧按 `fp` 下发，正视隐藏、自由观察显示。`set_2d_cluster_up` 带早退，每帧调用幂等。
+- **判据必须用 `fp`（`mode == FIRST_PERSON`），不能用 `is_cockpit_view()`**：后者把 `FREE_LOOK + _base_mode==FIRST_PERSON` 也算座舱内视，会让「低头看 3D 仪表台」教学（`flight_teaching.gd`、`hud.gd`）失效。下发走 `flight_instrument_hud` 的 `_views` 鸭子型调用，**不复用** `aircraft_camera._set_exterior_hidden()` 的 `set_interior_view` 遍历（那是 `CockpitInterior` 的相反极性）。
+- 正面副作用：`refresh_instruments()` 已有 `if not visible: return` 早退 ⇒ 正视隐藏后 30 Hz 离屏重绘自动停止（中低端 Android 帧预算，目检 J8）。
+
+### 5. 为什么不走其它路线
+
+| 候选 | 排除理由 |
+|---|---|
+| 把抖动包络 / `SHAKE_AMP` 再调小 | 抖动与幅度无关，是「相机与机体不同步」；调包络会波及 `cockpit_shake_probe` 12 条标定并误伤外部视角 |
+| 让 3D A 柱跟随相机抖 | 保住震感且消除相对滑动，但要给内装根节点施加同一偏移，3D 内装会与 2D 框 / 世界产生新错位，改动面最大 |
+| 同步缩小 `PANEL_W/H` | `CockpitInterior` 的 `DASH_POS` / `PLATE_SIZE` 全部派生于它，改动面更大；7 盘 92 px 在更小板上更糊 |
+| 只瘦视觉、不收宽 | 占屏面积不变，用户第三次同类反馈不会解决 |
+| 保持 3D 面板常显、接受露出 | 正视会同时看到两套量程不同的读数，儿童向不可接受 |
+
+### 6. 改动范围（**符号定位**；本轮多处注释扩充导致行号漂移，一律以符号名为准）
+
+**生产代码**
+- `scripts/vehicles/aircraft_camera.gd`：`COCKPIT_SHAKE_SCALE := 0.0`（**唯一行为改动**）+ 抖动注释块订正。
+- `scripts/flight/cockpit_instruments.gd`：四常量 + 过时注释（D-051/D-053 宽度口径、`600px / 5px 每度` 视野口径）。
+- `scripts/flight/cockpit_panel.gd`：`_cluster_up` + `set_2d_cluster_up()` + `setup()` 末尾 visible 合成 + 文件头 L2 前提订正。
+- `scripts/ui/flight_instrument_hud.gd`：`_apply_visibility()` 末尾对 `_views` 下发 `fp`。
+- `scripts/flight/cockpit_interior.gd`：**仅注释**（A 柱 / 杆手微颤与 D-097 的口径）。
+
+**探针**
+- `tests/cockpit_shake_probe.gd`：新增 A7；文件头「乘子不在契约内」口径订正；A0~A6 原样。
+- `tests/cockpit_align_probe.gd`：A2 改钉 `444/392`；C1/C2 改可见性闸；D1 反转为「正视隐藏」；A1 / B1~B4 / D2 / D3 原样。
+- `tests/flight_panel_shot.gd`：③ 反转为「正视隐藏」；④ 追尾原样。
+- `tests/cockpit_instruments_probe.gd` / `tests/cockpit3d_shot.gd` / `tests/cockpit_interior_probe.gd`：**仅注释 / 出图清单口径**。
+- `tests/flight_director_probe.gd`：`vp.y * 0.70` 是「dash 顶沿留 30% 余量」的保守值，D-097 高度未变故仍成立（可选动态化，不改判定值）。
+
+**文档**（在上一轮 D-096 §7 的两份未提交 doc 之上追加 / 就地订正，**不覆盖**）
+- `docs/decisions.md`：D-053 / D-065 / D-075 就地交叉订正 + 本条。
+- `docs/device-visual-checklist.md`：F4 改写（A 柱是 3D + 旧「勿误判为 bug」推翻）、H 表加 J 行、J 组 8 项验收单。
+- `features/feature_flight.md`：§7.10 抖动口径交叉订正、17.2「座舱抖动明确不做」改为「D-097 已结案」。
+
+### 7. 反向对照设计
+
+A1（屏高 25.18%）、B1~B4（3D 面板四角投影目标点）、A0~A6（抖动包络上界）、D2/D3（追尾 / 自由观察 3D 面板显示）—— 全部**保持原样且应仍 PASS**，用来证明「高度没顶回去、面板几何没动、包络没动、教学没坏」。另登记一处已知缺口：**「外部视角抖动不变」探针侧没有相机渲染位移的断言**，由目检 J2 承接，本轮不补探针（新增窗口断言属新机制，需单独立项）。
+
+### 8. 验证（2026-11-14 实测 full 档，全绿）
+
+按 D-010「探针严禁并行」，落码阶段零引擎 / 零探针 / 零 `user://`；dylan 于 2026-11-14 确认「已退出游戏」后，串行跑完 full 档（`tmp/d097_full_run.sh`，8 段分组沿用 `tmp/run_regression.sh`，全程单 Godot 进程）。**实测结果**：
+
+- **75 探针 / 2951 PASS / 0 FAIL**。无头 58 探针 = **2572 PASS**（D-096 基线 2571 + `cockpit_shake_probe` **A7** 新增 1 条），窗口 17 探针 = **379 PASS**（与 D-096 一致）。合计 `2950 + 1 = 2951`，与落码时预设的对账链**精确吻合**；`cockpit_align_probe` A2/C1/C2/D1 为改写不增删（仍 16 条），其余探针只改注释 ⇒ 条数不变。
+- **8 段全部 `[user://] RESTORED_OK`、`DIFF=0`**（g1 213 / g2 890 / g3 592 / g4 229 / g5 352 / g6 296 / w1 168 / w2 211）；`PROFILES_RESTORED` 玩家档案槽原样移回、`profiles/` 原位、无孤儿 `user_real_profiles`、无残留 Godot 进程；零 `SCRIPT ERROR` / Parse Error；`git diff --check` rc=0、零新增 `class_name`。
+- `rc=139` 良性退出 **5 个**（g3×2 / g4×2 / g5×1，均为 Vulkan 退出期清理段、`FAIL=0` 且 `PASS>0`），按 D-093 判定不判回归失败；`flight_shot` 仍 `PASS=0`（历史纯取证探针，坑 #15/#20 危险信号未关闭，非本轮引入）。
+- **预检先行**：全量之前先跑受直接影响的 6 个探针（4 无头 + 2 窗口，一次调用走完整备份/还原外壳），6/6 全绿且零 DIFF，提前证伪「`_apply_visibility()` 每帧按 `fp` 下发的运行时时序赶不上断言」的风险 —— `cockpit_align_probe` D1 的 `await _wait(2)` 与 `flight_panel_shot` ③ 双向确认下发成立。
+- 仍按 D-010 纪律：跑前整目录备份 `user://` 到 `tmp/user_backup` 并移出 `profiles/`，跑后逐字节 `diff -r` 验证零 DIFF（8 段各自独立一份）。
+
+### 9. 剩余真机验收（回归全绿不关闭）
+
+见 `docs/device-visual-checklist.md` **J 组 8 项**：J1 红圈三处零抖动（核心）、J2 外部视角抖动仍在、J3 杆手微颤存在感、J4 仪表盘收窄且六件完整、J5 正视不露第二套仪表（P0）、J6 低头仍见 3D 仪表台、J7 16:9 / 20:9 两档盘排不溢出、J8 中低端 Android 帧率不劣化。J1 **必须用连续录屏判定**（硬边闪动是逐帧相对位移，静态截图看不出）。

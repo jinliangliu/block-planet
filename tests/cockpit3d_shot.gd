@@ -2,7 +2,7 @@ extends Node
 ## 3D 座舱内装取证（D-065，**需窗口**）：L1 环绕框 + L2 仪表台 + L3 杆手。
 ##
 ## 几何观感（视差、遮挡关系、比例、穿模）无头查不出来，只能出图目检；逻辑契约
-## 由 cockpit_interior_probe（27 断言）与 cockpit_align_probe（12 断言）钉。
+## 由 cockpit_interior_probe 与 cockpit_align_probe 钉（断言数以实测 PASS 行为准）。
 ##
 ## 出图清单（目检要点）：
 ##   ① fp          正视：2D 簇在位，3D 只该露出顶部横梁与两条 A 柱（与 2D 柱同形）
@@ -11,7 +11,8 @@ extends Node
 ##   ④ lookback    回头：椅背 + 头枕 + 后拱（"回头有物"）
 ##   ⑤ blueprint   蓝图机：无任何内装几何（对照 ①）
 ##   ⑥ free        2D 簇全隐藏：纯 3D 座舱全貌，检查比例与座舱感
-##   ⑦ shake       满油门连拍 3 帧：看仪表台抖动是否穿帮 / 底角是否漏出 2D 簇下沿
+##   ⑦ shake       满油门连拍 3 帧（D-097 后作「座舱静止零 diff」取证）：三帧
+##                 应逐像素一致，A 柱内缘不得有逐帧爬行；PANEL_W/H 未动
 ## 运行：Godot_v4.6.3-stable_win64.exe --path . res://tests/cockpit3d_shot.tscn
 
 const PROBE_PAD := preload("res://tests/probe_pad.gd")
@@ -163,11 +164,12 @@ func _run() -> void:
 	await _wait(8)
 	_cam.set_free_look(false)
 
-	# ⑥ 满油门抖动连拍：新包络下「地面满油门静止」仍是 envelope=1.0 的最坏点，但
-	# 座舱内视只取 40%（沿视线分量再打五折），故仪表台横向峰值约 18 px、呼吸 ±2%——
-	# 看底角会不会把 2D 簇下沿的亮边漏出来（DASH_RIM 0.09 的取舍就靠这三张判）。
-	# 连拍前等 90 物理帧（1.5 s）：包络平滑 τ≈0.33 s，30 帧只走到 78% 会让三连拍
-	# 呈「越来越抖」的假象，故拉到 settled 再拍。
+	# ⑥ 满油门连拍（D-097 后改为「座舱静止零 diff」取证）：D-097 已把
+	# COCKPIT_SHAKE_SCALE 收敛为 0，座舱内视不再有相机位置抖动；三张图应逐像素
+	# 一致，A 柱内缘不得有逐帧爬行。外部视角抖动与包络仍在，只是不进座舱。
+	# 旧注释的「座舱只取 40%、横向峰值约 18 px、呼吸 ±2%」是 D-075 口径，已失效。
+	# 连拍前仍等 90 物理帧（1.5 s）：包络平滑 τ≈0.33 s，确保进入 settled，
+	# 三张图的差别只可能来自抖动而非包络爬升，避免取证假象。
 	_craft.set_engine(true)
 	_craft.controls.throttle = 1.0
 	await _wait_physics(90)
