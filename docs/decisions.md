@@ -4938,3 +4938,120 @@ A1（屏高 25.18%）、B1~B4（3D 面板四角投影目标点）、A0~A6（抖�
 ### 9. 剩余真机验收（回归全绿不关闭）
 
 见 `docs/device-visual-checklist.md` **J 组 8 项**：J1 红圈三处零抖动（核心）、J2 外部视角抖动仍在、J3 杆手微颤存在感、J4 仪表盘收窄且六件完整、J5 正视不露第二套仪表（P0）、J6 低头仍见 3D 仪表台、J7 16:9 / 20:9 两档盘排不溢出、J8 中低端 Android 帧率不劣化。J1 **必须用连续录屏判定**（硬边闪动是逐帧相对位移，静态截图看不出）。
+
+---
+
+## D-098 一键完全自动飞回机场 + J3 触屏低头修复（用户裁决，2026-11-15）
+
+**结论**：dylan 就「飞行时提示『掉头』但画面不转」反馈，裁决两条：① 返航改为**「完全自动飞回」**——一键后由系统自动转向 + 自动巡航飞到机场上空；② **J3 触屏低头缺口并入本批次**。本条同时推翻 `features/feature_flight-aviation_weather.md:126`「不做自动飞行」的既有设计裁决（见 §3，显式记录，不静默改）。当前 ADR 编号至 D-097（commit `e5561f7`，已 push），本批次新增 D-098。
+
+> **本轮边界与验证范围（2026-11-16 回填）**：落码阶段按 D-010「探针严禁并行」只做静态落码与文档订正，零 git commit；**2026-11-16 已完成预检 11 支、`return_autopilot_probe` 单支修复验证与整轮 full 档 77 支串行回归（引擎实测，数字见 §8）**。整轮实测 **77 支 / 3067 PASS / 0 FAIL**，8 段逐段 `RESTORED_OK` 零 DIFF；真机目检（`docs/device-visual-checklist.md` K 组）仍**全部「待真机目检」**——引擎回归全绿不关闭人工目检。
+
+### 1. 背景
+
+- 用户反馈「提示『掉头』但画面不转」。`fd-turn-diag` / `return-nav-ux` / `j3-cam-diag` 三路只读会诊定位到：飞行指引十字在 `absf(_dev_h) > 150°` 时输出状态词「掉头」，但儿童（6-12 岁）看到后**没有任何办法真的把机头掉过来**——既无自动转向，也没有可跟随的引导，短按方向键净航向只改 1~3°。
+- 同一轮盘点发现 J3：触屏飞行**无法低头看 3D 仪表台**（视角区输入链路断裂），与 D-097「低头仍见 3D 仪表台」的真机验收前提冲突。用户裁决把该缺口并入本批次一并收口。
+- 既有特情决策任务书（`features/feature_flight-aviation_weather.md`）把返航设计为「`set_navigation(机场坐标)` + 玩家用 FD 自己飞回去，不做自动飞行」，与本次「完全自动飞回」裁决正面冲突，必须显式记录推翻（§3）。
+
+### 2. 用户裁决（AskUserQuestion，2026-11-15）
+
+| 决策点 | dylan 裁决 |
+|---|---|
+| 返航行为 | **完全自动飞回**：一键后自动转向 + 自动巡航飞到**机场上空**（非「给个目标自己飞」、非「只把准星指过去」） |
+| J3 触屏低头 | **并入本批次**：补齐触屏飞行视角区，使「按 V / 点『自由观察』后再低头」在触屏侧可达 |
+
+### 3. 推翻的旧裁决（显式记录，不静默改）
+
+- `features/feature_flight-aviation_weather.md:126` 原文：「**返航 / 备降**：设 `set_navigation(机场坐标)`，玩家用 D-054 指引十字自己飞回去。**不做自动飞行**（无 AutoPilot）。」该文件 §0 表格（:17）也写「气象不引入自动驾驶；返航/备降若需自动飞，见 §6 用『目标点 + 现有 FlightDirector』实现」。
+- 同文件 `:154`（§6 Checklist「决策面板…返航备降走 `set_navigation` + 指引十字」）与 `:165`（§7「选『返航』后指引十字指向机场且能飞回去」）两条返航 / 备降待办至本批次前仍未勾选。
+- **D-098 裁决推翻上述「不做自动飞行 / 玩家自己飞回去」口径**：返航改为系统闭环自动驾驶（§5）。相应文档由本批次就地订正并引用本条；**不自动降落、不传送**的边界保留（§6）。历史原文以订正注记保留、不覆盖。
+
+### 4. 根因链（只读诊断结论 + 2026-11-16 引擎实测补录）
+
+- **「掉头」只是状态词**：`flight_director.gd:label_text()` 在 `absf(_dev_h) > 150°` 输出「掉头」，**不写 `controls`、不绑输入、不自动转向**；`tests/flight_director_probe.gd:222` 长期只断言字符串相等，从未有「6-12 岁儿童看到『掉头』后能否真的掉头」的端到端验收——**WF15 类验证假象**（见 `docs/lessons-and-criteria.md` WF15）。
+- **反馈真空**：`MAX_OFF = 120 / GAIN_PX_PER_DEG = 11` ⇒ 十字饱和约 `10.9°`，从 `150°` 到 `10.9°` 约 `139°` 全程十字零位移；D-090 `CRUISE_FADE_DIST = 800` 又把十字与原标签淡到 `alpha 0.3`，长距离下几乎什么反馈都不剩。
+- **手动掉头物理上不现实**：`ROLL_RATE_MAX 2.2 rad/s` 是**滚转角速度**而非航向角速度；D-096 `KB_ROLL_RAMP 4.0/s`（约 250 ms 到满杆）、`RATE_RESPONSE 4.5`、默认 PARTIAL 辅助 `roll_level = 0.9` 松杆摆平 ⇒ 短按净航向只改约 `1~3°`，转 `180°` 需 `7~18 s`。
+- **一次性 `set_navigation(机场)` 活不过一帧**：`main.gd:339-347` 每物理帧导航同步会覆写目标（`:393` / `:478`），`:341-343` 还会强制 `_clear_poi_route(true)` ⇒ 必须用 `_return_active` 挂起并清 `_nav_sync_key`（`:39`）/ `_poi_nav_key`（`:45`），否则返航目标被任务 / POI 导航同步抢回。
+- **J3 触屏低头链路断裂**：`hud.gd:1261-1264` 登机隐藏 `_touch_walk`，`_build_flight_touch()` 无视角区，`player.gd:543-546` `virtual_look` 驾驶态早退；PC 侧 `apply_look_delta` 只在 `FIRST_PERSON / FREE_LOOK` 放行，而 D-097 用 `fp = mode == FIRST_PERSON` 判 3D 仪表台可见性 ⇒ 第一人称低头仍隐藏 3D 仪表台，须**按 V / 右键进 `FREE_LOOK`** 才看得到。
+- **已排除项**：`KEY_V` 虽被 `toggle_build`（`input_actions.gd:22`）与 `aircraft_freelook`（`:41`）双登记，但 `build_screen.gd:348-351` 有 `not _player.is_riding()` 门保护，飞行中不会误开建造界面。
+- **〔2026-11-16 引擎实测新增，非原静态推断〕±180° `wrapf` 反屈跳符号**：`nav_dev` 在掉头工况经 `wrapf` 从 `+170.00` 跳到 `−173.50`（`_trace` 实测 `[C-start] dev=+170.00 bank=-0.00 ground=true` → `[C-mid ] dev=-173.50 bank=-31.35 roll=+0.308` → `[C-end ] dev=-175.54 bank=+18.84 roll=-1.000 turned=13.47°`），控制器把目标坡度从 `+25°` 翻成 `−25°`，坡度 `−31° ↔ +19°` 来回摆 ⇒ 自动驾驶组净转向 `13.47°`，只比对照组 `[R-end ] dev=-176.69 turned=12.34°` 多 `1.13°`，按 N 后飞机左右摇摆、不会真正掉头。这是**静态自洽的比例闭环在 ±180° 奇异点失效**，原 §5 闭环设计未预见；反向对照 C8b 的原假设「无自动驾驶机头不动」同时被引擎实测证伪（对照组自然飘转 `12.34°`）。根因与判据见 `docs/lessons-and-criteria.md` WF15 追加案例，修复见 §5「掉头方向锁定」。
+
+### 5. 设计
+
+- **`label_text()` 返回值逐字不变**：保 `tests/flight_director_probe.gd:222` 字符串相等断言、D-054 动作词标签契约、D-090 衰减契约与 `flight_director_shot` 三张取证图基线；可用性改在**现有 `_fd._draw()` 内新增引导层**（方向箭头 / 剩余角度 / 进度），不动任何既有文案与判定值。
+- **引导层与 D-090 衰减解耦**：引导用独立 `guide_col := _color_for()` + `guide_alpha()` 恒 `1.0`，与 `:249-251` 的 D-090 衰减 `col` 分离；**十字本体与原标签继续按 D-090 衰减**（`CRUISE_FADE_DIST = 800`、下限 `alpha 0.3` 均不动）。
+- **引导随 `_fd.visible` 门整体退场**：沿用 D-071（失速教案）/ D-074（`terrain_warn == 2` / `alt_warn == 2`）的 FD 退场门，**不新增第二套常显文字层、不新增节点、不新增 `class_name`**。
+- **自动驾驶只改 `aircraft.gd` 的 `controls` 层**：闭环杆量生成器新建 `scripts/flight/return_autopilot.gd`，**不改 `aircraft_flight.gd` 纯气动**；复用 `ROLL_RATE_MAX` / `RATE_RESPONSE` / `ALT_HOLD_GAIN` / PARTIAL 辅助；硬约束 VNE `55` / 失速 `13.1` / `PITCH_LIMIT 1.45`。
+- **键位**：`KEY_R` 已被「飞行后视」(`input_actions.gd:42`) 与「竞速重开」(`:57`) 占用，**返航不能用 R**；`KEY_N` 已 grep 确认全库空闲 ⇒ 新增动作 `aircraft_return` = `KEY_N`。PC 飞行中 `MOUSE_MODE_CAPTURED`、HUD 按钮点不到 ⇒ **键盘与触屏共用同一条 signal 入口**。
+- **D-097 收口项全部不动**：`COCKPIT_SHAKE_SCALE`、仪表四常量（`TAPE_W` / `TAPE_PPX` / `DASH_PAD` / `GAUGE_GAP`）、`set_2d_cluster_up()` 的 `fp` 判据一律不改。
+- **零新增 `class_name`（全工程红线）**；新增探针走 `.tscn` 场景（D-010 坑 #22「`--script` 不加载 Autoload」）。
+
+**掉头方向锁定（2026-11-16 引擎实测后新增，非首版静态设计）**：为消除 §4 的 ±180° 反屈，`scripts/flight/return_autopilot.gd` 新增方向迟滞锁：
+- 常量 `TURN_LATCH_DEG = 150.0` / `TURN_RELEASE_DEG = 110.0`，跨帧状态 `var _turn_dir := 0.0`，`func reset()`。
+- `step()` 在 `abs(dev) > 150` 且未锁时**锁定初始转向**；锁定期间用 `_turn_dir * abs(dev)` 算目标坡度 —— 用 `abs(dev)` 而非带符号 `dev`，使坡度符号只由已锁定的 `_turn_dir` 决定，跨 ±180 不翻符号；`abs(dev) < 110` 才解锁交回常规比例控制（迟滞带避免阈值附近反复锁 / 解锁）。
+- **reset 时机**：`scripts/vehicles/aircraft.gd` 的 `set_autopilot_target()` 与 `clear_autopilot()` 均调 `_return_ap.reset()`，避免跨次激活污染方向；探针 A6 前亦加 `ap.reset()`。
+- 修复后实测 `[C-end] dev=-148.78 bank=+23.84 roll=+0.008 yaw_rate=+0.123 turned=41.09°` / `[R-end] dev=-176.68 turned=12.35°`：坡度稳定在 `+25°` 上限附近、杆量收敛到接近 0 ⇒ 持续协调转弯，`abs(dev)` `170 → 148.78`（`−21.22°`），C5 / C8b / C9 全转 PASS。
+
+### 6. 边界与让位
+
+- **终点是机场上空**：自动转向 + 自动巡航到达机场上空即止，**不自动降落、不传送、不写「任务完成」**；落地 / 进近仍由玩家接管。
+- **玩家任一杆量超阈值即接管**：自动驾驶让位给玩家输入，不做对抗。
+- **自动解除条件**：失速警告 / 地形警告（`terrain_warn`）/ 高度警告（`alt_warn`）、下机、坠机、燃料耗尽、抵达场区 —— 任一即解除自动驾驶并恢复常规导航。
+- **返航优先但不放弃任务**：激活 `_return_active` 挂起任务 / POI 导航同步（清 `_nav_sync_key` / `_poi_nav_key`），**只挂起、不写任务失败、不结算**；解除后任务 / POI 导航继续。
+- **引导层让位**：与 §5 一致，失速教案 / `terrain_warn == 2` / `alt_warn == 2` 期间引导随 `_fd.visible` 整体退场，不与警告 / 教案抢屏。
+- **近场到达边界（已知，未调参）**：`return_autopilot.gd` 的 `ARRIVE_DIST_M = 150.0` 只判水平距离。`main.gd:197-200` 在无机场 / 降落场区域会把 `mission_anchor` 落到 `spawn_pos`，而 `_craft_park` 是「出生点以北」的初始停机位，二者很可能 < 150 m ⇒ 这些区域「登机即按 N 返航」会立刻 `arrived` 解除、看不到转向。本批次**不改数值、不加「激活时跳过一次 arrived」补丁**（改增益必跑引擎反向对照，D-010）；由 `docs/device-visual-checklist.md` **K3** 真机目检界定影响范围后单独立项。C 段端到端探针以 1000 m 起距规避该边界。
+- **方向锁迟滞区间（2026-11-16 实测后新增）**：`abs(dev) > TURN_LATCH_DEG = 150` 进入方向锁定、`abs(dev) < TURN_RELEASE_DEG = 110` 才解锁，`110~150` 为迟滞带（保持已锁方向、不重新判向）。该区间与「玩家任一杆量超阈值即接管」及「警告 / 教案 / 下机 / 坠机 / 燃料耗尽 / 抵达场区自动解除」叠加，任一解除条件命中即 `reset()` 清锁，不残留跨次方向。
+- **起始 `on_ground` 不对称（已知边界，本批次不调构造）**：`return_autopilot_probe` C 段起始 `[C-start] ground=true`、对照组 `[R-start] ground=false`；两组 `mid` / `end` 均为 `ground=false`，故差异**只影响首帧**，反向对照「自动驾驶组转向幅度 ≥+3°」仍成立。本批次不改探针构造、留作已知边界；若后续要严格首帧对齐需单独立项（改构造须跑引擎反向对照，D-010）。
+
+### 7. 影响文件（符号定位；含 2026-11-16 引擎实测后修复）
+
+> 下列生产 / 探针文件由本批次对应 worker 落码；**本轮文档 worker 仅改 `.md`**。行号来自只读诊断，以符号名为准。
+
+**生产代码**
+- `scripts/flight/flight_director.gd`：`_draw()` 内新增引导层（独立 `guide_col` / `guide_alpha()`）；`label_text()` 返回值不变。
+- `scripts/flight/return_autopilot.gd`（新建）：闭环杆量生成器，复用既有气动常量，零新增 `class_name`。
+- `scripts/vehicles/aircraft.gd`：`controls` 层接入自动驾驶：`set_autopilot_target(target_render)` / `clear_autopilot()` / `is_autopilot_active()` + `signal autopilot_released()`；手动杆量接管与安全解除。
+- `scripts/main.gd`：`var _return_active`、`return_to_airport()`（toggle 语义）、挂起 :339-347 导航同步、清 `_nav_sync_key`/`_poi_nav_key`、连接 `hud.return_flight_requested` 与 `aircraft.autopilot_released`。
+- `scripts/ui/hud.gd`：`signal return_flight_requested()`、`set_return_active(on)`、KEY_N 键盘分支、触屏返航按钮、触屏视角区 + 「自由观察」切换按钮。`scripts/player/player.gd` 与 `scripts/vehicles/aircraft_camera.gd` 本批次不改（视角区直接调 `_flight_camera.set_free_look()` / `apply_look_delta()` 绕过 `player.gd:543-546` 的 `virtual_look` 驾驶态早退）。
+- `scripts/core/input_actions.gd`：新增 `aircraft_return` = `KEY_N`。
+- `scripts/systems/flight_teaching.gd`：仅订正 `HINT_LOOKDOWN` 文案为「按 V / 点『自由观察』进 FREE_LOOK 再低头，看 3D 仪表台」；**不新增返航教学数据项**（该教学状态机为单条 `HINT_LOOKDOWN` 通道，且触屏 `should_fire()` 直接 return false，新增项无消费点 = 死代码，已删除；`stall_coach_probe.gd` / `stall_coach_shot.gd` 有 20+ 处断言钉住该通道，改它超出本批次回归预算）。
+- `scripts/ui/manual_panel.gd`：座舱视角说明补「自由观察才显示 3D 仪表台」；键位表补「N：一键返航 / 再按一次取消」。
+
+**探针 / 文档**
+- 新增场景化探针走 `.tscn`（D-010 坑 #22），断言覆盖「按提示操作后能真的掉头 / 自动飞回」的端到端链路（WF15）。
+- `docs/decisions.md`：本条 D-098。
+- `features/feature_flight-aviation_weather.md`：§3 订正 + `:154` / `:165` 待办改已实现（引用本条）。
+- `docs/device-visual-checklist.md`：J6 订正 + 新增 K 组（返航 / 触屏环顾目检）。
+- `docs/lessons-and-criteria.md`：补 WF15 判据。
+- `features/feature_flight.md`：`:902` 欠账仅交叉引用核对，不改结论（见 §9）。
+
+> **〔影响文件路径核对注记，D-098〕**：分配清单初稿曾把 `flight_teaching.gd` 的目录写错（该错误路径在磁盘上不存在）；按「**代码是唯一事实来源**」以磁盘真实路径 `scripts/systems/flight_teaching.gd` 为准（该文件已有 `class_name FlightTeaching`），`scripts/ui/manual_panel.gd` 亦经 Glob 核实。**未在错误路径新建同名文件**，避免第二个 `class_name FlightTeaching` 触发编译冲突；上述两文件均按真实路径补入本节清单。
+
+**〔2026-11-16 引擎实测后修复，符号定位〕**：下列三处为预检 + 单支探针实测后追加的改动（上方「生产代码」清单 8 项与「探针 / 文档」清单不变，详见 §8）：
+- `scripts/flight/return_autopilot.gd`：新增 `TURN_LATCH_DEG = 150.0` / `TURN_RELEASE_DEG = 110.0`、跨帧状态 `var _turn_dir := 0.0`、`func reset()`；`step()` 在 `abs(dev) > 150` 且未锁时锁定初始转向，锁定期间用 `_turn_dir * abs(dev)` 算目标坡度（跨 ±180 不翻符号），`abs(dev) < 110` 解锁交回常规比例控制。
+- `scripts/vehicles/aircraft.gd`：`set_autopilot_target()` / `clear_autopilot()` 均调 `_return_ap.reset()`，避免跨次激活污染方向。
+- `tests/return_autopilot_probe.gd`：A6 前加 `ap.reset()`；新增 `A29~A37` 九条方向锁定构造式断言；C8b 由「对照组机头基本不变」改为「自动驾驶组转向幅度显著大于对照组 ≥+3°」；保留 `_trace` 取证闸。另修 `:320/324/331` 三处 `:=` 右侧无类型 `Variant craft` 的 Parse Error，改显式 `: Vector3`。
+
+### 8. 验证状态（2026-11-16 引擎实测回填）
+
+- **已实测 / 未实测范围（2026-11-16 回填）**：落码阶段仅静态自验（`git diff --check` rc=0、零新增 `class_name`）；**2026-11-16 已完成预检 11 支、`return_autopilot_probe` 单支修复验证与整轮 full 档 77 支串行回归（引擎实测，数字见下）**。真机目检见 `docs/device-visual-checklist.md` K 组，一律「待真机目检」，不得据引擎探针结论推定真机通过。
+- **预检 11 支（`tmp/d098_precheck.sh`，两段串行）**：10 支首跑全绿 —— 无头 `return_hud_probe` **24** / `flight_director_probe` **54** / `fd_yield_probe` **28** / `stall_coach_probe` **90** / `route_wiring_probe` **36** / `poi_route_probe` **24** / `flight_probe` **150**；窗口 `cockpit3d_shot` **7** / `flight_director_shot` **9** / `stall_coach_shot` **17**。`cockpit3d_shot` PASS **4 → 7** 印证 C 阶段 ROI 硬边断言；两段均 `RESTORED_OK` / `DIFF=0`，`profiles/` 原位、无孤儿、无残留进程。第 11 支 `return_autopilot_probe` 首跑见下。
+- **`return_autopilot_probe` 首跑 Parse Error（rc=124，600 s 超时）**：`tests/return_autopilot_probe.gd:320/324/331` 三处 `:=` 右侧经过无类型 `Variant craft`，报「Cannot infer the type ...」，脚本未加载导致 `quit()` 未调用、进程空转；已改显式 `: Vector3`。
+- **修 Parse Error 后单跑：77 PASS / 3 FAIL（C5 / C8b / C9）**，`_trace` 实测取证：`[C-start] dev=+170.00 bank=-0.00 ground=true` / `[C-mid ] dev=-173.50 bank=-31.35 roll=+0.308` / `[C-end ] dev=-175.54 bank=+18.84 roll=-1.000 turned=13.47°` / `[R-end ] dev=-176.69 turned=12.34°`。自动驾驶组净转向仅比对照组多 **1.13°** ⇒ ±180° `wrapf` 反屈使坡度来回摆，按 N 后左右摇摆、不会真正掉头；C8b 原假设「无自动驾驶机头不动」同时被引擎实测证伪。根因见 §4，修复见 §5。
+- **修复后单支重跑：PASS=89 / FAIL=0，rc=139（退出期良性 segfault）**：日志以 `RETURN_AUTOPILOT_PROBE_OK` 收尾、零 `SCRIPT ERROR` / Parse Error、`RESTORED_OK`、`profiles` 原位、无残留进程，与 D-097 五例良性 `rc=139` 同形态，按 D-093 判定不判回归失败。实测 `[C-mid] dev=-166.62 bank=+21.61 roll=+0.071 yaw_rate=+0.234` / `[C-end] dev=-148.78 bank=+23.84 roll=+0.008 yaw_rate=+0.123 turned=41.09°` / `[R-end] dev=-176.68 turned=12.35°`：坡度稳定在 `+25°` 上限附近、杆量收敛到接近 0 ⇒ 持续协调转弯，`abs(dev)` `170 → 148.78`（`−21.22°`）；**C5 / C8b / C9 全转 PASS**。
+- **整轮 full 档 77 支（`tmp/d098_full_run.sh`，8 段串行，18m45s，HEAD=`e5561f7`，dirty=17）**：合计 **3067 PASS / 0 FAIL**。分段 `g1~g6` 各 10 支、`w1` 8 支、`w2` 9 支；**8 段逐段 `FAIL=0` / `RESTORED_OK=1` / `DIFF=0` / `SCRIPT_ERR=0`**，8 段编排 `rc=0`。整轮总扫零 `^FAIL`、零 `DIFF!`、零 `SCRIPT ERROR` / Parse Error。收尾 `profiles/` 原位、无孤儿、无残留 Godot 进程。
+- **`rc=139` 共 3 支（良性退出期 segfault，不判回归失败）**：`village_probe` 38 PASS / `crop_raycast_probe` 6 PASS / `return_autopilot_probe` 89 PASS，均 `FAIL=0`、日志以 `PROBE_OK` 收尾、零 `SCRIPT ERROR`、`RESTORED_OK`；前两支为历史老探针，与 D-097 基线 5 例 `rc=139` 同形态（按 D-093 口径）。
+- **对账链（逐项吻合，零隐藏增量）**：D-097 full 档基线 **2951 PASS** → C 阶段 `tests/cockpit3d_shot.gd` ROI 硬边断言 **+3**（PASS `4 → 7`）→ 新增 `return_autopilot_probe` **+89** → 新增 `return_hud_probe` **+24** = **3067 PASS**（D-098 full 档实测值）。
+- **探针档位与项数（磁盘事实，非实测结论）**：D-097 full 档基线 **58 无头 + 17 窗口 = 75 支**；D-098 新增 `return_autopilot_probe` 与 `return_hud_probe`，**两支均挂 `HEADLESS_LIST`**（后者按主理人裁决从 `WINDOW_SHOTS_DEFAULT` 移挂：它是无头逻辑探针、不产截图，挂窗口档会让日常 headless 回归漏测）⇒ 现 **60 无头 + 17 窗口 = 77 支**。`tmp/run_regression.sh:10` 注释 `full = 57 无头 + 16 窗口 = 73` 既不等于改前项数也不等于基线，属历史批次口径，**未猜改**，留待统一；该文件被 `tmp/` gitignore，改动仅在磁盘、不进本批次 diff。
+- 按 D-010：跑前整目录备份 `user://` 并移出 `profiles/`，跑后逐字节 `diff -r` 验证 `RESTORED_OK` 零 DIFF；探针严禁并行；`git diff --check` rc=0、零新增 `class_name` 为落码阶段唯一可静态核对项。
+
+### 9. 交叉引用
+
+- **D-054**（飞行指引十字 / 动作词标签契约 / `flight_director_shot` 三张取证图基线）、**D-090**（`CRUISE_FADE_DIST = 800` 衰减契约）：引导层与二者解耦，`label_text()` 逐字不变。
+- **D-071 / D-074**（`_fd.visible` 让位门：失速教案 / `terrain_warn == 2` / `alt_warn == 2`）：引导层随该门整体退场。
+- **D-096**（`KB_ROLL_RAMP` 起杆斜坡 / `RATE_RESPONSE`）、**D-097**（座舱收口项 / `fp` 判据 / 三张截图基线）：复用与「全部不动」口径见 §4、§5。
+- **D-010**（探针 `.tscn` 场景 / 坑 #22 / `user://` 零 DIFF / 探针严禁并行）：落码与验证纪律。
+- **WF15**（`docs/lessons-and-criteria.md`）：本批次「掉头」是该判据的触发事故案例。
+- **`features/feature_flight.md:902` 欠账核对**：该处记为 D-054 遗留「首次出现的教学提示『把准星套进十字』还没做（现在靠动作词标签自解释、没接教练系统）」。**与本批次相关但不等同**：二者同属「面向儿童的 FD 十字指令性文案可用性」主题、同受 WF15 约束，且本批次引导层落在同一 `_fd._draw()` 区域；但该欠账是**首次一次性教学提示 / 教练系统接入**，本批次 §5 明确「不新增第二套常显文字层、不新增节点」，**未实现该一次性教学提示，也不改 `features/feature_flight.md` 的结论**。此处仅登记关联、留作后续，不得视为已结案。
+- **返航功能可发现性欠账（未实现，待后续立项）**：一键返航入口为 `KEY_N` 与触屏「返航」按钮；PC 端缺少首次引导（本批次未新增第二套常显文字层 / 节点，亦未接入 `FlightTeaching` 教学状态机）。触屏按钮文字、手册键位表、FD 引导层「返航中 · 轻触任一操纵杆可接管」为现有可发现路径。**本批次未做 PC 首次引导**，由 `docs/device-visual-checklist.md` K 组真机目检后单独立项；不得据 D-098 推定其已实现。
+- **测试覆盖欠账（独立只读复核识别，本批次不补断言）**：`latch-review` 只读复核确认生产代码无需追加改动——迟滞区间 `[110, 150]` 自洽、`reset()` 覆盖激活 / 主动取消 / 玩家接管 / 失速 / 燃油耗尽 / 熄火 / `request_level` / 下机 / 坠机 / 抵达 `ARRIVE_DIST_M` / 换槽与 D-039 传送重置全部路径，`takeover()` 与 `arrived` 不冲突，方向选择为最短路，静态层无 `Variant` 推断 / 缩进 / `class_name` / 未用参数隐患。但 `tests/return_autopilot_probe.gd` 的 A / B / C 全段跑在 `use_player_input = false` ⇒ `_apply_autopilot()` 的 `live` 判据恒假，**生产环境 `live = true` 下「方向锁定 × 玩家接管」交互零断言覆盖**；另缺迟滞保持（`dev = -130` 落在 `[110,150]`）、开区间阈值（恰好 `150` 不锁 / 恰好 `110` 不解锁）、解锁后反向重锁、`clear → 重新激活` 清态等构造式断言。**本批次裁决不补**：整轮 3067 PASS 的证据与当前代码 / 探针版本一一对应，补断言后若不重跑整轮即破坏证据链，而该缺口纯属测试加固、非功能缺陷；登记欠账，下一批次连同 K 组真机目检一起补断言并单支重跑。另低优先项：`craft.place()` / `set_piloted(true)` 不自清 `_turn_dir`（当前所有激活 / 解除路径均经过 `set_autopilot_target()` / `clear_autopilot()`，故无实害）。

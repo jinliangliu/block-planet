@@ -14,9 +14,10 @@ extends RefCounted
 ##   · progress.json 耦合任务 schema 与 SaveGuard 内存态陷阱，不并。
 ## 独立文件 + SaveGuard EXTRA_FILES 纳入，探针跑完原样还原（D-010）。
 ##
-## 当前只有一条提示（U-9）：座舱视角已离地后教「低头可以看 3D 仪表台」——
-## D-065 补了 CockpitPanel，但儿童玩家不知道第一人称可以低头看仪表台。
-## 触屏设备没有鼠标环顾手段，「低头」无从谈起（U-12 只记录不实现）。
+## 当前只有一条提示（U-9）：
+##   · lookdown：座舱已离地后教「按 V / 点『自由观察』，再低头看 3D 仪表台」——
+##     D-097 后第一人称正视会收起 3D 仪表台，须先进 FREE_LOOK 才看得到。
+## 触屏设备没有鼠标环顾手段时，lookdown 的触发由 should_fire 的 touch 门收敛。
 
 ## D-086：按槽派生。探针以 FlightTeaching.SAVE_PATH 做类级读取（stall_coach_probe
 ## / stall_coach_shot 共 12 处），因此必须是 static var 而非实例 var——const 改
@@ -26,7 +27,7 @@ static var SAVE_PATH: String = "user://flight_teaching.json"
 ## 提示 id → 课文案。加新提示只改这里 + should_fire 的触发条件。
 const HINT_LOOKDOWN := "lookdown_panel"
 const HINTS := {
-	HINT_LOOKDOWN: "💡 低头可以看 3D 仪表台",
+	HINT_LOOKDOWN: "💡 按 V / 点『自由观察』，再低头看 3D 仪表台",
 }
 
 ## U-9 触发高度（m AGL）：低于此值不提示——起飞/着陆阶段教练区正忙，

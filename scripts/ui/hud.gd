@@ -1,5 +1,11 @@
 extends CanvasLayer
 class_name HUD
+
+## 一键返航（D-098 裁决）：键盘 N（aircraft_return）/ 触屏「返航」按钮只发
+## 本信号，由 main 连接 return_to_airport()；再按一次取消的 toggle 由 main 侧
+## 实现。本文件集绝不直接调用 main，键盘与触屏共用这一条入口。
+signal return_flight_requested()
+
 ## 移动端触屏 HUD：左侧摇杆、右侧视角滑动、右下角动作按钮。
 ## 桌面环境显示键位提示。
 
@@ -198,13 +204,21 @@ var _takeoff_coach: TakeoffCoach
 ## 计时照常推进，防「起飞成功」横幅在教案结束后复活）。
 var _stall_coach: StallCoach
 ## 飞行一次性教学提示的进度层（U-9 / D-069）：纯逻辑器 + user://
-## flight_teaching.json 持久化（tmp→rename 原子写）。当前只有一条提示：
-## 座舱视角已离地后教「低头可以看 3D 仪表台」（D-065 补了 CockpitPanel，
-## 但儿童玩家不知道第一人称能低头看仪表台）。触屏设备无鼠标环顾手段，
-## 提示不投（缺口记 U-12）。
+## flight_teaching.json 持久化（tmp→rename 原子写）。lookdown 课文案见
+## FlightTeaching.HINTS：D-097 后须按 V / 点「自由观察」进 FREE_LOOK 才看得到
+## 3D 仪表台。触屏环顾手段由 _build_flight_touch() 的视角区与「自由观察」
+## 按钮补齐（U-12 已修复）；触屏仍不投 lookdown Toast（should_fire 的 touch
+## 门），以免与触屏操纵抢注意力。
 var _flight_teaching: FlightTeaching
 ## 警告蜂鸣码播放器（D-034）：程序生成音，落地儿童友好「语音提示」。
 var _alert_beeper: AlertBeeper
+## 飞行指引十字（FlightDirector）引用：set_return_active() 惰性从
+## _instrument_hud._fd 解析后转发。裸 HUD（探针）时为 null，转发安全早退。
+var _fd: FlightDirector = null
+## 触屏飞行层新增控件（D-098）：返航按钮 / 自由观察切换 / 视角区触摸 index。
+var _ft_return_btn: Button = null
+var _ft_freelook_btn: Button = null
+var _ft_look_touch := -1
 
 
 func setup(player: Player) -> void:
@@ -443,6 +457,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif flying and event.is_action_pressed("toggle_map"):
 			_toggle_tactical_map()
+			get_viewport().set_input_as_handled()
+		elif flying and event.is_action_pressed("aircraft_return"):
+			return_flight_requested.emit()
 			get_viewport().set_input_as_handled()
 		elif not flying and event.is_action_pressed("replay_play") \
 				and _recorder != null and _recorder.sample_count() > 1 \
@@ -1103,6 +1120,110 @@ func _build_flight_touch(root: Control) -> void:
 	exit.pressed.connect(_on_ft_exit)
 	row.add_child(exit)
 
+	# ── 触屏返航 + 视角区（D-098 / U-12）────────────────────────────
+	# 视角区：右侧上半屏，挂在本 pad 上 → 登机随 _flight_touch 显示、下机隐藏；
+	# **不复用** _on_aircraft_ride_changed 里被隐藏的 _touch_walk。y 从 88 起
+	# 避开右上按钮排（y16..72），底沿落在半屏上方，避开摇杆/油门/2D dash。
+	var look := Control.new()
+	look.name = "FlightLookArea"
+	look.anchor_left = 0.5
+	look.anchor_top = 0.0
+	look.anchor_right = 1.0
+	look.anchor_bottom = 0.44
+	look.offset_left = 8.0
+	look.offset_top = 88.0
+	look.offset_right = -12.0
+	look.offset_bottom = -8.0
+	look.custom_minimum_size = Vector2(240, 180)  # 热区下限，远大于 44×44
+	look.mouse_filter = Control.MOUSE_FILTER_STOP
+	look.gui_input.connect(_on_ft_look_input)
+	pad.add_child(look)
+
+	# 自由观察切换按钮（右侧中部，视角区下沿之外），等价于键盘 V。
+	var freelook_btn := Button.new()
+	freelook_btn.name = "FreeLookBtn"
+	freelook_btn.text = "自由观察"
+	freelook_btn.custom_minimum_size = Vector2(150, 76)
+	freelook_btn.focus_mode = Control.FOCUS_NONE
+	freelook_btn.anchor_left = 1.0
+	freelook_btn.anchor_top = 0.5
+	freelook_btn.anchor_right = 1.0
+	freelook_btn.anchor_bottom = 0.5
+	freelook_btn.offset_left = -358.0
+	freelook_btn.offset_right = -208.0
+	freelook_btn.offset_top = -24.0
+	freelook_btn.offset_bottom = 52.0
+	freelook_btn.pressed.connect(_on_ft_freelook)
+	pad.add_child(freelook_btn)
+	_ft_freelook_btn = freelook_btn
+
+	# 返航按钮（自由观察按钮右侧）：常态标 N 键与接管提示，set_return_active(on)
+	# 切「取消返航 / 返航中」；按下始终只 emit 同一条 return_flight_requested。
+	var return_btn := Button.new()
+	return_btn.name = "ReturnBtn"
+	return_btn.text = "N 返航" + char(10) + "轻触任一操纵杆可接管"
+	return_btn.custom_minimum_size = Vector2(180, 76)  # 热区 ≥112×64，远大于 44
+	return_btn.focus_mode = Control.FOCUS_NONE
+	return_btn.add_theme_font_size_override("font_size", 14)
+	return_btn.anchor_left = 1.0
+	return_btn.anchor_top = 0.5
+	return_btn.anchor_right = 1.0
+	return_btn.anchor_bottom = 0.5
+	return_btn.offset_left = -196.0
+	return_btn.offset_right = -16.0
+	return_btn.offset_top = -24.0
+	return_btn.offset_bottom = 52.0
+	return_btn.pressed.connect(_on_ft_return)
+	pad.add_child(return_btn)
+	_ft_return_btn = return_btn
+
+
+## main 在返航开/关时调用：切触屏按钮文案，并把状态转发给飞行指引十字画引导层。
+## _fd 为空或失效时安全返回、不报错（探针断言点）；绝不直接调用 main。
+func set_return_active(on: bool) -> void:
+	if _ft_return_btn != null and is_instance_valid(_ft_return_btn):
+		if on:
+			_ft_return_btn.text = "取消返航 / 返航中"
+		else:
+			_ft_return_btn.text = "N 返航" + char(10) + "轻触任一操纵杆可接管"
+	if _fd == null or not is_instance_valid(_fd):
+		if _instrument_hud != null and is_instance_valid(_instrument_hud):
+			_fd = _instrument_hud._fd
+	if _fd == null or not is_instance_valid(_fd):
+		return
+	_fd.set_return_active(on)
+
+
+## 触屏「返航」按钮：与键盘 N 共用同一条信号，只 emit，不直调 main。
+func _on_ft_return() -> void:
+	return_flight_requested.emit()
+
+
+## 触屏「自由观察」切换按钮：等价于键盘 V。
+func _on_ft_freelook() -> void:
+	if _flight_camera == null or not is_instance_valid(_flight_camera):
+		return
+	_flight_camera.set_free_look(
+		_flight_camera.current_mode() != AircraftCamera.ViewMode.FREE_LOOK)
+
+
+## 触屏飞行视角区拖动（U-12 / J3 触屏低头修复）：player.virtual_look 在驾驶态
+## 提前 return，触屏拖动到不了相机——这里直接喂给 AircraftCamera。先切 FREE_LOOK
+## 绕过 apply_look_delta 的 mode 门（也是 D-097 后 3D 仪表台显形的判据），
+## 再传相对位移；松手只清 index，保留环顾角、不强制回正。相机引用全程判空。
+func _on_ft_look_input(event: InputEvent) -> void:
+	if _flight_camera == null or not is_instance_valid(_flight_camera):
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed and _ft_look_touch == -1:
+			_ft_look_touch = event.index
+		elif not event.pressed and event.index == _ft_look_touch:
+			_ft_look_touch = -1
+	elif event is InputEventScreenDrag and event.index == _ft_look_touch:
+		if _flight_camera.current_mode() != AircraftCamera.ViewMode.FREE_LOOK:
+			_flight_camera.set_free_look(true)
+		_flight_camera.apply_look_delta(event.relative)
+
 
 func _on_ft_joystick(value: Vector2) -> void:
 	_ft_pitch = -value.y   # 摇杆上推 = 抬头（屏幕 y 向下，故取负）
@@ -1266,6 +1387,7 @@ func _on_aircraft_ride_changed(_riding: bool) -> void:
 			_ft_roll = 0.0
 			_ft_yaw = 0.0
 			_ft_brake = false
+			_ft_look_touch = -1
 			_ft_throttle = 0.0
 			if _ft_throttle_slider != null:
 				_ft_throttle_slider.value = 0.0

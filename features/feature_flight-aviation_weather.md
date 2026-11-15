@@ -14,7 +14,7 @@
 
 | 初稿假设 | 代码现状（实测） | 本任务的正确做法 |
 |---|---|---|
-| 「结合已有的 AutoPilot」 | **不存在 AutoPilot**。只有 D-034「自动改平」（双击左键增强摆平增益，`aircraft.gd:93 LEVEL_ASSIST_TIME`） | 不要假设有自动驾驶。气象不引入自动驾驶；返航/备降若需自动飞，见 §6 用「目标点 + 现有 FlightDirector」实现 |
+| 「结合已有的 AutoPilot」 | **不存在 AutoPilot**。只有 D-034「自动改平」（双击左键增强摆平增益，`aircraft.gd:93 LEVEL_ASSIST_TIME`） | 不要假设有自动驾驶。气象不引入自动驾驶；返航/备降若需自动飞，见 §6 用「目标点 + 现有 FlightDirector」实现 **〔D-098 补注：本格「不引入自动驾驶 / 若需自动飞自己飞回去」为当时快照，已由 D-098「完全自动飞回」裁决推翻；详见 §4 与 ADR D-098 §3。物理层耦合「气象不引入自动驾驶」的结论不变〕** |
 | 「创建 weather.json + WeatherSystem Autoload 管理气象」 | `day_night.gd` **已有 `enum Weather { CLEAR, CLOUDY, RAIN }`、`set_weather()`、`clear_weather_override()`、雨粒子 `_build_rain()`、`WEATHER_AMBIENT_MUL`** | **扩展 `day_night.gd` 的 Weather 枚举**，不新建平行的 WeatherSystem。气象的外观层（光/雨/云）已存在，本任务做的是**物理层耦合** |
 | 「HUD 上绘制十字指引线做 ILS 盲降」 | **D-054 飞行指引十字已实现**（`flight_director.gd`，模式 `OFF/ROLL/TAKEOFF/APPROACH(≤400m)/CRUISE`，含 11 px/度导引律与三档配色） | 不重画十字。扩展它：在 `APPROACH` 模式叠加 RVR 判据——低能见度时把「指令十字」接管为盲降引导 |
 
@@ -123,7 +123,7 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 
 - **触发**：`is_illegal_to_fly = true`（进入雷暴 / 严重积冰 / RVR 超标）。
 - **四选项结算**（初稿表格可用，补充本作落点）：
-  - **返航 / 备降**：设 `set_navigation(机场坐标)`，玩家用 D-054 指引十字自己飞回去。**不做自动飞行**（无 AutoPilot）。
+  - **返航 / 备降**：**〔D-098 推翻旧裁决，2026-11-15〕** 本条原写「设 `set_navigation(机场坐标)`，玩家用 D-054 指引十字自己飞回去，**不做自动飞行**（无 AutoPilot）」——该口径已由 **D-098** 用户裁决「**完全自动飞回**」推翻：改为**一键后自动转向 + 自动巡航飞到机场上空**（闭环自动驾驶，`scripts/flight/return_autopilot.gd`，入口 `aircraft_return` = `KEY_N`，键盘与触屏共用一条 signal；详见 ADR D-098 §3 / §5）。**边界保留**：终点为机场上空，**不自动降落、不传送、不写「任务完成」**；玩家任一杆量超阈值即接管，失速 / 地形 / 高度警告、下机、坠机、燃料耗尽、抵达场区自动解除；返航优先但**不放弃任务**（仅挂起任务 / POI 导航同步，不写失败）。〔历史原文保留不覆盖；预检与端到端单支探针已实测通过（89 PASS / 0 FAIL），整轮 full 档 77 支已实测 3067 PASS / 0 FAIL、8 段零 DIFF，见 ADR D-098 §8。〕
   - **迫降**：玩家手动找平地，接地速度过大则解体（现有判定）。
   - **强飞**：不改变任何力，只维持恶劣气象 → 大概率解体。
 - **面板是 `pause` + Control 覆盖层**，复用现有 HUD 弹层模式。
@@ -151,7 +151,7 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 - [ ] 雾/能见度 → 在既有雾参数之上做物理层耦合（D-090 已在 `scenes/main.tscn:17-20` 落 `fog_enabled=true` / `fog_mode=1`(DEPTH) / `fog_density=0.004` / `fog_aerial_perspective=0.35`，D-093 已把 `setup_environment()` 填成构造 Sky + `fog_sky_affect=0.0`，**不再是空钩子 / 全库无 `fog_` 设置**）；按能见度调制 `fog_density`（禁 `volumetric_fog`，密度 0.004~0.005）；低 RVR 接管 D-054 指引十字为盲降。
 - [ ] 密度高度：把气温/气压喂进现有密度模型（`air_density()` `:234`），不另写公式。
 - [ ] 雷暴禁区 + 颠簸扰动（只扰速度）。
-- [ ] 决策面板（强飞/返航/备降/迫降），返航备降走 `set_navigation` + 指引十字。
+- [x] 决策面板（强飞/返航/备降/迫降）的**返航 / 备降由 D-098 一键完全自动飞回承接**：一键后自动转向 + 自动巡航到机场上空（`aircraft_return` = `KEY_N` / 触屏共用 signal，**不自动降落、不传送**）；旧「`set_navigation` + 指引十字自己飞回去」口径由 ADR D-098 §3 推翻。**（D-098 预检与端到端单支探针已实测通过（89 PASS / 0 FAIL），整轮 full 档 77 支已实测 3067 PASS / 0 FAIL、8 段零 DIFF）**
 - [ ] METAR 简报 UI：报文数值取自实际气象状态。
 - [ ] 科普卡片：每次特情后展示对应知识点（复用现有成就/教学弹层模式）。
 - [x] **探针（第一批：风两层）**：新增 `wind_flight_probe`，40 条覆盖风梯度/侧风偏流/空速地速分流/切变掉高度与推油门改出/区域数据与接线/设置开关，`SaveGuard.snapshot()/restore()` 全路径（D-010）。**（后续批次：积冰改气动/低 RVR 接管十字/决策面板四态并入同一探针或扩展，命名以代码为准。）**
@@ -162,7 +162,7 @@ enum Weather { CLEAR, CLOUDY, RAIN, FOG, SNOW, THUNDERSTORM, WIND_SHEAR, ICING }
 - [x] 起降能感到逆风/顺风的差别（滑跑距离肉眼可见不同）。**（模型级已验证：同空速下顺风地速大、逆风地速小，1 s 位移差可测——`wind_flight_probe` B1/B2。窗口级目检随 full 档取证。）**
 - [x] 风切变触发时飞机掉高度，**推油门能改出**，不推则解体。**（模型级已验证：`wind_flight_probe` C1/C2——同剧本同 15 s 窗口唯一变量为油门，怠速侧掉高 68.9 m 且空速崩，满油门侧空速改出、切变后下沉收敛、同窗口少掉 12.9 m。「不推则解体」= 低空掉高度坠地触发现有 impact 判定，随窗口取证确认。）**
 - [ ] 积冰后仪表能看出速度异常/失速告警，防冰开启后恢复。
-- [ ] 恶劣天气弹决策面板，选「返航」后指引十字指向机场且能飞回去。
+- [x] 恶劣天气弹决策面板，选「返航」后**一键完全自动飞回机场上空**（D-098：自动转向 + 自动巡航、抵达场区自动解除、玩家任一杆量超阈值即接管；**不自动降落、不传送、不写「任务完成」、不放弃任务**）；旧「指引十字指向机场且能飞回去」为 D-098 §3 推翻口径。**（D-098 预检与端到端单支探针已实测通过（89 PASS / 0 FAIL），整轮 full 档 77 支已实测 3067 PASS / 0 FAIL、8 段零 DIFF）**
 - [ ] 低能见度下靠指引十字完成盲降。
 - [ ] 全量回归 0 FAIL 0 SCRIPT ERROR，`user://` 零 DIFF（D-010）。
 - [ ] 既有 `weather_probe`（22 PASS，D-093 后）/ `night_shot` / 所有钉 `set_weather(CLEAR)` 的窗口截图探针不打穿；气象扩展后 `weather_probe` 断言数只增不减。

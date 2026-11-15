@@ -56,6 +56,8 @@ const ACTIONS := {
 	"race_horn": [KEY_F],
 	"race_restart": [KEY_R],
 	"race_exit": [KEY_ESCAPE],
+	# 返航（D-098）：N 全工程空闲；R 已被飞行后视(aircraft_rear)与竞速重开(race_restart)占用。
+	"aircraft_return": [KEY_N],
 }
 
 const SLOT_ACTION_COUNT := 9

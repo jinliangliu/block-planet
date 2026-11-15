@@ -26,6 +26,9 @@ signal readings_changed(snapshot: Dictionary)
 signal stall_changed(stalled: bool)
 ## 解体时广播，reason 为中文原因（供提示文案）。
 signal crashed(reason: String)
+## 返航自动驾驶被飞机自主解除（玩家接管 / 到达 / 安全解除）时广播（D-098），
+## main 据此反向复位返航态与 HUD 标志。
+signal autopilot_released()
 
 ## 机身原点（重心）距地面的高度：与 AircraftModel.GROUND_CLEARANCE 一致。
 const GROUND_CLEARANCE := AircraftModel.GROUND_CLEARANCE
@@ -44,6 +47,9 @@ const CRASH_IMPACT_DV := 7.0
 const WRECK_LIFETIME := 4.0
 ## 读数广播节流间隔（秒）。
 const READINGS_INTERVAL := 0.1
+## 返航自动驾驶控制器（D-098）：无 class_name 脚本，preload 拿脚本引用访问
+## 常量/static，.new() 出的实例是 Variant（坑 #33，禁用 := 推导）。
+const ReturnAutopilot = preload("res://scripts/flight/return_autopilot.gd")
 
 # ── 地面操纵 ────────────────────────────────────────────────
 ## 轮胎抓地：水平速度被拽向机头方向的速率（1/s）。
@@ -125,6 +131,10 @@ const SHAKE_G_FULL := 2.5
 @export var use_player_input := true
 
 var controls := AircraftFlight.Controls.new()
+## 返航自动驾驶状态（D-098）：目标为渲染坐标，与 global_position 同系。
+var _return_ap = ReturnAutopilot.new()
+var _autopilot_active := false
+var _autopilot_target := Vector3.ZERO
 ## 触屏驾驶输入：由 HUD 飞行触控层写入，替代键盘（仅触屏设备、有人驾驶时启用）。
 ## 桌面端 _touch_active 恒为 false，走键盘分支，互不影响（D-070 起鼠标不再接飞机）。
 var _touch_active := false
@@ -246,6 +256,10 @@ static func from_loadout(
 func rebase_state_after_shift(delta: Vector3) -> void:
 	if _state != null:
 		_state.position += delta
+	# 返航目标是渲染坐标，浮动原点搬迁时随机体整体平移，保持相对方位不变
+	# （机体 global_position 与 _state.position 都 += delta，目标须同步）。
+	if _autopilot_active:
+		_autopilot_target += delta
 
 
 ## 落位：把机轮放到地面上（at 为地面点）。
@@ -493,6 +507,38 @@ func drive_remotely() -> void:
 	set_piloted(true)
 
 
+## 返航自动驾驶（D-098）：设定目标并激活。target_render 必须与 global_position
+## 同坐标系（渲染坐标）——main 用 _world.to_render(_mission_anchor) 转换后传入，
+## 与 HSI/CDI 的注入口径一致。
+func set_autopilot_target(target_render: Vector3) -> void:
+	# D-098：掉头方向锁定是控制器唯一的跨帧状态，每次重新激活都要清空，
+	# 否则上次掉头到一半取消后，再按 N 会沿用旧方向往反方向绕。
+	_return_ap.reset()
+	_autopilot_target = target_render
+	_autopilot_active = true
+
+
+## 清除返航自动驾驶：只清状态、不发信号（供 main 主动取消 toggle 调用，
+## 避免与 autopilot_released 回调重复复位）。
+func clear_autopilot() -> void:
+	_return_ap.reset()
+	_autopilot_active = false
+	_autopilot_target = Vector3.ZERO
+
+
+func is_autopilot_active() -> bool:
+	return _autopilot_active
+
+
+## 飞机自主解除（玩家接管 / 到达 / 安全解除）统一走这里：清状态并上报 main。
+## 仅在 active 时发信号，避免重复广播。
+func _release_autopilot() -> void:
+	if not _autopilot_active:
+		return
+	clear_autopilot()
+	autopilot_released.emit()
+
+
 ## 燃油比例（0..1；容量为 0 视为 0）。
 func fuel_ratio() -> float:
 	return clampf(fuel_liters / fuel_capacity, 0.0, 1.0) if fuel_capacity > 0.0 else 0.0
@@ -525,6 +571,8 @@ func _update_fuel(delta: float) -> void:
 			# 直接置熄火而非 set_engine(false)：避免叠发两条通知，油尽一句就够。
 			engine_running = false
 			controls.throttle = 0.0
+			# D-098：燃料耗尽无推力，让位给玩家滑翔降落。
+			_release_autopilot()
 			Events.notice.emit("⛽ 燃油耗尽，发动机熄火了——尽快找地方降落！")
 	var rpm_target := controls.throttle if (engine_running and fuel_liters > 0.0) else 0.0
 	var k := 1.0 - exp(-delta / RPM_TAU) if delta > 0.0 else 1.0
@@ -542,6 +590,8 @@ func adjust_throttle(step: float) -> void:
 ## 自动改平（D-034 双击左键）：LEVEL_ASSIST_TIME 秒内以增强增益摆平。
 func request_level() -> void:
 	if piloted:
+		# D-098：手动改平请求即视为接管，让位给玩家。
+		_release_autopilot()
 		_level_timer = LEVEL_ASSIST_TIME
 
 
@@ -603,6 +653,8 @@ func set_engine(on: bool) -> bool:
 		Events.notice.emit("🔧 发动机已启动：W/S 油门，空格爬升，Shift 加速。")
 	else:
 		controls.throttle = 0.0
+		# D-098：熄火无推力，自动驾驶无意义，让位给玩家滑翔。
+		_release_autopilot()
 		Events.notice.emit("🔧 发动机已熄火：按 F 重新启动，舵面仍可滑翔。")
 	return engine_running
 
@@ -635,6 +687,8 @@ func set_piloted(value: bool, who: Player = null) -> void:
 	_touch_throttle = 0.0
 	_touch_brake = false
 	_kbd_roll_shaped = 0.0
+	# D-098：下机即解除返航自动驾驶并上报 main。
+	_release_autopilot()
 
 
 func _physics_process(delta: float) -> void:
@@ -649,6 +703,11 @@ func _physics_process(delta: float) -> void:
 
 	_prepare_input(delta)
 	_update_fuel(delta)
+	# ── 返航自动驾驶（D-098）──：手动杆量已由 _prepare_input 写入、气动积分
+	# （AircraftFlight.integrate）之前覆写 controls。刻意排在 _update_fuel 之后：
+	# 燃料耗尽已在上面 _release_autopilot() 清态，本帧不会再拿自动驾驶杆量去飞。
+	if _autopilot_active:
+		_apply_autopilot(delta)
 	if _level_timer > 0.0:
 		_level_timer = maxf(_level_timer - delta, 0.0)
 	var on_ground := is_on_floor()
@@ -702,6 +761,47 @@ func _physics_process(delta: float) -> void:
 	_update_flight_tracking(delta, on_ground)
 	_check_failure(impact)
 	_emit_readings(delta)
+
+
+## 返航自动驾驶每帧闭环（D-098）：由 _state 与渲染坐标目标复算 HSI 口径的
+## 导航读数，调 ReturnAutopilot.step() 覆写 controls；玩家接管或到达时让位。
+func _apply_autopilot(delta: float) -> void:
+	# 失速告警：安全优先，交还玩家改出（本帧不覆写 controls）。
+	if _state.stalled or _state.stall_warning:
+		_release_autopilot()
+		return
+	# 玩家接管：本帧 controls 由 _prepare_input 写入玩家杆量，任一超阈值即让位。
+	# 模态冻结（rider.input_locked）与脚本直写（use_player_input=false）时
+	# _prepare_input 不重写 controls，上面残留的是上帧自动驾驶输出，不能拿来
+	# 判「玩家动杆」——否则面板打开那一帧会自我解除。
+	var live := use_player_input and (rider == null or not rider.input_locked)
+	if live and ReturnAutopilot.takeover(
+			[controls.roll, controls.pitch, controls.yaw]):
+		_release_autopilot()
+		return
+	# HSI 口径复算（与 FlightInstruments.update 的 bearing/heading/dev 逐字一致）：
+	# 目标与 global_position 同为渲染坐标，水平面上算方位与距离。
+	var to_target := _autopilot_target - global_position
+	to_target.y = 0.0
+	var dist_m := to_target.length()
+	var nav_bearing := fposmod(
+		rad_to_deg(atan2(to_target.x, to_target.z)), 360.0)
+	var fwd := -_state.basis.z
+	var heading := fposmod(rad_to_deg(atan2(fwd.x, fwd.z)), 360.0)
+	var nav_dev := wrapf(nav_bearing - heading, -180.0, 180.0)
+	# bank 右转为正（同 FlightInstruments 的 bank_deg 口径）。
+	var bank := -asin(clampf(_state.basis.x.y, -1.0, 1.0))
+	var out = _return_ap.step(
+		nav_dev, bank, _state.yaw_rate, global_position.y,
+		_autopilot_target.y + ReturnAutopilot.CRUISE_ALT_M,
+		_state.airspeed, dist_m, delta)
+	if bool(out["arrived"]):
+		_release_autopilot()
+		return
+	controls.roll = float(out["roll"])
+	controls.pitch = float(out["pitch"])
+	controls.yaw = float(out["yaw"])
+	controls.throttle = float(out["throttle"])
 
 
 ## 碰撞盒钉回世界轴向（D-048）：整机盒 15.6 × 6.6 × 4.8 m 若随机体姿态旋转，
@@ -970,6 +1070,8 @@ func wreck(reason: String) -> void:
 	if _wrecked:
 		return
 	_wrecked = true
+	# D-098：坠机即解除（残骸不再飞行，返航目标作废）。
+	_release_autopilot()
 	velocity = Vector3.ZERO
 	_state.velocity = Vector3.ZERO
 	_spawn_debris()

@@ -94,6 +94,12 @@ var _dev_v := 0.0
 var _s := 1.0
 var _lock_hdg := 0.0
 var _lock_valid := false
+## 返航引导（D-098）：return_active 为真时 _draw 叠加方向箭头/剩余角度/进度/
+## 接管提示。由 hud.set_return_active() 转发置位；引导层画在本控件同一个
+## _draw 内 ⇒ 整体随 _fd.visible 让位门退场（D-071/D-074）。
+var return_active := false
+## 返航启动时记录的本次需转总角度（画进度条 / 剩余角度用）。
+var _return_total_deg := 0.0
 
 
 func _ready() -> void:
@@ -120,6 +126,15 @@ func clear_guide() -> void:
 	_has_target = false
 	_mode = Mode.OFF
 	_lock_valid = false
+	queue_redraw()
+
+
+## main 经 hud.set_return_active() 转发：开启时记下当前水平偏差作为本次需转
+## 总角度，供引导层算进度 / 剩余；关闭即退场。queue_redraw 让状态即时生效。
+func set_return_active(on: bool) -> void:
+	return_active = on
+	if on:
+		_return_total_deg = maxf(absf(_dev_h), CAPTURE_DEG)
 	queue_redraw()
 
 
@@ -236,6 +251,42 @@ static func mode_name(m: int) -> String:
 	return "—"
 
 
+## 引导层专用 alpha：D-090 让十字本体随巡航距离淡出（_draw 里 col.a *= f），
+## 但返航引导是安全关键指令，必须始终清晰。故引导层用独立 guide_col，alpha
+## 恒 1.0，**绝不复用** _draw 里被 D-090 衰减的 col。参数 _dist_h 保留接口
+## 形状供扩展，当前按契约恒返回 1.0（探针直接断言）。
+static func guide_alpha(_dist_h: float) -> float:
+	return 1.0
+
+
+## 返航转弯读数（纯函数，供探针断言与 _draw 引导层共用同一份逻辑）。
+## total_deg：本次需转过的总角度（正标量）；dir：指令方向符号(+1 右 / -1 左)；
+## accum_deg：已累计转过的角度；cur_dev：当前剩余航向偏差（带符号，度）。
+## 返回 dir=方向文字(掉头/右转/左转)、total=总角度、remaining=剩余角度(≥0)、
+## progress=进度(0..1)、wrong_way=当前偏差与指令方向相反(转过头/转反)、
+## arrived=已进入 CAPTURE_DEG 捕获阈值。「掉头」判据与 label_text() 的 150° 同源。
+static func turn_readout(total_deg: float, dir: float, accum_deg: float,
+		cur_dev: float) -> Dictionary:
+	var total := absf(total_deg)
+	var remaining := maxf(0.0, absf(cur_dev))
+	var progress := 0.0
+	if total > 0.001:
+		progress = clampf(accum_deg / total, 0.0, 1.0)
+	else:
+		progress = 1.0
+	var dir_txt := "掉头" if absf(cur_dev) > 150.0 else ("右转" if dir > 0.0 else "左转")
+	var wrong_way := cur_dev * dir < 0.0
+	var arrived := absf(cur_dev) < CAPTURE_DEG
+	return {
+		"dir": dir_txt,
+		"total": total,
+		"remaining": remaining,
+		"progress": progress,
+		"wrong_way": wrong_way,
+		"arrived": arrived,
+	}
+
+
 # ── 绘制 ────────────────────────────────────────────────────────
 func _draw() -> void:
 	if _mode == Mode.OFF:
@@ -300,6 +351,53 @@ func _draw() -> void:
 		HORIZONTAL_ALIGNMENT_CENTER, lw, fs, COL_EDGE)
 	draw_string(ThemeDB.fallback_font, lp, txt,
 		HORIZONTAL_ALIGNMENT_CENTER, lw, fs, col)
+	# ── 返航引导层（D-098）────────────────────────────────────────
+	# return_active 为真时叠加方向箭头 / 剩余角度 / 转弯进度 / 接管提示。
+	# 颜色用独立 guide_col，绝不复用上面被 D-090 衰减的 col（:249-251）；
+	# 引导层画在本控件同一个 _draw 内 ⇒ 整体随 _fd.visible 让位门退场
+	# （D-071/D-074：失速教案 / terrain_warn>=2 / alt_warn>=2 时 _fd.visible=false）。
+	if return_active:
+		var guide_col := _color_for()
+		guide_col.a *= guide_alpha(_dist_h)
+		var rdir := 1.0 if _dev_h >= 0.0 else -1.0
+		var accum := _return_total_deg - absf(_dev_h)
+		var r := turn_readout(_return_total_deg, rdir, accum, _dev_h)
+		var gfs := maxi(14, int(18.0 * s))
+		var top := maxf(44.0 * s, size.y * 0.12)
+		# 方向箭头（水平指向转弯方向）。
+		var adv := Vector2(rdir, 0.0)
+		var asz := 24.0 * s
+		_arrow(Vector2(c.x, top) + adv * asz, adv, asz, guide_col)
+		# 主读数：方向 + 剩余角度 / 转反 / 已对准。
+		var head := ""
+		if bool(r["arrived"]):
+			head = "已对准 · 返航中"
+		elif bool(r["wrong_way"]):
+			head = "转反了 · %s" % r["dir"]
+		else:
+			head = "%s · 还差 %d°" % [r["dir"], int(round(float(r["remaining"])))]
+		var hw := 360.0 * s
+		var hp := Vector2(c.x - hw * 0.5, top + 30.0 * s)
+		draw_string(ThemeDB.fallback_font, hp + Vector2(1.0, 1.0), head,
+			HORIZONTAL_ALIGNMENT_CENTER, hw, gfs, COL_EDGE)
+		draw_string(ThemeDB.fallback_font, hp, head,
+			HORIZONTAL_ALIGNMENT_CENTER, hw, gfs, guide_col)
+		# 转弯进度条。
+		var bw := 220.0 * s
+		var bh := 12.0 * s
+		var bx := c.x - bw * 0.5
+		var by := top + 54.0 * s
+		draw_rect(Rect2(bx, by, bw, bh), COL_EDGE, true)
+		draw_rect(Rect2(bx, by, bw * float(r["progress"]), bh), guide_col, true)
+		# 固定提示：接管方式（儿童向「一次只听一个声音」）。
+		var tip := "返航中 · 轻触任一操纵杆可接管"
+		var tfs := maxi(11, int(14.0 * s))
+		var tw := 460.0 * s
+		var tp := Vector2(c.x - tw * 0.5, by + bh + tfs + 6.0 * s)
+		draw_string(ThemeDB.fallback_font, tp + Vector2(1.0, 1.0), tip,
+			HORIZONTAL_ALIGNMENT_CENTER, tw, tfs, COL_EDGE)
+		draw_string(ThemeDB.fallback_font, tp, tip,
+			HORIZONTAL_ALIGNMENT_CENTER, tw, tfs, guide_col)
 
 
 ## 带描边的实心条（先画一圈放大的黑边，再画彩色本体）：座舱外是天空，

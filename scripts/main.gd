@@ -44,6 +44,8 @@ var _poi_registry := PoiRegistry.new()
 var _poi_route: RoutePlan = null
 var _poi_nav_key := ""
 var _poi_active := false
+## 返航中（D-098）：为真时挂起任务/POI 导航同步，锁定一次性设的机场目标。
+var _return_active := false
 ## 飞行重置归位点（D-039）：_flight_spawn = 本次进图的初始出生点（跑道南段），
 ## _craft_park = 初始停机位（出生点以北、机头朝北）。坠机/卡住时按 Y 把玩家
 ## 与飞机送回这两点。无机场/降落场的区域 _craft_park 为零，飞机就地摆正。
@@ -180,6 +182,8 @@ func _ready() -> void:
 	_player.flight_camera = _flight_camera
 	_hud.setup_flight(_flight_camera, _recorder, _replay)
 	Events.aircraft_ride_changed.connect(_on_flight_ride_changed)
+	# 返航（D-098）：HUD 的返航按钮/热键统一发信号，main 做 toggle 与导航挂起。
+	_hud.return_flight_requested.connect(return_to_airport)
 	# 浮动原点（D-062）：世界锚定实体整群搬迁。静态根在此登记；动态实体
 	# （飞机/船/箭/浮漂/村民/飞行标注）在各自出生点调 WorldAnchor.register。
 	WorldAnchor.register(_player)
@@ -247,6 +251,9 @@ func _ready() -> void:
 ## D-086：换槽重载 _unlocks 并重新注入工坊台。工坊台可能还没建（启动期选槽），
 ## 故判空；建好后 set_unlocks() 只是替换引用，不触碰当前打开状态。
 func _on_slot_changed(_id: String) -> void:
+	# D-098：换存档槽一并退出返航态（返航目标绑定本机世界，换槽后失效）。
+	if _return_active:
+		_cancel_return()
 	_unlocks = PartUnlocks.load_or_new(Profile.slot_file("unlocks.json"))
 	if _build_screen != null:
 		_build_screen.set_unlocks(_unlocks)
@@ -338,13 +345,16 @@ func _physics_process(delta: float) -> void:
 	_hud.feed_mission(delta, telemetry)
 	# 导航同步：POI 直飞优先于任务导航，但二者互斥——任务一旦进行，POI 航线
 	# 自动让位（clear 后落入 else 走任务导航），避免两套导航目标打架。
-	if _poi_active:
-		if _hud.is_mission_running():
-			_clear_poi_route(true)
+	# D-098 返航中整段挂起：机场目标由 return_to_airport() 一次性设定后不再被
+	# 任务/POI 同步逐帧覆写；取消/解除（_return_active=false）后即恢复同步。
+	if not _return_active:
+		if _poi_active:
+			if _hud.is_mission_running():
+				_clear_poi_route(true)
+			else:
+				_sync_poi_navigation()
 		else:
-			_sync_poi_navigation()
-	else:
-		_sync_mission_navigation()
+			_sync_mission_navigation()
 
 
 ## 航线 → 导航同步（D-066）：把「MissionManager 判定的当前航点」同步进 HSI/CDI、
@@ -497,6 +507,53 @@ func _clear_poi_route(reset_nav: bool) -> void:
 			_flight_markers.set_target(anchor_render, "机场/任务")
 
 
+## 一键返航（D-098）：把 HSI/CDI 与 3D 标注一次性锁定到机场锚点、启动飞机
+## 自动驾驶，并经 _physics_process 的 _return_active 守卫挂起任务/POI 导航同步。
+## toggle 语义：返航中再次触发即取消，恢复任务/POI 同步——不写任务失败、
+## 不 _clear_poi_route（POI 航线保持原状，取消后自行续飞）。
+func return_to_airport() -> void:
+	if _return_active:
+		_cancel_return()
+		return
+	var craft := _player.aircraft()
+	if craft == null or not is_instance_valid(craft):
+		return
+	_return_active = true
+	# 挂起期间任务/POI 状态可能推进；清去重键，取消/解除后强制重注入正确目标。
+	_nav_sync_key = ""
+	_poi_nav_key = ""
+	var anchor_render := _world.to_render(_mission_anchor)
+	_hud.set_flight_navigation(anchor_render, "机场/任务")
+	if _flight_markers != null and is_instance_valid(_flight_markers):
+		_flight_markers.set_target(anchor_render, "机场/任务")
+	_hud.set_return_active(true)
+	# 飞机自主解除（玩家接管/到达/失速/燃料/坠机/下机）要反向清返航态；
+	# is_connected 守卫防同一架飞机反复激活时重复连接。
+	if not craft.autopilot_released.is_connected(_on_autopilot_released):
+		craft.autopilot_released.connect(_on_autopilot_released)
+	craft.set_autopilot_target(anchor_render)
+
+
+## 取消返航：复位标志与去重键，停掉飞机自动驾驶，恢复任务/POI 同步。
+## 不写任务失败、不 _clear_poi_route——目标复位交给恢复后的 _sync_*_navigation
+## （_nav_sync_key/_poi_nav_key 已清空，下一帧必定重注入正确目标）。
+func _cancel_return() -> void:
+	_return_active = false
+	_nav_sync_key = ""
+	_poi_nav_key = ""
+	_hud.set_return_active(false)
+	var craft := _player.aircraft()
+	if craft != null and is_instance_valid(craft):
+		craft.clear_autopilot()
+
+
+## 飞机自主解除自动驾驶时的回调：走同一套取消复位，保证 HUD 标志、
+## 导航同步挂起态与飞机状态三者一致。
+func _on_autopilot_released() -> void:
+	if _return_active:
+		_cancel_return()
+
+
 ## 登机 / 下机 → 飞行相机激活、轨迹录制起止、座舱 3D 面板与世界标注增删（D-033/D-034）。
 func _on_flight_ride_changed(riding: bool) -> void:
 	# 飞行流式加载窗口：登机时切到「沿机头方向的偏置矩形 + 时间预算」，
@@ -553,6 +610,10 @@ func _on_flight_ride_changed(riding: bool) -> void:
 				fwd = fwd.normalized()
 				_flight_markers.set_runway_guide(anchor_render, fwd)
 	else:
+		# D-098：下机一并退出返航态（飞机 set_piloted(false) 也会 emit 一次，
+		# 这里幂等兜底，保证 HUD 标志与挂起态复位）。
+		if _return_active:
+			_cancel_return()
 		_flight_camera.set_active(false)
 		# D-073 P3：下机即清除 POI 直飞（环廊/导航/战术地图）；标记随后一并释放。
 		if _poi_active:
@@ -629,6 +690,9 @@ func _on_origin_shifted(delta: Vector3) -> void:
 ## → _on_crash_survived），无需玩家按 Y；卡住 / 手动重开仍走 Y 键入口。
 ## notice 为收尾提示文案；坠机自动归位（D-056）会带上坠机原因，空串用默认文案。
 func reset_flight_experience(notice: String = "") -> void:
+	# D-098：坠机/重置一并退出返航态（残骸随后 place，目标作废）。
+	if _return_active:
+		_cancel_return()
 	if _flight_spawn == Vector3.ZERO:
 		return
 	# 回放中让位（同 player 的 replaying 守卫）：运镜时搬世界会打断演出。

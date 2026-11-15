@@ -11,8 +11,12 @@ extends Node
 ##   ④ lookback    回头：椅背 + 头枕 + 后拱（"回头有物"）
 ##   ⑤ blueprint   蓝图机：无任何内装几何（对照 ①）
 ##   ⑥ free        2D 簇全隐藏：纯 3D 座舱全貌，检查比例与座舱感
-##   ⑦ shake       满油门连拍 3 帧（D-097 后作「座舱静止零 diff」取证）：三帧
-##                 应逐像素一致，A 柱内缘不得有逐帧爬行；PANEL_W/H 未动
+##   ⑦ shake       满油门连拍 3 帧（D-097 后作「座舱硬边零位移」取证）：三帧的
+##                 A 柱内缘 / 2D-3D 交界硬边位置必须逐像素一致，由
+##                 _check_cockpit_still() 用 ROI 边缘位置 + 构造式反向对照钉住。
+##                 注意：整帧不可能零 diff——满油门时飞机在跑道滑跑加速，地面、
+##                 跑道线、教学提示与仪表读数都在变；「三帧逐像素一致」是错误口径。
+##                 PANEL_W/H 未动
 ## 运行：Godot_v4.6.3-stable_win64.exe --path . res://tests/cockpit3d_shot.tscn
 
 const PROBE_PAD := preload("res://tests/probe_pad.gd")
@@ -164,18 +168,24 @@ func _run() -> void:
 	await _wait(8)
 	_cam.set_free_look(false)
 
-	# ⑥ 满油门连拍（D-097 后改为「座舱静止零 diff」取证）：D-097 已把
-	# COCKPIT_SHAKE_SCALE 收敛为 0，座舱内视不再有相机位置抖动；三张图应逐像素
-	# 一致，A 柱内缘不得有逐帧爬行。外部视角抖动与包络仍在，只是不进座舱。
+	# ⑥ 满油门连拍（D-097 后改为「座舱硬边零位移」取证）：D-097 已把
+	# COCKPIT_SHAKE_SCALE 收敛为 0，座舱内视不再有相机位置抖动；3D A 柱挂在机体上、
+	# 与眼位刚性 ⇒ 内缘硬边不得逐帧爬行。外部视角抖动与包络仍在，只是不进座舱。
 	# 旧注释的「座舱只取 40%、横向峰值约 18 px、呼吸 ±2%」是 D-075 口径，已失效。
+	# **不要再写「三帧逐像素一致」**：D-097 验收桌面实测三帧 md5 全不同、整帧差异
+	# 10~14%，差异集中在滑跑的地面/跑道线（28~37%）、左下开口透出的世界（21~28%）、
+	# 教学提示与仪表读数；座舱几何区（柱区/天空/仪表簇）只有 0.25~1.28%。
 	# 连拍前仍等 90 物理帧（1.5 s）：包络平滑 τ≈0.33 s，确保进入 settled，
 	# 三张图的差别只可能来自抖动而非包络爬升，避免取证假象。
 	_craft.set_engine(true)
 	_craft.controls.throttle = 1.0
 	await _wait_physics(90)
+	var shake_frames: Array[Image] = []
 	for k in range(3):
-		await _snap("cockpit3d_throttle_shake%d.png" % (k + 1))
+		var frame: Image = await _snap("cockpit3d_throttle_shake%d.png" % (k + 1))
+		shake_frames.append(frame)
 		await _wait_physics(6)
+	_check_cockpit_still(shake_frames)
 	_craft.controls.throttle = 0.0
 	_craft.set_engine(false)
 	await _wait(4)
@@ -187,6 +197,82 @@ func _run() -> void:
 	_restored = true
 	print("COCKPIT3D_SHOT_DONE fails=%d" % _fails)
 	get_tree().quit(0 if _fails == 0 else 1)
+
+
+## 座舱硬边零位移闸（D-097 / J1）。只比 A 柱内缘的**位置**，不比整帧像素：
+## 帧内有滑跑的世界、跑道线、教学提示与仪表读数，整帧零 diff 是错误口径。
+## 取样行只取 y=40..360（纯柱 / 天空），避开 y≥400 的地面、侧 console 亮边与
+## 教学卡片，否则「首个亮像素」会取到地面或 UI，边缘检测失效（坑 #15）。
+## 三条闸：① 9 行内缘位置三帧全等；② 人为右移 2 px 的构造式反向对照必须被检出；
+## ③ 中央地面 ROI 确实逐帧变化，证明三帧不是同一张图、判据有区分力。
+const STILL_ROWS: Array[int] = [40, 80, 120, 160, 200, 240, 280, 320, 360]
+const STILL_LUM_MIN := 0.353   # ≈ 90/255；柱面约 0.18，天空 / 地面 > 0.5
+
+
+func _lum(c: Color) -> float:
+	return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
+
+
+func _inner_edges(img: Image, y: int) -> Vector2i:
+	var w := img.get_width()
+	var half: int = int(w * 0.5)
+	var left := -1
+	var right := -1
+	for x in range(20, half):
+		if _lum(img.get_pixel(x, y)) > STILL_LUM_MIN:
+			left = x
+			break
+	for x in range(w - 20, half, -1):
+		if _lum(img.get_pixel(x, y)) > STILL_LUM_MIN:
+			right = x
+			break
+	return Vector2i(left, right)
+
+
+func _check_cockpit_still(frames: Array[Image]) -> void:
+	if frames.size() != 3:
+		_check(false, "座舱硬边零位移：连拍应为 3 帧，实测 %d" % frames.size())
+		return
+	var ok_rows := 0
+	var spread_max := 0
+	for y in STILL_ROWS:
+		var base := _inner_edges(frames[0], y)
+		var spread := 0
+		for i in range(1, 3):
+			var e := _inner_edges(frames[i], y)
+			spread = maxi(spread, maxi(absi(e.x - base.x), absi(e.y - base.y)))
+		# 守卫：内缘必须落在柱区，否则「三帧全等」可能只是阈值失效的假绿。
+		if base.x > 20 and base.x < 360 and base.y > 920 and base.y < 1260:
+			ok_rows += 1
+			spread_max = maxi(spread_max, spread)
+	_check(ok_rows == STILL_ROWS.size() and spread_max == 0,
+		"座舱硬边零位移：%d/%d 行有效、三帧 A 柱内缘最大位移 %d px（D-097 应为 0）"
+			% [ok_rows, STILL_ROWS.size(), spread_max])
+	# 构造式反向对照：人为把首帧整体右移 2 px，边缘检测必须报出 +2 px，
+	# 否则「spread_max == 0」只是检测函数恒真的假绿（坑 #15）。
+	var shifted := Image.new()
+	shifted.copy_from(frames[0])
+	shifted.blit_rect(frames[0],
+		Rect2i(0, 0, frames[0].get_width(), frames[0].get_height()), Vector2i(2, 0))
+	var probe_y: int = STILL_ROWS[4]
+	var e0 := _inner_edges(frames[0], probe_y)
+	var e1 := _inner_edges(shifted, probe_y)
+	_check(e1.x - e0.x == 2,
+		"构造式反向对照：人为右移 2 px 后内缘应右移 2 px（实测 %d px），证明边缘检测非恒真"
+			% (e1.x - e0.x))
+	# 反向对照二：中央地面 ROI 必须逐帧变化，证明三帧确实在推进、不是同一张图。
+	var moved := 0
+	var total := 0
+	for gy in range(420, 520, 4):
+		for gx in range(380, 900, 4):
+			var a := _lum(frames[0].get_pixel(gx, gy))
+			var b := _lum(frames[1].get_pixel(gx, gy))
+			if absf(a - b) > 0.02:
+				moved += 1
+			total += 1
+	_check(total > 0 and float(moved) / float(total) > 0.05,
+		"反向对照：中央地面 ROI 逐帧变化率 %.1f（%d/%d 采样点），证明三帧非同一张"
+			% [100.0 * float(moved) / float(total), moved, total])
 
 
 ## 白屏闸（窗口侧真判据）：3D 仪表台的内边四角必须落在深色板面上。
